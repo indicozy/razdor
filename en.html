@@ -182,6 +182,38 @@
   <a class="close" href="#top" aria-label="Back to the menu">×</a>
   <div class="window-body">
     <article class="box">
+      <h3>1.5.4 <span class="date">18 November 2026</span></h3>
+      <h4>Fixed</h4>
+      <ul>
+        <li>The "Development tree" window closes with its cross again.</li>
+      </ul>
+    </article>
+    <article class="box">
+      <h3>1.5.3 <span class="date">17 November 2026</span></h3>
+      <p><b>Development tree:</b> the army window can show a warrior's branch and the whole class tree with each class's stats.</p>
+      <h4>Added</h4>
+      <ul>
+        <li>The army has a new "Development tree" window: the warrior's branch top to bottom, "Whole tree" shows the full tree in a circle, and the card shows any class's stats.</li>
+      </ul>
+      <h4>Changed</h4>
+      <ul>
+        <li>A battle always starts at once again, as before 1.5.2: no waiting for the first turn and no deployment after "Restart". The "Does not take part in this battle" checkbox is gone together with the deployment.</li>
+        <li>"Retreat" is available for the whole battle: the battle is cancelled as if it never happened, but counts as lost in the chronicle.</li>
+        <li>Debug mode now records where the time goes in the main menu and other windows off the map.</li>
+        <li>Chronicle: full-window mode shows only the event list, without the description panel.</li>
+      </ul>
+      <h4>Fixed</h4>
+      <ul>
+        <li>When several event points share a cell, the last one's events fire, as in the original: on the map "Время Ковена" the event in the cell north-east of the ruin fires again.</li>
+        <li>Debug mode no longer stalls the map on weak graphics cards.</li>
+        <li>The game no longer crashes on exit on Windows.</li>
+        <li>On weak graphics cards the main menu and the load window no longer lag for the first half minute after start; the load window with a long save list draws faster.</li>
+        <li>The "Watch the record" button on the "Summary" page opens the replay again, for Hub maps and on phones. If a replay can't be opened, the window says why.</li>
+        <li>Watching a replay no longer damages it, no longer drifts in battles or after a music change, no longer repeats enemy moves twice, and on a mismatch jumps to the nearest saved point. Loading an old save no longer damages the replay.</li>
+        <li>On phones, buttons in message windows are bigger, and the labels on the "Summary" page no longer overlap the numbers.</li>
+      </ul>
+    </article>
+    <article class="box">
       <h3>1.5.2 <span class="date">15 November 2026</span></h3>
       <p><b>Faster on weak phones:</b> the map, walking, the windows over the map and a map zoomed out whole now load the phone noticeably less. The black screen under windows on some Android phones (Adreno) is fixed, and a still map no longer drops frames.</p>
       <h4>Added</h4>
@@ -1316,7 +1348,7 @@
 </main>
 
 <footer class="foot">
-  <p>Razdor 1.5.2 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
+  <p>Razdor 1.5.4 // for Community Update 1.2 // <a href="https://github.com/indicozy/razdor">source code on GitHub</a></p>
   <p>Made by <a href="https://github.com/indicozy">@indicozy</a>. Not affiliated with Aterdux or the rights holders of <i>Discord Times</i>; no warranty.</p>
 </footer>
 
