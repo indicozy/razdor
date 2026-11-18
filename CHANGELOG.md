@@ -13,6 +13,32 @@
 ## Не выпущено
 ## 1.5.4 — 2026-11-18
 
+Коммит `26b47dd7` (тег `v1.5.4`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+1e52c8aa8784eebf97f32e58bafe2eb90b6685c9c24e9f51a3020ad1257f943b  razdor
+bed232dfa787ee99f1182084b0dc291c7d15123f3533bdf7fdc7f8a8a1f202f3  Razdor.exe
+020bb63dc3d963fa5f77f5497787306b6ed376e945cf5d5134880caec3719f70  razdor-macos
+a70b0c07ad84778f641da841f0d4b1601947f56b42b13462a09334aa50a60403  razdor-translate
+ad5b7a30718bff6f4c1d569e836ac67d3cad8d678ef70751b14f82bcc58a94ed  Razdor-translate.exe
+7413bc3c912fb58ef8e0f6788189fda59f273e452b452dcdec302889101826b9  razdor-translate-macos
+877c4bf45744d8981b03dbaae1c7f45f914d90757d8752a22ed411188e592fdf  razdor.apk
+f3fda93af26c29eb9abceb38ddcc3cd1196f1f2258d4b3e8a1879e1410996111  razdor.ipa
+1e52c8aa8784eebf97f32e58bafe2eb90b6685c9c24e9f51a3020ad1257f943b  razdor-1.5.4-linux
+bed232dfa787ee99f1182084b0dc291c7d15123f3533bdf7fdc7f8a8a1f202f3  Razdor-1.5.4.exe
+020bb63dc3d963fa5f77f5497787306b6ed376e945cf5d5134880caec3719f70  razdor-1.5.4-macos
+877c4bf45744d8981b03dbaae1c7f45f914d90757d8752a22ed411188e592fdf  razdor-1.5.4.apk
+f3fda93af26c29eb9abceb38ddcc3cd1196f1f2258d4b3e8a1879e1410996111  razdor-1.5.4.ipa
+a70b0c07ad84778f641da841f0d4b1601947f56b42b13462a09334aa50a60403  razdor-translate-1.5.4-linux
+ad5b7a30718bff6f4c1d569e836ac67d3cad8d678ef70751b14f82bcc58a94ed  Razdor-translate-1.5.4.exe
+7413bc3c912fb58ef8e0f6788189fda59f273e452b452dcdec302889101826b9  razdor-translate-1.5.4-macos
+9299d9b62f83ad96dd2c73b395786232c66887acb4851a68ff825d1a4c3a588b  razdor-ads-1.5.4.zip
+b263ff2691c106d06d85d0cfbf916545eedf97d8f65dea72aa7d88444b005d6c  Razdor-win7.exe
+d81b4b3027a9fdae3c4c07a2e519f28cfafff349515a66ece1afa9127015c417  razdor-1.5.4-windows7.zip
+```
+
 ### Исправлено
 
 - Окно «Дерево развития» снова закрывается крестиком.
