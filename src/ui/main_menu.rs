@@ -1793,7 +1793,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
@@ -1839,6 +1839,8 @@ pub enum Row {
     Weather,
     CloudShadows,
     LivingMap,
+    /// Advanced, Razdor's, off by default: «Новогодний вид» (`holiday`): the winter and holiday look. Style only.
+    Holiday,
     DepthModel,
     MapBattles,
     ArmyList,
@@ -1883,7 +1885,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 69] = [
+pub const ALL: [Row; 70] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1918,6 +1920,7 @@ pub const ALL: [Row; 69] = [
         Row::Weather,
         Row::CloudShadows,
         Row::LivingMap,
+        Row::Holiday,
         Row::DepthModel,
         Row::MapBattles,
         Row::ArmyList,
@@ -1983,6 +1986,7 @@ pub const ALL: [Row; 69] = [
             Row::CloudShadows => Some(tr("Razdor's: soft cloud shadows drift slowly over the map, and faster, about three times, while game time runs. Black, not blue; none at night. Without «Map animation» they stand still.")),
             Row::MapDecor => Some(tr("Razdor's: grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites. Only the look: nothing is written into the map and nothing blocks the way.")),
             Row::LivingMap => Some(tr("Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only.")),
+            Row::Holiday => Some(tr("Razdor's: snow on the land, roofs and trees, frozen water, snowfall, garlands and festive hats on the heroes, and a Christmas menu theme from the Hub. Style only.")),
             Row::DepthModel => Some(tr("Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click selects a unit, and a click on an empty cell places the selected one; units and items are also moved by dragging. Both: clicks and dragging at once.")),
@@ -2623,6 +2627,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // Razdor's, off by default: the map lives (`living`), style only.
             if labelled_row_help(c, geo, tr("Living map"), yes_no(audio.map_living), Row::LivingMap.help_text()).0 {
                 audio.map_living = !audio.map_living;
+            }
+        }
+        Row::Holiday => {
+            // Razdor's, off by default: the winter and holiday look (`holiday`), style only.
+            if labelled_row_help(c, geo, tr("Holiday look"), yes_no(audio.map_holiday), Row::Holiday.help_text()).0 {
+                audio.map_holiday = !audio.map_holiday;
             }
         }
         Row::MapBattles => {
@@ -4180,7 +4190,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

@@ -878,6 +878,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::world_view::decor::set_pref(env_switch("RAZDOR_DECOR").unwrap_or(false), env_density().unwrap_or(1.0));
         // `RAZDOR_LIVING=1` (the snapshots' living map); the setting is not read here.
         crate::ui::living::set_prefs(false);
+        // `RAZDOR_HOLIDAY=1` (the snapshots' «Новогодний вид»); the setting is not read here.
+        crate::ui::holiday::set_pref(false, false);
         // `RAZDOR_LIGHT_MODE=game|cycle` (the snapshots' light clock; the lighting is off otherwise): the game's
         // clock (the hour moves while the army travels), or the real-time cycle of `RAZDOR_LIGHT_CYCLE` minutes a
         // day (24 by default), which runs on the snapshot clock, so one run can show several hours.
@@ -923,6 +925,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::water::set_levels(settings.map_water_rate, settings.map_water_quality);
     crate::ui::weather::set_pref(settings.map_weather);
     crate::ui::living::set_prefs(settings.map_living);
+    // «Новогодний вид»: the cheap path on «Низкое» light or with the battery saver (`holiday::cheap`).
+    crate::ui::holiday::set_pref(settings.map_holiday, quality == crate::ui::lights::Quality::Low || settings.battery_saver);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 

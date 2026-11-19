@@ -54,6 +54,7 @@ pub mod map_scale;
 pub mod memo;
 pub mod minimap;
 pub mod living;
+pub mod holiday;
 pub mod cloud_shadow;
 pub mod crt;
 pub mod mist;
