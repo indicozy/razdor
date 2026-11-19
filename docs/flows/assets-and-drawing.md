@@ -354,7 +354,7 @@ every frame (`display::follow_settings`); `RAZDOR_CLOUD_SHADOWS=1` wins over it.
 `world_frame` after the world pass (the ground, the objects, the decorations, the buildings and the figures) and before the
 light and the flat fog, so a cell's colour is multiplied by `1 − cover × dark × tint`. The fog's shown darkness masks the shade
 (no shade on the war fog). It is skipped on a bent view and on the hex grid. The drift runs on a lattice that moves with
-`map_anim::now` (frozen with «Анимация карты» off), at the walking speed while the hero walks (`advance`, eased). The shade is neutral black by default (`RAZDOR_CLOUD_TINT`
+`map_anim::now` (frozen with «Анимация карты» off) at 18 cells a minute, the same walking or still (`advance`, eased; `RAZDOR_CLOUD_SPEED` and `RAZDOR_CLOUD_SPEED_WALK`, both 18). In block mode the block grid is in cloud space (`p + Drift × Scale`), so the blocks slide with the clouds. The shade is neutral black by default (`RAZDOR_CLOUD_TINT`
 0; 1 is the old cool blue). Its strength is the daylight's share, `Pass::daylight` = `daylight::shade_at(hour)`: the sun's sine
 smooth-stepped between -0.3 and 0.3, so 1 by day, 0 at night, eased over dusk and dawn. The hour is the lighting's shown hour
 when «Освещение» is on (`daylight::shown_hour`; `RAZDOR_LIGHT_HOUR` sets it in a snapshot), else the game clock's (`game_hour`),

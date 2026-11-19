@@ -13,8 +13,9 @@
 //! frequency (green); the density is their weighted sum, cut at a threshold that covers the setting's share of the
 //! texture (calibrated once from its own histogram).
 //!
-//! The drift is integrated on the CPU each frame (`advance`): `offset += dir × speed × dt`, with the speed eased
-//! toward the still speed or the walking speed, so a change of speed never jumps. `dt` is the map's animation time
+//! The drift is integrated on the CPU each frame (`advance`): `offset += dir × speed × dt`, 18 cells a minute by
+//! default, the same walking or standing still (the walking speed is a separate tuning, 18 too). The speed is eased
+//! toward its target, so a change of speed never jumps. `dt` is the map's animation time
 //! (`map_anim::now`), so the drift is frozen with «Анимация карты» off and deterministic in snapshots.
 //! Phones: GLES 2 (`#version 100`), no `sin` hash; texture fetches only (the block mode takes 9 a pixel, the round
 //! mode 3).
@@ -58,15 +59,16 @@ pub struct Tuning {
     pub soft: f32,
     /// The block size in cells (`RAZDOR_CLOUD_BLOCK`): 0 for the round blotches, else the blocks' side.
     pub block: f32,
-    /// The drift in cells a minute while the player stands still (`RAZDOR_CLOUD_SPEED`).
+    /// The drift in cells a minute while the player stands still (`RAZDOR_CLOUD_SPEED`; 18 by default: 3× the old pace).
     pub speed: f32,
-    /// The drift in cells a minute while the hero walks (`RAZDOR_CLOUD_SPEED_WALK`).
+    /// The drift in cells a minute while the hero walks (`RAZDOR_CLOUD_SPEED_WALK`; 18 by default, the same as
+    /// standing still: walking does not speed the shadows up).
     pub speed_walk: f32,
 }
 
 impl Default for Tuning {
     fn default() -> Self {
-        Tuning { dark: 0.25, tint: 0.0, scale: 5.0, cover: 0.28, soft: 0.15, block: 1.0, speed: 6.0, speed_walk: 30.0 }
+        Tuning { dark: 0.25, tint: 0.0, scale: 5.0, cover: 0.28, soft: 0.15, block: 1.0, speed: 18.0, speed_walk: 18.0 }
     }
 }
 
@@ -195,8 +197,9 @@ void main() {
 
 // The fragment: the multiply factor per pixel (1 where no shade). The ground under the pixel comes from the
 // projection (flat or the tilted plane); the pixel's cell is p (cells, centred on whole numbers). The density is
-// the two octaves of the mist's noise: red at the cloud size, green at twice the frequency; the drift is added in
-// lattice units. Round mode (Block 0): one density per pixel. Block mode: the density at each block's centre,
+// the two octaves of the mist's noise: red at the cloud size, green at twice the frequency. The drift is in lattice
+// units: round mode (Block 0) adds it to the density's position, one density per pixel. Block mode moves the
+// pixel into cloud space first (p + Drift × Scale), so the block grid drifts with the clouds. The density at each block's centre,
 // thresholded per block, the four blocks round the pixel blended bilinearly. Tint 0 (the default) is neutral
 // black; Tint 1 is the old cool shade (red takes the most, blue the least).
 const FRAGMENT: &str = r#"#version 100
@@ -235,10 +238,11 @@ float density(vec2 q) {
     return 0.65 * a + 0.35 * b;
 }
 
-// One block's shade at its index i: its centre is (i + ½) blocks in cells; 1 where the density clears the threshold.
+// One block's shade at its index i: its centre is (i + ½) blocks in cloud space (the drift is already in the
+// position, see main); 1 where the density clears the threshold.
 float block_shade(vec2 i, float hw) {
     vec2 c = (i + 0.5) * Block;
-    return smoothstep(Thresh - hw, Thresh + hw, density(c / Scale + Drift));
+    return smoothstep(Thresh - hw, Thresh + hw, density(c / Scale));
 }
 
 void main() {
@@ -259,7 +263,10 @@ void main() {
     float hw = 0.2 * Soft;
     float cover;
     if (Block > 0.0) {
-        vec2 fc = p / Block - 0.5;
+        // The block grid moves with the clouds: the drift is added to the position first (cloud space), so the
+        // blocks slide with the shade instead of blinking on and off in place.
+        vec2 q = p + Drift * Scale;
+        vec2 fc = q / Block - 0.5;
         vec2 i0 = floor(fc);
         vec2 f = fc - i0;
         float v00 = block_shade(i0, hw);
@@ -410,7 +417,7 @@ mod tests {
         let d = tuning_from(|_| None);
         assert_eq!(d, Tuning::default());
         assert_eq!((d.dark, d.scale, d.soft, d.tint, d.block), (0.25, 5.0, 0.15, 0.0, 1.0));
-        assert_eq!((d.speed, d.speed_walk), (6.0, 30.0));
+        assert_eq!((d.speed, d.speed_walk), (18.0, 18.0));
         let t = tuning_from(|k| match k {
             "RAZDOR_CLOUD_DARK" => Some("9".into()),
             "RAZDOR_CLOUD_COVER" => Some("nope".into()),
@@ -442,14 +449,14 @@ mod tests {
     fn the_drift_starts_at_the_still_speed_and_eases_to_the_walking_speed_without_a_jump() {
         let tu = Tuning::default();
         local_reset();
-        // Standing still for ten seconds: 6 cells a minute, so 1 cell in 10 s.
+        // Standing still for ten seconds: 18 cells a minute, so 3 cells in 10 s.
         for k in 0..=600 {
             advance(k as f64 / 60.0, false, &tu);
         }
         let still = MOTION.with(|m| m.borrow().offset);
         let moved = (still[0] * still[0] + still[1] * still[1]).sqrt();
-        assert!((moved - 1.0).abs() < 0.02, "still: {moved} cells in 10 s");
-        // Walking: the speed climbs toward 30 cells a minute, and the offset never jumps between frames.
+        assert!((moved - 3.0).abs() < 0.05, "still: {moved} cells in 10 s");
+        // Walking: the same pace (no speed-up), and the offset never jumps between frames.
         let mut prev = still;
         let mut max_step = 0.0f64;
         for k in 601..=1200 {
@@ -459,10 +466,12 @@ mod tests {
             prev = now;
         }
         let speed = MOTION.with(|m| m.borrow().speed);
-        assert!((speed - 30.0).abs() < 0.5, "walking speed after 10 s: {speed}");
-        // At 30 cells a minute a 1/60 s frame moves 0.5 cell; the largest step never exceeds the walking rate.
-        let frame_at_walk = 30.0 / 60.0 * (1.0 / 60.0);
-        assert!(max_step <= frame_at_walk * 1.001, "a frame moved {max_step} cells");
+        assert!((speed - 18.0).abs() < 0.05, "walking speed after 10 s: {speed}");
+        let walked = ((prev[0] - still[0]).powi(2) + (prev[1] - still[1]).powi(2)).sqrt();
+        assert!((walked - 3.0).abs() < 0.05, "walking: {walked} cells in 10 s, not faster than standing still");
+        // At 18 cells a minute a 1/60 s frame moves 0.3 cell; the largest step never exceeds that rate.
+        let frame = 18.0 / 60.0 * (1.0 / 60.0);
+        assert!(max_step <= frame * 1.001, "a frame moved {max_step} cells");
     }
 
     #[test]

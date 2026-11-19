@@ -591,7 +591,7 @@ Map decor: few = Мало
 Map decor: normal = Обычно
 Razdor's: grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites. Only the look: nothing is written into the map and nothing blocks the way. = Своё в Razdor: трава, цветы, камыш у воды и кусты у леса из спрайтов игры. Только вид: в карту не пишутся, на движение не влияют.
 Cloud shadows = Тени облаков
-Razdor's: soft cloud shadows drift slowly over the map, faster while the hero walks. Black, not blue; none at night. Without «Map animation» they stand still. = Своё в Razdor: мягкие тени облаков медленно плывут по карте, быстрее, когда герой идёт. Чёрные, не синие; ночью их нет. Без «Анимация карты» стоят на месте.
+Razdor's: soft cloud shadows drift slowly over the map, at the same pace whether the hero walks or stands. Black, not blue; none at night. Without «Map animation» they stand still. = Своё в Razdor: мягкие тени облаков медленно плывут по карте, с одной скоростью, идёт герой или стоит. Чёрные, не синие; ночью их нет. Без «Анимация карты» стоят на месте.
 
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода
