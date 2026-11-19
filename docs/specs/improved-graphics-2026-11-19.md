@@ -44,6 +44,8 @@ frame: one experimental setting, off by default, engine only, no change to `.DTm
   effect is small on DT's dense maps. Open: the inner corner of a 90° turn on a one-cell road stays angular.
 - Wind in the grass (`LIVE_GRASS`, backlog 1602): prototype on a branch, env `RAZDOR_NATURAL=…,wind`; per-frame
   overlay over grass like live water; a fixed east direction for now; the owner to choose its direction source.
+- Clouds (owner, 18:2x): drift 3× faster and at a fixed speed (still = walking = 18 cells/min); to become the code
+  defaults (`RAZDOR_CLOUD_SPEED`, `RAZDOR_CLOUD_SPEED_WALK`). Clouds removed from «Погода» (a separate setting only).
 
 ## 1. Decision summary
 

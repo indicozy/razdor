@@ -8330,8 +8330,8 @@ fn draw_cloud_shadows(game: &Game, cam: &Camera) {
         projection,
         row_height: cam.grid.row_height(),
         now: super::map_anim::now(),
-        // The hero's walk (the path is being followed): the drift runs at its walking speed.
-        walking: game.moving(),
+        // The game clock: the drift runs faster as game time runs faster (a walk, a wait), slowly while it stands.
+        hours: game.clock.total_minutes() / 60.0,
         // The shade follows the daylight: the lighting's hour when it is on («Освещение» or a snapshot's
         // RAZDOR_LIGHT_HOUR), else the game clock's (the sun is the same either way). Full by day, none at night.
         daylight: daylight::shade_at(daylight::shown_hour().unwrap_or_else(|| game_hour(game))),

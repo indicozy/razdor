@@ -13,9 +13,11 @@
 //! frequency (green); the density is their weighted sum, cut at a threshold that covers the setting's share of the
 //! texture (calibrated once from its own histogram).
 //!
-//! The drift is integrated on the CPU each frame (`advance`): `offset += dir × speed × dt`, 18 cells a minute by
-//! default, the same walking or standing still (the walking speed is a separate tuning, 18 too). The speed is eased
-//! toward its target, so a change of speed never jumps. `dt` is the map's animation time
+//! The drift is integrated on the CPU each frame (`advance`): `offset += dir × speed × dt`. The speed is one speed
+//! while the game clock stands still (30 cells a minute), and about three times that while game time runs (the
+//! clock moved within the last 0.45 s: a hero's walk or a wait). The speed eases toward its target (0.12 s), so a
+//! change never jumps. A frame where the clock moves more than 12 game hours (a loaded save) counts for nothing.
+//! `dt` is the map's animation time
 //! (`map_anim::now`), so the drift is frozen with «Анимация карты» off and deterministic in snapshots.
 //! Phones: GLES 2 (`#version 100`), no `sin` hash; texture fetches only (the block mode takes 9 a pixel, the round
 //! mode 3).
@@ -59,16 +61,32 @@ pub struct Tuning {
     pub soft: f32,
     /// The block size in cells (`RAZDOR_CLOUD_BLOCK`): 0 for the round blotches, else the blocks' side.
     pub block: f32,
-    /// The drift in cells a minute while the player stands still (`RAZDOR_CLOUD_SPEED`; 18 by default: 3× the old pace).
+    /// The drift in cells a minute while the game clock stands still (`RAZDOR_CLOUD_SPEED`; 30 by default).
     pub speed: f32,
-    /// The drift in cells a minute while the hero walks (`RAZDOR_CLOUD_SPEED_WALK`; 18 by default, the same as
-    /// standing still: walking does not speed the shadows up).
-    pub speed_walk: f32,
+    /// The drift's multiple while game time runs (`RAZDOR_CLOUD_RUN_FACTOR`; 3 by default).
+    pub run_factor: f32,
+    /// How fast the speed follows its target, the exponential's time constant in seconds (`RAZDOR_CLOUD_EASE`;
+    /// 0.12 by default).
+    pub ease: f32,
+    /// How long game time counts as running after its clock last moved, in real seconds (`RAZDOR_CLOUD_RUN_WINDOW`;
+    /// 0.45 by default). The slowest walk (`walk_speed` 0, `walk_pace` 0.375) steps every 0.4 s: 0.4 + 0.05.
+    pub run_window: f32,
 }
 
 impl Default for Tuning {
     fn default() -> Self {
-        Tuning { dark: 0.25, tint: 0.0, scale: 5.0, cover: 0.28, soft: 0.15, block: 1.0, speed: 18.0, speed_walk: 18.0 }
+        Tuning {
+            dark: 0.25,
+            tint: 0.0,
+            scale: 5.0,
+            cover: 0.28,
+            soft: 0.15,
+            block: 1.0,
+            speed: 30.0,
+            run_factor: 3.0,
+            ease: 0.12,
+            run_window: 0.45,
+        }
     }
 }
 
@@ -87,7 +105,9 @@ pub fn tuning_from(get: impl Fn(&str) -> Option<String>) -> Tuning {
         soft: num("RAZDOR_CLOUD_SOFT", d.soft, 0.02, 0.5),
         block: num("RAZDOR_CLOUD_BLOCK", d.block, 0.0, 4.0),
         speed: num("RAZDOR_CLOUD_SPEED", d.speed, 0.0, 600.0),
-        speed_walk: num("RAZDOR_CLOUD_SPEED_WALK", d.speed_walk, 0.0, 600.0),
+        run_factor: num("RAZDOR_CLOUD_RUN_FACTOR", d.run_factor, 0.0, 10.0),
+        ease: num("RAZDOR_CLOUD_EASE", d.ease, 0.01, 5.0),
+        run_window: num("RAZDOR_CLOUD_RUN_WINDOW", d.run_window, 0.05, 5.0),
     }
 }
 
@@ -95,40 +115,69 @@ pub fn tuning_from(get: impl Fn(&str) -> Option<String>) -> Tuning {
 /// only swings left and right.
 const DIR: [f64; 2] = [0.8, 0.6];
 
-/// How fast the drift's speed follows its target (seconds): an exponential with this time constant settles
-/// in about half a second.
-const EASE_SECONDS: f64 = 0.17;
-
 /// The longest step the drift integrates in one frame (seconds): a long gap (a paused frame) moves no more.
 const MAX_STEP: f64 = 0.1;
 
-/// The drift's state: the last clock it ran at, its eased speed (cells a minute) and its offset (cells).
+/// A frame where the clock moves more than this many game hours is a jump (a loaded save, a clock set): it counts
+/// for nothing, neither as running nor as drift.
+const JUMP_HOURS: f64 = 12.0;
+
+/// The drift's state: the last clocks it ran at (real seconds and game hours), the real time the game clock last
+/// moved (None: not yet), its eased speed (cells a minute) and its offset (cells).
 #[derive(Clone, Copy, Debug)]
 struct Motion {
     last: Option<f64>,
+    hours: Option<f64>,
+    moved_at: Option<f64>,
     speed: f64,
     offset: [f64; 2],
 }
 
-local! {
-    static MOTION: RefCell<Motion> = RefCell::new(Motion { last: None, speed: 0.0, offset: [0.0; 2] });
+impl Motion {
+    fn fresh() -> Self {
+        Motion { last: None, hours: None, moved_at: None, speed: 0.0, offset: [0.0; 2] }
+    }
 }
 
-/// Moves the drift on to clock `now` (seconds) with the hero walking or not: the speed eases toward the walking
-/// or the still speed, and the offset integrates it. The first call starts at the target speed.
-pub fn advance(now: f64, walking: bool, tu: &Tuning) {
+local! {
+    static MOTION: RefCell<Motion> = RefCell::new(Motion::fresh());
+}
+
+/// The drift's target speed (cells a minute): the still speed, times the run factor while game time runs.
+pub fn target_speed(running: bool, tu: &Tuning) -> f64 {
+    let base = f64::from(tu.speed).max(0.0);
+    if running { base * f64::from(tu.run_factor).max(0.0) } else { base }
+}
+
+/// Moves the drift on to real clock `now` (seconds) and game clock `hours` (total game hours, fractional). Game
+/// time runs when its clock moved within `run_window`; the speed eases toward the target and the offset integrates
+/// it. A frame whose clock moves more than `JUMP_HOURS` (or goes back) drifts nothing. The first call starts at
+/// the still speed.
+pub fn advance(now: f64, hours: f64, tu: &Tuning) {
     MOTION.with(|m| {
         let mut m = m.borrow_mut();
-        let target = f64::from(if walking { tu.speed_walk } else { tu.speed });
-        let dt = match m.last {
-            None => {
-                m.speed = target;
-                0.0
-            }
-            Some(last) => (now - last).clamp(0.0, MAX_STEP),
+        let (Some(last), Some(last_hours)) = (m.last, m.hours) else {
+            m.last = Some(now);
+            m.hours = Some(hours);
+            m.speed = target_speed(false, tu);
+            return;
         };
+        let real = now - last;
+        let passed = hours - last_hours;
         m.last = Some(now);
-        m.speed += (target - m.speed) * (1.0 - (-dt / EASE_SECONDS).exp());
+        m.hours = Some(hours);
+        let jump = real.is_nan() || real < 0.0 || !passed.is_finite() || !(0.0..=JUMP_HOURS).contains(&passed);
+        let dt = if jump {
+            0.0
+        } else {
+            if passed > 0.0 {
+                m.moved_at = Some(now);
+            }
+            real.min(MAX_STEP)
+        };
+        let running = m.moved_at.is_some_and(|t| now - t <= f64::from(tu.run_window));
+        let target = target_speed(running, tu);
+        m.speed += (target - m.speed) * (1.0 - (-dt / f64::from(tu.ease).max(1e-3)).exp());
         // cells a minute → cells a second
         let step = m.speed / 60.0 * dt;
         m.offset[0] += DIR[0] * step;
@@ -347,8 +396,9 @@ pub struct Pass<'a> {
     pub row_height: f32,
     /// The map's animation time in seconds (`map_anim::now`): the drift integrates its steps.
     pub now: f64,
-    /// Whether the hero is walking this frame (the drift runs at the walking speed, eased).
-    pub walking: bool,
+    /// The game clock in hours (total, fractional: `Clock::total_minutes / 60`): the drift's speed follows how fast
+    /// it passes (`advance`).
+    pub hours: f64,
     /// The share of the daylight the shade keeps this frame (`daylight::shade_at`, 0..1): 1 by day, 0 at night.
     pub daylight: f32,
 }
@@ -361,7 +411,7 @@ pub fn draw(pass: &Pass) {
     }
     let cal = calibrated();
     let tu = tuning();
-    advance(pass.now, pass.walking, &tu);
+    advance(pass.now, pass.hours, &tu);
     // At night the shade is gone: nothing to multiply (the drift still moves on).
     if pass.daylight <= 0.0 {
         return;
@@ -417,7 +467,7 @@ mod tests {
         let d = tuning_from(|_| None);
         assert_eq!(d, Tuning::default());
         assert_eq!((d.dark, d.scale, d.soft, d.tint, d.block), (0.25, 5.0, 0.15, 0.0, 1.0));
-        assert_eq!((d.speed, d.speed_walk), (18.0, 18.0));
+        assert_eq!((d.speed, d.run_factor, d.ease, d.run_window), (30.0, 3.0, 0.12, 0.45));
         let t = tuning_from(|k| match k {
             "RAZDOR_CLOUD_DARK" => Some("9".into()),
             "RAZDOR_CLOUD_COVER" => Some("nope".into()),
@@ -446,35 +496,6 @@ mod tests {
     }
 
     #[test]
-    fn the_drift_starts_at_the_still_speed_and_eases_to_the_walking_speed_without_a_jump() {
-        let tu = Tuning::default();
-        local_reset();
-        // Standing still for ten seconds: 18 cells a minute, so 3 cells in 10 s.
-        for k in 0..=600 {
-            advance(k as f64 / 60.0, false, &tu);
-        }
-        let still = MOTION.with(|m| m.borrow().offset);
-        let moved = (still[0] * still[0] + still[1] * still[1]).sqrt();
-        assert!((moved - 3.0).abs() < 0.05, "still: {moved} cells in 10 s");
-        // Walking: the same pace (no speed-up), and the offset never jumps between frames.
-        let mut prev = still;
-        let mut max_step = 0.0f64;
-        for k in 601..=1200 {
-            advance(k as f64 / 60.0, true, &tu);
-            let now = MOTION.with(|m| m.borrow().offset);
-            max_step = max_step.max(((now[0] - prev[0]).powi(2) + (now[1] - prev[1]).powi(2)).sqrt());
-            prev = now;
-        }
-        let speed = MOTION.with(|m| m.borrow().speed);
-        assert!((speed - 18.0).abs() < 0.05, "walking speed after 10 s: {speed}");
-        let walked = ((prev[0] - still[0]).powi(2) + (prev[1] - still[1]).powi(2)).sqrt();
-        assert!((walked - 3.0).abs() < 0.05, "walking: {walked} cells in 10 s, not faster than standing still");
-        // At 18 cells a minute a 1/60 s frame moves 0.3 cell; the largest step never exceeds that rate.
-        let frame = 18.0 / 60.0 * (1.0 / 60.0);
-        assert!(max_step <= frame * 1.001, "a frame moved {max_step} cells");
-    }
-
-    #[test]
     fn the_shade_follows_the_daylight_none_at_night_full_by_day_and_continuous() {
         use crate::ui::daylight::shade_at;
         assert_eq!(shade_at(0.0), 0.0, "midnight: no shade");
@@ -496,17 +517,123 @@ mod tests {
     fn a_frozen_clock_moves_nothing() {
         let tu = Tuning::default();
         local_reset();
-        advance(5.0, false, &tu);
+        advance(5.0, 100.0, &tu);
         let before = MOTION.with(|m| m.borrow().offset);
-        for _ in 0..100 {
-            advance(5.0, true, &tu);
+        // Game time runs on, but the map animation is frozen (`now` stands still): no drift.
+        for k in 0..100 {
+            advance(5.0, 100.0 + f64::from(k) * 0.01, &tu);
         }
-        assert_eq!(MOTION.with(|m| m.borrow().offset), before, "no clock, no drift");
+        assert_eq!(MOTION.with(|m| m.borrow().offset), before, "no real time, no drift");
     }
 
     /// Clears the drift's state for a test (the tests share the thread's state).
     fn local_reset() {
-        MOTION.with(|m| *m.borrow_mut() = Motion { last: None, speed: 0.0, offset: [0.0; 2] });
+        MOTION.with(|m| *m.borrow_mut() = Motion::fresh());
+    }
+
+    /// Runs `frames` frames at 60 a second from real time `t0`. The game clock moves `step` hours every `every`
+    /// frames (0 = never) from `hours0`.
+    fn run(t0: f64, frames: u32, hours0: f64, step: f64, every: u32, tu: &Tuning) -> f64 {
+        let mut hours = hours0;
+        for k in 1..=frames {
+            if every > 0 && k % every == 0 {
+                hours += step;
+            }
+            advance(t0 + f64::from(k) / 60.0, hours, tu);
+        }
+        hours
+    }
+
+    fn speed() -> f64 {
+        MOTION.with(|m| m.borrow().speed)
+    }
+
+    fn offset() -> [f64; 2] {
+        MOTION.with(|m| m.borrow().offset)
+    }
+
+    #[test]
+    fn a_still_clock_drifts_at_the_still_speed() {
+        let tu = Tuning::default();
+        local_reset();
+        run(0.0, 600, 100.0, 0.0, 0, &tu);
+        assert!((speed() - 30.0).abs() < 1e-6, "still speed: {}", speed());
+        let o = offset();
+        let moved = (o[0] * o[0] + o[1] * o[1]).sqrt();
+        assert!((moved - 30.0 / 60.0 * 10.0).abs() < 0.05, "still: {moved} cells in 10 s");
+    }
+
+    #[test]
+    fn a_stepwise_clock_counts_as_running() {
+        let tu = Tuning::default();
+        local_reset();
+        // The hero's walk: 25 game minutes (25/60 h) in one frame every 9 frames (0.15 s), so the clock never
+        // stands still for the 0.45 s window. The target is 3 × 30 = 90 cells a minute.
+        run(0.0, 600, 100.0, 25.0 / 60.0, 9, &tu);
+        assert!((speed() - 90.0).abs() < 0.05, "running speed after 10 s: {}", speed());
+    }
+
+    #[test]
+    fn the_speed_returns_to_still_after_the_clock_stops() {
+        let tu = Tuning::default();
+        local_reset();
+        let hours = run(0.0, 180, 100.0, 25.0 / 60.0, 9, &tu);
+        assert!(speed() > 80.0, "running before the stop: {}", speed());
+        // The clock stands still: 0.45 s of running (the window), then the speed eases down (0.12 s constant).
+        let t0 = 3.0;
+        let mut running_at_third_second = 0.0;
+        let mut eased_at_one_second = 0.0;
+        for k in 1..=600 {
+            let t = t0 + f64::from(k) / 60.0;
+            advance(t, hours, &tu);
+            if k == 20 {
+                running_at_third_second = speed();
+            }
+            if k == 60 {
+                eased_at_one_second = speed();
+            }
+        }
+        assert!(running_at_third_second > 80.0, "still running 0.33 s after the stop: {running_at_third_second}");
+        assert!(eased_at_one_second < 35.0, "eased down 1 s after the stop: {eased_at_one_second}");
+        assert!((speed() - 30.0).abs() < 0.05, "stopped: the speed eases to {}", speed());
+    }
+
+    #[test]
+    fn a_jump_drifts_nothing_and_does_not_count_as_running() {
+        let tu = Tuning::default();
+        local_reset();
+        // Standing still, then a loaded save leaps 13 hours in one frame.
+        run(0.0, 60, 100.0, 0.0, 0, &tu);
+        let (before, speed_before) = (offset(), speed());
+        advance(61.0 / 60.0, 113.0, &tu);
+        assert_eq!(offset(), before, "no drift in the jump frame");
+        assert_eq!(speed(), speed_before, "no speed change in the jump frame");
+        // The next frames stand still: the jump did not start a running spell.
+        run(62.0 / 60.0, 120, 113.0, 0.0, 0, &tu);
+        assert!((speed() - 30.0).abs() < 1e-6, "still after a jump: {}", speed());
+        // A clock set back is a jump too.
+        let before = offset();
+        advance(10.0, 50.0, &tu);
+        assert_eq!(offset(), before, "no drift when the clock goes back");
+        assert!((speed() - 30.0).abs() < 1e-6, "a clock set back leaves the speed: {}", speed());
+    }
+
+    #[test]
+    fn a_change_of_speed_moves_the_offset_without_a_jump() {
+        let tu = Tuning::default();
+        local_reset();
+        let hours = run(0.0, 180, 100.0, 25.0 / 60.0, 9, &tu);
+        let mut prev = offset();
+        let mut max_step = 0.0f64;
+        for k in 1..=600 {
+            advance(3.0 + f64::from(k) / 60.0, hours, &tu);
+            let now = offset();
+            max_step = max_step.max(((now[0] - prev[0]).powi(2) + (now[1] - prev[1]).powi(2)).sqrt());
+            prev = now;
+        }
+        // No frame moves faster than the running speed (90 cells a minute).
+        let frame = 90.0 / 60.0 * (1.0 / 60.0);
+        assert!(max_step <= frame * 1.001, "a frame moved {max_step} cells, more than {frame}");
     }
 
     #[test]
