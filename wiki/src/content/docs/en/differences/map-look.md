@@ -65,8 +65,8 @@ Turn it off on weak phones if the map is slow. The cost: the edges of roads, fie
 
 The **"Natural ground"** row (off by default) changes the edges of fields, shores and roads. They no longer follow the cell grid. They bend in smooth curves.
 
-* **"Soft"**: the edges bend.
-* **"Strong"**: at the shores the bends are more visible, and the meadows get soft lighter and darker patches.
+* **"Soft"**: the edges bend, and the grass, sand and other ground textures no longer repeat one pattern.
+* **"Strong"**: the bends at the shores are more visible. The meadows get soft lighter and darker patches. Roads become winding tracks. By water and lava, the road stays wide. The ground also gets a fine grain.
 
 This is only the look: cells, passability and water stay as in the original. Without **"Ground blending"**, the row changes nothing.
 

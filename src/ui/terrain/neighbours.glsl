@@ -13,6 +13,10 @@
 //   EDGE_MIST   the border's fog («Продолжать карту за краем»), drawn over the ground past the map's edges.
 //   NAT_EDGES   «Улучшенная земля» (Soft, Strong): the natural edges (the blend fractions bent by a slow noise curve).
 //   NAT_TONE    «Улучшенная земля» (Strong): the meadow tone (a low-frequency patch of lighter and darker land, `main`).
+//   NAT_PATHS   «Улучшенная земля» (Strong): the winding paths: a road in a mixed quad narrows to a path through the road
+//               cells' centres (`Paths`, the baked distance; `main`).
+//   NAT_DETAIL  «Улучшенная земля» (Soft, Strong): the land textures' anti-tiling (a slow offset of each texture's phase,
+//               `det_offset`, in `ground`) and, in Strong, the fine grain (`DetAmp`, the brightness and hue, in `main`).
 precision highp float;
 varying highp vec2 uv;
 uniform sampler2D Neighbours;
@@ -45,15 +49,27 @@ uniform float LiveWater;
 // foam's lapping; zoomed out the water keeps its texture, colour and foam.
 uniform float Detail;
 // The shore (`water::bank_distance`, `wide_water`): red the water's distance from the bank in steps / 8, green 1 on
-// the wide water (a lake, the sea), 0 on a river.
+// the wide water (a lake, the sea), 0 on a river; blue 1 where no cell of the 3×3 block is blocked (water, lava, swamp,
+// snowdrifts), the road narrowing's safe byte (`road_bake::safe_cells`).
 uniform sampler2D Bank;
+// The winding paths' distance (`road_bake::bake_paths`): red the distance from the nearest centreline in cells / 1
+// (255 at a cell or more), the texels per cell at the map's resolution (`road_bake::bake_for_map`). A map without a bake
+// holds a single zero texel; the NAT_PATHS draws are not made then.
+uniform sampler2D Paths;
 // The sun's and the moon's glint (`water::glint`): rgb the light's colour, a the strength.
 uniform vec4 Glint;
 uniform sampler2D Flow;
 uniform vec3 Sky;
 // The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
 uniform sampler2D Noise;
-#if NAT_EDGES || NAT_TONE
+#if NAT_PATHS
+// The winding paths' tuning (`terrain::natural_look`): the path's half-width in cells (`NatPathW`, 0.40) and its
+// softness (`NatPathSoft`, 0.45); `PathPx` is the view's screen pixels per cell (the narrowing fades out below ~12).
+uniform float NatPathW;
+uniform float NatPathSoft;
+uniform float PathPx;
+#endif
+#if NAT_EDGES || NAT_TONE || NAT_PATHS || NAT_DETAIL
 // The natural look's tuning (`terrain::natural_look`: the setting's level, the RAZDOR_NAT_* environment variables win).
 // NatS and NatShore: the bend's amplitude in cells on land and at a passable/blocked border; NatFreq: the noise's
 // cycles per cell; NatH: the ramp's half-width; NatTone and NatTonePeriod: the meadow tone's amplitude and period.
@@ -63,6 +79,16 @@ uniform float NatFreq;
 uniform float NatH;
 uniform float NatTone;
 uniform float NatTonePeriod;
+#endif
+#if NAT_DETAIL
+// The anti-tiling (`det_offset`): NatWarp the offset's amplitude in tiles, NatWarpFreq the noise's cycles per cell.
+// The fine grain (`main`): DetAmp its brightness amplitude (0 off), DetScale its cycles per cell.
+uniform float NatWarp;
+uniform float NatWarpFreq;
+uniform float DetAmp;
+uniform float DetScale;
+// This pixel's phase offset of the land textures, in texture pixels (set in `main`, read by `ground`).
+vec2 det_px;
 #endif
 // @SHARP_UV@
 
@@ -165,7 +191,7 @@ vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr, vec4 nb, vec4 wgt) {
 }
 #endif
 
-#if NAT_EDGES || NAT_TONE
+#if NAT_EDGES || NAT_TONE || NAT_PATHS || NAT_DETAIL
 // The natural look's noise: one fetch of the `Noise` table, the smooth value noise of `wnoise` (kept apart from it,
 // which sits inside LIVE_WATER). World position only, no clock, so the ground cache stays exact.
 float nat_noise(vec2 q) {
@@ -204,6 +230,14 @@ vec2 nat_weights(vec2 p, vec2 f, vec4 k) {
 }
 #endif
 
+#if NAT_PATHS
+// The winding paths' distance at the pixel (cells), read from `Paths`: the texel grid covers the map, cell x's centre at
+// p = x, so the texture is sampled at (p + 0.5) / MapSize like `Bank`.
+float nat_path_dist(vec2 p) {
+    return texture2D(Paths, (p + 0.5) / MapSize).r;
+}
+#endif
+
 #if NAT_TONE
 // 1 on the land the meadow tone lies on: grass, dry plain, sand, clay and stony soil (codes 5-7, 10-12). Water, lava,
 // road, marsh, scorched and snowy ground and snowdrifts keep their colour.
@@ -212,9 +246,29 @@ float nat_land(float code) {
 }
 #endif
 
+#if NAT_DETAIL
+// 1 on the land the anti-tiling and the fine grain lie on: grass, marsh, sand, clay, stony, scorched and snowy ground
+// (codes 5-8, 10-14). Water, lava, road, impassable swamp (9) and snowdrifts (15) keep their texture and colour.
+float det_land(float code) {
+    return step(4.5, code) * step(code, 8.5) + step(9.5, code) * step(code, 14.5);
+}
+
+// The land textures' phase offset at world position p, in texture pixels: two slow noise reads centred on zero, at most
+// NatWarp / 2 tiles each way. The field is continuous and the textures tile seamlessly, so no seam shows, and the `mod` in
+// `ground` keeps any phase inside its tile. World position only, no clock.
+vec2 det_offset(vec2 p) {
+    vec2 q = p * NatWarpFreq;
+    return (vec2(nat_noise(q), nat_noise(q + vec2(31.7, 11.3))) - 0.5) * NatWarp * Tile;
+}
+#endif
+
 @CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
+#if NAT_DETAIL
+    vec2 t = mod(px + det_px * det_land(code), Tile);
+#else
     vec2 t = mod(px, Tile);
+#endif
     vec2 atlas_uv = (slot * Slot + (Slot - Tile) * 0.5 + t) / AtlasSize;
     @CP@ vec3 c = texture2D(Atlas, sharp_uv(atlas_uv, AtlasSize, AtlasScale)).rgb;
 #if WATER_CODE
@@ -234,6 +288,10 @@ void main() {
     vec2 i = floor(p);
     vec2 f = p - i;
     vec2 px = p * CellPx;
+#if NAT_DETAIL
+    // The anti-tiling offset of this pixel (`ground` moves the land codes' textures by it).
+    det_px = det_offset(p);
+#endif
 #if EDGE_MIST
     // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the war fog.
     vec2 gap = max(max(vec2(-0.5) - p, p - (MapSize - 0.5)), vec2(0.0));
@@ -334,6 +392,51 @@ void main() {
         col = mix(top, bottom, fy);
     }
 #endif
+#if NAT_PATHS
+    // The winding paths («Улучшенная земля» Сильно): in a mixed quad (road codes and others), the road narrows to a path
+    // through the road cells' centres, its edge soft and its width NatPathW (noise 0.04, `nat_noise`). The colour is the
+    // blend of the quad's other codes (renormalised over their weights, never darkened) outside the path, and the road
+    // texture inside. The narrowing is on where the cell block is safe (`Bank` blue) and the view is zoomed in (`PathPx`
+    // 8 to 12 screen pixels per cell); a quad of four road codes keeps its look, as do the other quads.
+    if (!(k.x == k.y && k.y == k.z && k.z == k.w)) {
+        vec4 rd = step(vec4(3.5), k) * step(k, vec4(4.5));
+        vec4 nr = vec4(1.0) - rd;
+        if (dot(rd, vec4(1.0)) > 0.5 && dot(nr, vec4(1.0)) > 0.5) {
+            // The zoom fade (8 to 12 screen pixels per cell) and the safe byte. Beside blocked ground the half-width
+            // widens by 0.15 over the cell's ramp (a linear `Bank` blue), so the road meets its full-width self without
+            // a corner. The edge is soft (NatPathSoft) and wobbles with a finer noise, like worn ground.
+            float pg = smoothstep(8.0, 12.0, PathPx);
+            if (pg > 0.0) {
+                // The safe byte: an explicit bilinear blend of the four cells around p (cell x's centre at p = x), each read
+                // at its texel centre, so the ramp does not depend on the texture's filter. Smoothed, so it is C1.
+                vec2 c0 = floor(p);
+                vec2 ft = p - c0;
+                float s00 = texture2D(Bank, (c0 + 0.5) / MapSize).b;
+                float s10 = texture2D(Bank, (c0 + vec2(1.0, 0.0) + 0.5) / MapSize).b;
+                float s01 = texture2D(Bank, (c0 + vec2(0.0, 1.0) + 0.5) / MapSize).b;
+                float s11 = texture2D(Bank, (c0 + vec2(1.0, 1.0) + 0.5) / MapSize).b;
+                float safe = smoothstep(0.0, 1.0, mix(mix(s00, s10, ft.x), mix(s01, s11, ft.x), ft.y));
+                float pw = mix(NatPathW + 0.15, NatPathW, safe) + 0.04 * (nat_noise(p * 0.2) * 2.0 - 1.0);
+                float pd = nat_path_dist(p) + 0.04 * (nat_noise(p * 0.2 + vec2(17.3, 5.1)) * 2.0 - 1.0)
+                    + 0.02 * (nat_noise(p * 0.9 + vec2(3.1, 9.7)) * 2.0 - 1.0);
+                float pm = 1.0 - smoothstep(pw - NatPathSoft, pw + NatPathSoft, pd);
+                // The land's weights are the plain fractions: the natural edges' bend would make the grass side of a path steep.
+                vec4 ow = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y) * nr;
+                @CP@ vec3 g0 = ground(k.x, px, w, sea);
+                @CP@ vec3 g1 = ground(k.y, px, w, sea);
+                @CP@ vec3 g2 = ground(k.z, px, w, sea);
+                @CP@ vec3 g3 = ground(k.w, px, w, sea);
+                // A convex mix of the other codes: the weights' sum is never clamped, so it cannot fade to black.
+                float sw = dot(ow, vec4(1.0));
+                @CP@ vec3 land = sw > 0.0
+                    ? (ow.x * g0 + ow.y * g1 + ow.z * g2 + ow.w * g3) / sw
+                    : (nr.x * g0 + nr.y * g1 + nr.z * g2 + nr.w * g3) / dot(nr, vec4(1.0));
+                @CP@ vec3 road = ground(4.0, px, w, sea);
+                col = mix(col, mix(land, road, pm), pg);
+            }
+        }
+    }
+#endif
 #if NAT_TONE
     // The meadow tone (prototype): one low-frequency noise fetch, scaling the land share of the pixel, so water, lava,
     // road and snowdrifts keep their colour. A few per cent lighter or darker, a little warmer or cooler.
@@ -343,6 +446,20 @@ void main() {
             float tn = nat_noise(p / NatTonePeriod) * 2.0 - 1.0;
             vec3 tint = vec3(1.0 + NatTone * 1.2 * tn, 1.0 + NatTone * tn, 1.0 - NatTone * 0.8 * tn);
             col = mix(col, col * tint, land);
+        }
+    }
+#endif
+#if NAT_DETAIL
+    // The fine grain («Сильно», DetAmp > 0): a 1-3 cell noise of brightness and a slight warm or cool hue, on the land
+    // share of the pixel (water, road and snowdrifts keep their colour). No clock: it stands still with the map.
+    if (DetAmp > 0.0) {
+        float dland = mix(mix(det_land(k.x), det_land(k.y), fx), mix(det_land(k.z), det_land(k.w), fx), fy);
+        if (dland > 0.0) {
+            vec2 g = p * DetScale;
+            float bn = nat_noise(g) * 2.0 - 1.0;
+            float hn = nat_noise(g + vec2(13.1, 47.3)) * 2.0 - 1.0;
+            vec3 grain = vec3(1.0 + DetAmp * (bn + 0.5 * hn), 1.0 + DetAmp * bn, 1.0 + DetAmp * (bn - 0.5 * hn));
+            col = mix(col, col * grain, dland);
         }
     }
 #endif

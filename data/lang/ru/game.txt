@@ -582,7 +582,7 @@ Natural ground = Улучшенная земля
 Natural ground: off = Выкл
 Natural ground: soft = Мягко
 Natural ground: strong = Сильно
-Razdor's: uneven edges of fields, shores and roads; Strong also tints the meadows. Only the look: cells, passability and water stay the same. Does not work without «Ground blending». = Своё в Razdor: неровные края полей, берегов и дорог; в «Сильно» ещё и оттенки лугов. Только вид: клетки, проходимость и вода прежние. Не работает без «Смешивание земли».
+Razdor's: uneven edges of fields, shores and roads, land textures that do not repeat in a pattern; Strong also tints the meadows, adds a fine grain and turns roads into winding paths. Only the look: cells, passability and water stay the same. Does not work without «Ground blending». = Своё в Razdor: неровные края полей, берегов и дорог, земля без повторяющегося узора; в «Сильно» ещё оттенки лугов, мелкое зерно и извилистые тропы вместо дорог. Только вид: клетки, проходимость и вода прежние. Не работает без «Смешивание земли».
 
 # Advanced settings: map decorations and cloud shadows (Razdor's, off by default)
 Map decorations = Украшения карты

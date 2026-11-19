@@ -34,6 +34,16 @@ frame: one experimental setting, off by default, engine only, no change to `.DTm
   road-centre limit is below a staircase's 0.354 offset from its diagonal. Next: allow road centres up to 0.36 from the
   line and draw the path at half-width ≥ 0.38 (grass centres stay ≥ 1.0 away on staircases); soften the edges of fill
   blocks; add a map-size guard before baking (dtm allows 8192², ~4 GB at 8 texels).
+- Owner, 15:20: add noise/randomness to the textures themselves (grass and the other land). Planned after the paths:
+  per-cell anti-tiling (a hashed offset/flip of the texture per cell, blended across cell borders without seams) and
+  fine brightness/hue noise at 1–3 cells, on land surfaces only, baked into the ground cache.
+- Shipped next (16:19): winding paths in Сильно from the CPU road bake (road-centre limit 0.36, non-road 0.50, up to
+  4 Chaikin passes, fills with a soft edge, maps over 1024 cells skipped), a `Paths` texture (7 samplers of 8), edge
+  softness 0.45 and half-width 0.55 (the owner's pick: as soft as today's road blend), a bilinear "safe" ramp beside
+  blocked ground; anti-tiling (`NAT_DETAIL`) in Мягко and Сильно, fine grain in Сильно. The anti-tiling's visible
+  effect is small on DT's dense maps. Open: the inner corner of a 90° turn on a one-cell road stays angular.
+- Wind in the grass (`LIVE_GRASS`, backlog 1602): prototype on a branch, env `RAZDOR_NATURAL=…,wind`; per-frame
+  overlay over grass like live water; a fixed east direction for now; the owner to choose its direction source.
 
 ## 1. Decision summary
 

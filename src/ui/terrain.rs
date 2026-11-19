@@ -39,6 +39,10 @@ use razdor::dt::gfx::{water_frame, Image, WATER_FRAMES};
 use razdor::rules::map::{is_water, Surface};
 use super::{daylight, sharp, water};
 
+// The winding paths' distance bake (pure, tested). The shader step that reads it is not wired yet.
+#[allow(dead_code)]
+mod road_bake;
+
 /// The period of the `Clock` uniform (the water clock, seconds): 6400 = 64 × 100. Every drift in the
 /// shaders moves its noise by whole lattice periods (64 cells) over it, and every sine has a whole
 /// number of cycles in it, so the wrap is invisible. Keep the shader constants in step with the tests.
@@ -165,7 +169,7 @@ void main() {
 "#;
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 24] = [
+const UNIFORMS: [(&str, UniformType); 31] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -191,6 +195,14 @@ const UNIFORMS: [(&str, UniformType); 24] = [
     ("NatH", UniformType::Float1),
     ("NatTone", UniformType::Float1),
     ("NatTonePeriod", UniformType::Float1),
+    // The winding paths' tuning and the view's screen pixels per cell (`natural_look`, `draw_layer`).
+    ("NatPathW", UniformType::Float1),
+    ("NatPathSoft", UniformType::Float1),
+    ("PathPx", UniformType::Float1),
+    ("NatWarp", UniformType::Float1),
+    ("NatWarpFreq", UniformType::Float1),
+    ("DetAmp", UniformType::Float1),
+    ("DetScale", UniformType::Float1),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -334,9 +346,11 @@ pub enum NaturalGround {
     /// «Выкл»: the ground as it always was.
     #[default]
     Off,
-    /// «Мягко»: the natural edges, the ramp's half-width 0.5, the bend 0.30 on land and 0.15 at a shore.
+    /// «Мягко»: the natural edges, the ramp's half-width 0.5, the bend 0.30 on land and 0.15 at a shore, and the land
+    /// textures' anti-tiling (`NAT_DETAIL`).
     Soft,
-    /// «Сильно»: the «Мягко» look with the shore's bend at 0.25, and the meadows' tone (0.15, period 12 cells).
+    /// «Сильно»: the «Мягко» look with the shore's bend at 0.25, the meadows' tone (0.15, period 12 cells) and the fine
+    /// grain (0.15, features of about 1.5 cells).
     Strong,
 }
 
@@ -355,6 +369,18 @@ pub struct NatTune {
     pub tone: f32,
     /// The meadow tone's period, in cells (`NatTonePeriod`): 12.
     pub tone_period: f32,
+    /// The winding path's half-width, in cells (`NatPathW`): 0.55.
+    pub path_w: f32,
+    /// The winding path's edge softness, in cells (`NatPathSoft`): 0.45.
+    pub path_soft: f32,
+    /// The anti-tiling offset's amplitude, in tiles (`NatWarp`): 1.5 (the offset is at most three quarters of a tile each way).
+    pub warp: f32,
+    /// The anti-tiling offset's noise, cycles per cell (`NatWarpFreq`): 0.10 (features of about 10 cells).
+    pub warp_freq: f32,
+    /// The fine grain's brightness amplitude (`DetAmp`): 0 in «Мягко», 0.15 in «Сильно»; 0 draws no grain.
+    pub fine: f32,
+    /// The fine grain's noise, cycles per cell (`DetScale`): 0.7 (features of about 1.5 cells).
+    pub fine_scale: f32,
 }
 
 /// What the natural look draws now: the two blocks' flags and the tuning.
@@ -364,6 +390,10 @@ pub struct NatLook {
     pub edges: bool,
     /// The meadow tone (`NAT_TONE`).
     pub tone: bool,
+    /// The winding paths (`NAT_PATHS`).
+    pub paths: bool,
+    /// The anti-tiling of the land textures and the fine grain's block (`NAT_DETAIL`).
+    pub detail: bool,
     /// The tuning (`NatTune`).
     pub tune: NatTune,
 }
@@ -372,11 +402,11 @@ impl NaturalGround {
     /// The look of this level. Off draws nothing, and keeps the «Мягко» tuning, so a dev switch that turns the
     /// edges on alone uses the same values.
     pub fn look(self) -> NatLook {
-        let soft = NatTune { s: 0.30, shore: 0.15, freq: 0.45, h: 0.5, tone: 0.15, tone_period: 12.0 };
+        let soft = NatTune { s: 0.30, shore: 0.15, freq: 0.45, h: 0.5, tone: 0.15, tone_period: 12.0, path_w: 0.55, path_soft: 0.45, warp: 1.5, warp_freq: 0.10, fine: 0.0, fine_scale: 0.7 };
         match self {
-            NaturalGround::Off => NatLook { edges: false, tone: false, tune: soft },
-            NaturalGround::Soft => NatLook { edges: true, tone: false, tune: soft },
-            NaturalGround::Strong => NatLook { edges: true, tone: true, tune: NatTune { shore: 0.25, ..soft } },
+            NaturalGround::Off => NatLook { edges: false, tone: false, paths: false, detail: false, tune: soft },
+            NaturalGround::Soft => NatLook { edges: true, tone: false, paths: false, detail: true, tune: soft },
+            NaturalGround::Strong => NatLook { edges: true, tone: true, paths: true, detail: true, tune: NatTune { shore: 0.25, fine: 0.15, ..soft } },
         }
     }
 }
@@ -391,19 +421,29 @@ pub fn set_natural(level: NaturalGround) {
 }
 
 /// The dev switches, read once. They win over the setting: `RAZDOR_NATURAL=off|soft|strong` sets the level, or
-/// `RAZDOR_NATURAL=edges,tone` sets the two blocks alone; `RAZDOR_NAT_S`, `RAZDOR_NAT_S_SHORE`, `RAZDOR_NAT_FREQ`,
-/// `RAZDOR_NAT_H`, `RAZDOR_NAT_TONE` and `RAZDOR_NAT_TONE_PERIOD` set the tuning (each clamped to its range).
+/// `RAZDOR_NATURAL=edges,tone,detail` sets the blocks alone; `RAZDOR_NAT_S`, `RAZDOR_NAT_S_SHORE`, `RAZDOR_NAT_FREQ`,
+/// `RAZDOR_NAT_H`, `RAZDOR_NAT_TONE` and `RAZDOR_NAT_TONE_PERIOD` set the tuning (each clamped to its range), and
+/// `RAZDOR_NAT_DETAIL_WARP`, `RAZDOR_NAT_DETAIL_WARP_FREQ`, `RAZDOR_NAT_DETAIL_AMP` and `RAZDOR_NAT_DETAIL_SCALE` the
+/// anti-tiling and the fine grain.
 #[derive(Default)]
 struct NatEnv {
     level: Option<NaturalGround>,
     edges: Option<bool>,
     tone: Option<bool>,
+    paths: Option<bool>,
+    path_w: Option<f32>,
+    path_soft: Option<f32>,
+    detail: Option<bool>,
     s: Option<f32>,
     shore: Option<f32>,
     freq: Option<f32>,
     h: Option<f32>,
     tone_amp: Option<f32>,
     tone_period: Option<f32>,
+    warp: Option<f32>,
+    warp_freq: Option<f32>,
+    fine: Option<f32>,
+    fine_scale: Option<f32>,
 }
 
 fn natural_env() -> &'static NatEnv {
@@ -420,6 +460,8 @@ fn natural_env() -> &'static NatEnv {
                 let has = |name: &str| list.split(',').any(|s| s.trim() == name);
                 e.edges = Some(has("edges"));
                 e.tone = Some(has("tone"));
+                e.paths = Some(has("paths"));
+                e.detail = Some(has("detail"));
             }
         }
         let num = |name: &str| std::env::var(name).ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite());
@@ -429,6 +471,12 @@ fn natural_env() -> &'static NatEnv {
         e.h = num("RAZDOR_NAT_H");
         e.tone_amp = num("RAZDOR_NAT_TONE");
         e.tone_period = num("RAZDOR_NAT_TONE_PERIOD");
+        e.path_w = num("RAZDOR_NAT_PATH_W");
+        e.path_soft = num("RAZDOR_NAT_PATH_SOFT");
+        e.warp = num("RAZDOR_NAT_DETAIL_WARP");
+        e.warp_freq = num("RAZDOR_NAT_DETAIL_WARP_FREQ");
+        e.fine = num("RAZDOR_NAT_DETAIL_AMP");
+        e.fine_scale = num("RAZDOR_NAT_DETAIL_SCALE");
         e
     })
 }
@@ -444,7 +492,15 @@ pub fn natural_look() -> NatLook {
     let mut look = level.look();
     look.edges = env.edges.unwrap_or(look.edges);
     look.tone = env.tone.unwrap_or(look.tone);
+    look.paths = env.paths.unwrap_or(look.paths);
+    look.detail = env.detail.unwrap_or(look.detail);
     let t = &mut look.tune;
+    if let Some(v) = env.path_w {
+        t.path_w = v.clamp(0.05, 0.5);
+    }
+    if let Some(v) = env.path_soft {
+        t.path_soft = v.clamp(0.01, 0.3);
+    }
     if let Some(v) = env.s {
         t.s = v.clamp(0.0, 0.45);
     }
@@ -462,6 +518,18 @@ pub fn natural_look() -> NatLook {
     }
     if let Some(v) = env.tone_period {
         t.tone_period = v.max(0.5);
+    }
+    if let Some(v) = env.warp {
+        t.warp = v.clamp(0.0, 2.0);
+    }
+    if let Some(v) = env.warp_freq {
+        t.warp_freq = v.max(0.0);
+    }
+    if let Some(v) = env.fine {
+        t.fine = v.clamp(0.0, 0.5);
+    }
+    if let Some(v) = env.fine_scale {
+        t.fine_scale = v.clamp(0.05, 4.0);
     }
     look
 }
@@ -550,6 +618,9 @@ struct MapTextures {
     flow: Texture2D,
     /// The live water's shore (`bank_texels`): the distance from the bank, and the wide water.
     bank: Texture2D,
+    /// The winding paths' distance (`paths_texels`); a single zero texel when the map has no bake (`paths_baked` false).
+    paths: Texture2D,
+    paths_baked: bool,
     /// Razdor's weather masks (`weather::mask_texels`): snow, swamp rain, heat and ash; the lowland rain.
     weather: Texture2D,
     lowland: Texture2D,
@@ -608,12 +679,20 @@ pub fn flow_texels(codes: &[u8], flow: &[(f32, f32)], speed: &[f32]) -> Vec<u8> 
 
 /// The live water's shore as RGBA8 bytes, one texel per cell (row by row), baked once per map: red is the cell's
 /// distance from the bank in steps (`water::bank_distance`, up to 8: 255 is 8 or more), green 255 on the wide water
-/// (`water::wide_water`, a lake or the sea) and 0 elsewhere; linear, so the waves run soft.
-pub fn bank_texels(bank: &[u32], wide: &[bool]) -> Vec<u8> {
+/// (`water::wide_water`, a lake or the sea) and 0 elsewhere; linear, so the waves run soft. Blue is `safe` (255 where
+/// no cell of the 3×3 block is blocked, `road_bake::safe_cells`): the winding paths narrow only there.
+pub fn bank_texels(bank: &[u32], wide: &[bool], safe: &[u8]) -> Vec<u8> {
     bank.iter()
         .zip(wide)
-        .flat_map(|(&d, &w)| [((d.min(8) as f32) / 8.0 * 255.0).round() as u8, if w { 255 } else { 0 }, 0, 255])
+        .zip(safe)
+        .flat_map(|((&d, &w), &sf)| [((d.min(8) as f32) / 8.0 * 255.0).round() as u8, if w { 255 } else { 0 }, sf, 255])
         .collect()
+}
+
+/// The winding paths' distance as RGBA8 bytes (`road_bake::bake_for_map`): red the distance, one texel per texel of the
+/// bake (row by row), linear. Managed RGBA, as the other per-map textures (the single-channel formats are not managed).
+pub fn paths_texels(dist: &[u8]) -> Vec<u8> {
+    dist.iter().flat_map(|&d| [d, d, d, 255]).collect()
 }
 
 /// Whether cell `i` (row by row) lies on the map's outer ring.
@@ -847,7 +926,7 @@ fn make_blended_material(fragment: &str, uniforms: &[(&str, UniformType)], textu
 }
 
 /// The textures the neighbours shader declares (every variant declares the same list).
-const NEW_TEXTURES: [&str; 6] = ["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank"];
+const NEW_TEXTURES: [&str; 7] = ["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank", "Paths"];
 
 /// One variant of the neighbours shader (`neighbours.glsl`): the blocks a material holds. A draw picks the variant
 /// that holds only the blocks it uses, so the ground pass carries no water code and no fog, and the unlit and the
@@ -871,6 +950,10 @@ struct Variant {
     edges: bool,
     /// The meadow tone (`NAT_TONE`, «Сильно»): a low-frequency tint on the land.
     tone: bool,
+    /// The winding paths (`NAT_PATHS`, «Сильно»): the roads narrow to paths in the mixed quads.
+    paths: bool,
+    /// The land textures' anti-tiling and the fine grain (`NAT_DETAIL`, «Улучшенная земля»).
+    detail: bool,
 }
 
 impl Variant {
@@ -884,6 +967,8 @@ impl Variant {
             | u16::from(self.cheap) << 5
             | u16::from(self.edges) << 6
             | u16::from(self.tone) << 7
+            | u16::from(self.paths) << 8
+            | u16::from(self.detail) << 9
     }
 }
 
@@ -891,14 +976,16 @@ impl Variant {
 /// and the sharp sampling filled in.
 fn variant_text(v: Variant) -> String {
     let defines = format!(
-        "#define LIVE_WATER {}\n#define WATER_CODE {}\n#define OVERLAY_PASS {}\n#define EDGE_MIST {}\n#define CHEAP_GROUND {}\n#define NAT_EDGES {}\n#define NAT_TONE {}\n",
+        "#define LIVE_WATER {}\n#define WATER_CODE {}\n#define OVERLAY_PASS {}\n#define EDGE_MIST {}\n#define CHEAP_GROUND {}\n#define NAT_EDGES {}\n#define NAT_TONE {}\n#define NAT_PATHS {}\n#define NAT_DETAIL {}\n",
         u8::from(v.live),
         u8::from(v.water),
         u8::from(v.overlay),
         u8::from(v.mist),
         u8::from(v.cheap),
         u8::from(v.edges),
-        u8::from(v.tone)
+        u8::from(v.tone),
+        u8::from(v.paths),
+        u8::from(v.detail)
     );
     let precision = if v.mediump { "mediump" } else { "highp" };
     NEW_FRAGMENT
@@ -924,7 +1011,7 @@ impl TerrainLayer {
         if opts.new_shader {
             // The full variant (every block) is made at start: it proves the shader compiles (else the old one is used).
             // Its mediump twin proves option 4's text; the other variants are made on their first draw (`material`).
-            let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false };
+            let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false, paths: true, detail: true };
             match make_variant(full) {
                 Ok(m) => variants.push((full.key(), Some(m))),
                 Err(e) => razdor::diag!("terrain shader: {e}"),
@@ -1021,8 +1108,23 @@ impl TerrainLayer {
         // The map's edge is not a shore: the water on the border is not wide here, so no wave runs along it (the
         // off-map land makes its bank distance, which the speed uses, but a wave there would be a seam).
         let wide_shore: Vec<bool> = wide.iter().enumerate().map(|(i, &wd)| wd && !is_map_edge(i, w, h)).collect();
-        let bank_tex = Texture2D::from_rgba8(w as u16, h as u16, &bank_texels(&bank, &wide_shore));
+        let safe = road_bake::safe_cells(codes, w, h);
+        let bank_tex = Texture2D::from_rgba8(w as u16, h as u16, &bank_texels(&bank, &wide_shore, &safe));
         bank_tex.set_filter(FilterMode::Linear);
+        // The winding paths: the road's baked distance field, one texel per texel of the bake (`bake_for_map`).
+        let baked = road_bake::bake_for_map(codes, w, h);
+        let (paths_tex, paths_bytes) = match &baked {
+            Some(b) => {
+                let (tw, th) = ((b.cells_w * b.texels_per_cell) as u16, (b.cells_h * b.texels_per_cell) as u16);
+                let t = Texture2D::from_rgba8(tw, th, &paths_texels(&b.dist));
+                t.set_filter(FilterMode::Linear);
+                (t, razdor::mem_probe::texture_bytes(u32::from(tw), u32::from(th), 4))
+            }
+            None => {
+                let t = Texture2D::from_rgba8(1, 1, &[0, 0, 0, 255]);
+                (t, 0)
+            }
+        };
         let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes);
         // Nearest: the shader blends the four cells itself (`weather::mask4`).
         let weather = Texture2D::from_rgba8(w as u16, h as u16, &biome_bytes);
@@ -1030,9 +1132,9 @@ impl TerrainLayer {
         let lowland = Texture2D::from_rgba8(w as u16, h as u16, &lowland_bytes);
         lowland.set_filter(FilterMode::Nearest);
         let weather_boxes = super::weather::mask_boxes(&biome_bytes, &lowland_bytes, w as usize);
-        razdor::mem_probe::set_texture("terrain layers", 5 * razdor::mem_probe::texture_bytes(w, h, 4) + razdor::mem_probe::texture_bytes(w + 2, h + 2, 4));
+        razdor::mem_probe::set_texture("terrain layers", 5 * razdor::mem_probe::texture_bytes(w, h, 4) + razdor::mem_probe::texture_bytes(w + 2, h + 2, 4) + paths_bytes);
         let weather_seed = super::weather::map_seed(w, h, codes);
-        let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, weather, lowland, weather_boxes, weather_seed };
+        let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, paths: paths_tex, paths_baked: baked.is_some(), weather, lowland, weather_boxes, weather_seed };
         // The keyed entries hold no copy of the codes and the flow (nothing to compare then).
         let (kept_codes, kept_flow) = if gen.is_some() { (Vec::new(), Vec::new()) } else { (codes.to_vec(), flow.to_vec()) };
         *cache = Some(CellTextures { codes: kept_codes, flow: kept_flow, gen, flow_len: flow.len(), size: (w, h), tex: tex.clone() });
@@ -1193,20 +1295,33 @@ impl TerrainLayer {
         let cheap = cheap_path(self.opts.new_shader, self.opts.cheap, blend_on());
         // The natural look needs the blend: the cheap ground (blend off) draws without it.
         let nat = natural_look();
-        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on, cheap, edges: nat.edges && !cheap, tone: nat.tone && !cheap };
+        // The maps are made first: the winding paths need the map's bake (none on a map over 1024 cells).
+        let maps = self.cells(codes, w, h, flow, gen);
+        let variant = Variant {
+            mediump: self.opts.mediump,
+            live: water_on && water::live(),
+            water: water_on,
+            overlay: mode == Mode::Overlay,
+            mist: edge_on,
+            cheap,
+            edges: nat.edges && !cheap,
+            tone: nat.tone && !cheap,
+            paths: nat.paths && !cheap && maps.paths_baked,
+            detail: nat.detail && !cheap,
+        };
         let Some(m) = self.material(variant) else { return };
         let new = self.opts.new_shader;
         // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
         if super::world_view::trailer_active() {
             self.atlas.set_filter(FilterMode::Nearest);
         }
-        let maps = self.cells(codes, w, h, flow, gen);
         gl_use_material(&m);
         if new {
             m.set_texture("Neighbours", maps.neighbours.clone());
             m.set_texture("Flow", maps.flow.clone());
             m.set_texture("Noise", self.noise.clone());
             m.set_texture("Bank", maps.bank.clone());
+            m.set_texture("Paths", maps.paths.clone());
         } else {
             m.set_texture("Cells", maps.cells.clone());
         }
@@ -1248,6 +1363,14 @@ impl TerrainLayer {
         m.set_uniform("NatH", nat.h);
         m.set_uniform("NatTone", nat.tone);
         m.set_uniform("NatTonePeriod", nat.tone_period);
+        // The winding paths: the half-width, the softness and the view's screen pixels per cell (the fade by zoom).
+        m.set_uniform("NatPathW", nat.path_w);
+        m.set_uniform("NatPathSoft", nat.path_soft);
+        m.set_uniform("PathPx", dest.w / (view.z - view.x));
+        m.set_uniform("NatWarp", nat.warp);
+        m.set_uniform("NatWarpFreq", nat.warp_freq);
+        m.set_uniform("DetAmp", nat.fine);
+        m.set_uniform("DetScale", nat.fine_scale);
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
@@ -1733,8 +1856,8 @@ mod variant_tests {
         out
     }
 
-    const GROUND: Variant = Variant { mediump: false, live: false, water: false, overlay: false, mist: false, cheap: false, edges: false, tone: false };
-    const OVERLAY_LIVE_MIST: Variant = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false };
+    const GROUND: Variant = Variant { mediump: false, live: false, water: false, overlay: false, mist: false, cheap: false, edges: false, tone: false, paths: false, detail: false };
+    const OVERLAY_LIVE_MIST: Variant = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false, paths: false, detail: false };
 
     #[test]
     fn the_ground_pass_holds_the_land_only() {
@@ -1756,7 +1879,7 @@ mod variant_tests {
 
     #[test]
     fn the_full_pass_without_live_water_has_no_live_code_and_no_discard() {
-        let full = Variant { mediump: false, live: false, water: true, overlay: false, mist: false, cheap: false, edges: false, tone: false };
+        let full = Variant { mediump: false, live: false, water: true, overlay: false, mist: false, cheap: false, edges: false, tone: false, paths: false, detail: false };
         let t = preprocess(&variant_text(full));
         assert!(t.contains("texture2D(Water"), "the water stage is drawn");
         for gone in ["discard;", "texture2D(Noise", "texture2D(Flow", "shore_foam(", "wnoise(", "vnoise(", "Edge.x"] {
@@ -1775,7 +1898,20 @@ mod variant_tests {
             cheap: bits & 32 != 0,
             edges: bits & 64 != 0,
             tone: bits & 128 != 0,
+            paths: bits & 256 != 0,
+            detail: bits & 512 != 0,
         }
+    }
+
+    #[test]
+    fn the_detail_block_is_out_unless_its_flag_is_set() {
+        let plain = preprocess(&variant_text(GROUND));
+        for gone in ["det_land(", "det_px", "det_offset(", "DetAmp > 0.0", "NatWarp;"] {
+            assert!(!plain.contains(gone), "the default ground holds `{gone}`");
+        }
+        let detail = preprocess(&variant_text(Variant { detail: true, ..GROUND }));
+        assert!(detail.contains("det_offset(p)") && detail.contains("mod(px + det_px * det_land(code), Tile)") && detail.contains("DetAmp > 0.0"), "the detail block is in");
+        assert!(detail.contains("float nat_noise(") && !detail.contains("nat_weights(p, f, k)"), "the anti-tiling reads the noise alone");
     }
 
     #[test]
@@ -1792,7 +1928,7 @@ mod variant_tests {
 
     #[test]
     fn every_variant_text_is_fully_assembled() {
-        for bits in 0u16..256 {
+        for bits in 0u16..512 {
             let v = of_bits(bits);
             let v = Variant { water: v.water || v.live || v.overlay, ..v };
             let t = variant_text(v);
@@ -1805,7 +1941,7 @@ mod variant_tests {
     #[test]
     fn variant_keys_are_distinct() {
         let mut seen = std::collections::HashSet::new();
-        for bits in 0u16..256 {
+        for bits in 0u16..512 {
             let v = of_bits(bits);
             assert!(seen.insert(v.key()), "{v:?}: a key repeats");
         }
@@ -1829,6 +1965,14 @@ mod natural_tests {
         assert_eq!(look.tune.h, 0.5, "the ramp's half-width");
         assert_eq!(look.tune.s, 0.30, "the land's bend");
         assert_eq!(look.tune.shore, 0.15, "the shore's bend");
+    }
+
+    #[test]
+    fn soft_and_strong_both_anti_tile_and_only_strong_grains() {
+        assert!(NaturalGround::Soft.look().detail && NaturalGround::Strong.look().detail, "both levels stop the tiling");
+        assert!(!NaturalGround::Off.look().detail, "off keeps the tiling");
+        assert_eq!(NaturalGround::Soft.look().tune.fine, 0.0, "no grain in «Мягко»");
+        assert!(NaturalGround::Strong.look().tune.fine > 0.0, "the grain in «Сильно»");
     }
 
     #[test]
