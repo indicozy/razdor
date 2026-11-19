@@ -646,7 +646,7 @@ pub fn left_edge() -> f32 {
 
 /// Draws the menu; returns what was picked. `no_install`: the install was not found, so the
 /// phones' not-found block is drawn beside the buttons.
-pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Pick> {
+pub fn frame(audio: &mut super::audio::Settings, no_install: bool, mods: &[(String, razdor::hub::Text)], active: Option<&str>, busy: bool) -> Option<Pick> {
     BLOCK_RESERVE.with(|r| r.set(if no_install { super::screens::upright_reserve(chrome::k()) } else { 0.0 }));
     // Sideways on a phone the menu takes the tile layout, unless the not-found block needs the
     // left column (no install): then the corner links stay, as before.
@@ -655,7 +655,9 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     let mod_choice = (!mods.is_empty()).then(|| super::new_game::mod_choice(mods, active, busy));
     backdrop();
     let mut pick = None;
-    let hot = if input_blocked() { None } else { hot_button(crate::ui::widgets::pointer().into(), BUTTONS.len()) };
+    // The holiday question (once a season) is a modal over the menu: no button under it.
+    let asking = holiday_asking(audio, busy);
+    let hot = if input_blocked() || asking { None } else { hot_button(crate::ui::widgets::pointer().into(), BUTTONS.len()) };
     frame_probe::time(frame_probe::Stage::MenuButtons, || {
         for (i, (p, label)) in BUTTONS.iter().enumerate() {
             if oval(i, tr(label), hot) {
@@ -705,8 +707,77 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     if key(KeyCode::Escape) && !crate::ui::input::pad_key_pressed(KeyCode::Escape) {
         pick = Some(Pick::Exit);
     }
+    if asking {
+        holiday_question(audio);
+        pick = None;
+    }
     SIDE_TILES.with(|t| t.set(false));
     pick
+}
+
+/// Whether the holiday question is up this frame: today is in a season not answered yet, and no
+/// other dialog is open (`busy`: a mod or an import is being done). A snapshot run asks only with
+/// `RAZDOR_HOLIDAY_ASK=1`.
+fn holiday_asking(audio: &super::audio::Settings, busy: bool) -> bool {
+    if busy || super::game_import::busy() {
+        return false;
+    }
+    if super::clock::is_snapshot() {
+        return std::env::var("RAZDOR_HOLIDAY_ASK").is_ok_and(|v| v.trim() == "1");
+    }
+    super::holiday::holiday_question_due(audio, super::holiday::today())
+}
+
+/// The holiday question's window: «Включить новогодний вид?» with its one-line explanation and
+/// «Да» / «Нет». Either answer is kept for this season (`holiday_asked`); «Да» turns the look on.
+/// Esc and the window's close count as «Нет». The settings are written by the audio's frame.
+fn holiday_question(audio: &mut super::audio::Settings) {
+    let phone = super::display::dp_px();
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        let k = chrome::k();
+        // One dp in screen pixels on a phone, the desktop's interface scale otherwise.
+        let unit = phone.unwrap_or(k);
+        let (sw, sh) = (screen_width(), screen_height());
+        let w = if phone.is_some() { (sw * 0.9).min(440.0 * unit) } else { 440.0 * k };
+        let title = tr("Holiday look");
+        let question = tr("Turn on the holiday look?");
+        let explain = tr("Snow, garlands and a Christmas menu theme. Style only; you can change it in Settings.");
+        let q_size = 18.0 * unit;
+        let e_size = 16.0 * unit;
+        let pad = 22.0 * unit;
+        let inner = w - 2.0 * pad;
+        let lines = wrap(explain, inner, e_size);
+        let btn_h = 44.0 * unit;
+        let title_h = 46.0 * unit;
+        // The question's baseline sits one question-size under the title; each explanation line
+        // is 1.35 of its size lower; the buttons come 18 under the last line's baseline.
+        let body_h = q_size * 1.6 + lines.len() as f32 * e_size * 1.35;
+        let h = title_h + body_h + 18.0 * unit + btn_h + pad + 30.0 * unit;
+        let r = Rect::new((sw - w) / 2.0, ((sh - h) / 2.0).max(0.0), w, h);
+        let (r, closed) = chrome::window(r, title, chrome::Skin::Marble, true);
+        let mut y = r.y + title_h + q_size;
+        chrome::shadow_text(question, r.x + pad, y, q_size, chrome::CREAM);
+        y += q_size * 0.6;
+        for line in &lines {
+            y += e_size * 1.35;
+            chrome::shadow_text(line, r.x + pad, y, e_size, chrome::CREAM);
+        }
+        let by = r.y + title_h + body_h + 18.0 * unit;
+        let gap = 14.0 * unit;
+        let bw = (inner - gap) / 2.0;
+        let yes = button_sounding(r.x + pad, by, bw, btn_h, tr("Yes"), true, Cue::MenuPress) || key(KeyCode::Y);
+        let no = button_sounding(r.x + pad + bw + gap, by, bw, btn_h, tr("No"), true, Cue::MenuPress) || key(KeyCode::N) || key(KeyCode::Escape) || closed;
+        if yes || no {
+            cue(Cue::MenuPress);
+            let today = super::holiday::today();
+            if let Some(year) = super::holiday::season(today.0, today.1, today.2) {
+                audio.holiday_asked = Some(year);
+            }
+            if yes {
+                audio.map_holiday = true;
+            }
+        }
+    });
 }
 
 /// The promo's picture and caption colours: a warm cream, the gold when it is pointed at.

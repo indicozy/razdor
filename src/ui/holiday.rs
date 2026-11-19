@@ -14,6 +14,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use razdor::local;
 use razdor::rules::marks::civil;
 
+use super::audio::Settings;
+
 local! {
     /// The setting, taken in every frame (`set_pref`).
     static ON: Cell<bool> = Cell::new(false);
@@ -59,6 +61,12 @@ pub fn should_ask(asked: Option<i64>, today: (i64, u32, u32)) -> bool {
     }
 }
 
+/// Whether the main menu asks the holiday question now: today is in a season the settings do not
+/// have an answer for yet (`holiday_asked`).
+pub fn holiday_question_due(s: &Settings, today: (i64, u32, u32)) -> bool {
+    should_ask(s.holiday_asked, today)
+}
+
 /// Today's date (UTC) as (year, month, day).
 pub fn today() -> (i64, u32, u32) {
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -83,6 +91,15 @@ mod tests {
         assert!(!should_ask(Some(2026), (2027, 1, 3)), "the same season, answered: not again");
         assert!(should_ask(Some(2026), (2027, 12, 1)), "the next December: asked again");
         assert!(!should_ask(None, (2026, 7, 1)), "outside the season: no question");
+    }
+
+    #[test]
+    fn the_holiday_question_is_due_once_per_season() {
+        let mut s = Settings::default();
+        assert!(holiday_question_due(&s, (2026, 12, 1)), "the first December visit asks");
+        s.holiday_asked = Some(2026);
+        assert!(!holiday_question_due(&s, (2027, 1, 3)), "answered for this season: not again");
+        assert!(!holiday_question_due(&s, (2026, 7, 1)), "July: no question");
     }
 
     #[test]
