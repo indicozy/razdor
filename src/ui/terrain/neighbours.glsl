@@ -62,6 +62,10 @@ uniform sampler2D Flow;
 uniform vec3 Sky;
 // The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
 uniform sampler2D Noise;
+// The holiday look (`holiday.glsl`): Holiday and HolidayCheap are 0 or 1; SnowByCode is the snow share of each code.
+uniform float Holiday;
+uniform float HolidayCheap;
+uniform sampler2D SnowByCode;
 #if NAT_PATHS
 // The winding paths' tuning (`terrain::natural_look`): the path's half-width in cells (`NatPathW`, 0.40) and its
 // softness (`NatPathSoft`, 0.45); `PathPx` is the view's screen pixels per cell (the narrowing fades out below ~12).
@@ -265,6 +269,8 @@ vec2 det_offset(vec2 p) {
 }
 #endif
 
+// @HOLIDAY@
+
 @CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
 #if NAT_DETAIL
@@ -395,6 +401,8 @@ void main() {
         col = mix(top, bottom, fy);
     }
 #endif
+// The winding paths' bare share (`bare`, below): the snow keeps off the road.
+float bare = 0.0;
 #if NAT_PATHS
     // The winding paths («Улучшенная земля» Сильно): in a mixed quad (road codes and others), the road narrows to a path
     // through the road cells' centres, its edge soft and its width NatPathW (noise 0.04, `nat_noise`). The colour is the
@@ -436,6 +444,7 @@ void main() {
                     : (nr.x * g0 + nr.y * g1 + nr.z * g2 + nr.w * g3) / dot(nr, vec4(1.0));
                 @CP@ vec3 road = ground(4.0, px, w, sea);
                 col = mix(col, mix(land, road, pm), pg);
+                bare = pg * pm;
             }
         }
     }
@@ -464,6 +473,13 @@ void main() {
             vec3 grain = vec3(1.0 + DetAmp * (bn + 0.5 * hn), 1.0 + DetAmp * bn, 1.0 + DetAmp * (bn - 0.5 * hn));
             col = mix(col, col * grain, dland);
         }
+    }
+#endif
+    // The holiday look: the snow over the ground, the ice over the water (`holiday.glsl`, the water's draws only).
+    col = holiday_ground(col, k, fx, fy, p, bare);
+#if WATER_CODE
+    if (Holiday > 0.5 && WaterOn > 0.5) {
+        col = holiday_ice(col, water_blend(k, fx, fy));
     }
 #endif
 #if LIVE_WATER
