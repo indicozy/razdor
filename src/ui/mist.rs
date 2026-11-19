@@ -142,9 +142,9 @@ void main() {
 
 /// The noise texture's side in texels: `NOISE_LATTICE` lattice cells wide, 16 texels a cell. Finer
 /// than the cloud needs, so the texture's bilinear creases stay below what a pixel shows.
-const NOISE_TEXELS: usize = 1024;
+pub(super) const NOISE_TEXELS: usize = 1024;
 /// The noise's period in lattice cells (the texture repeats every this many).
-const NOISE_LATTICE: usize = 64;
+pub(super) const NOISE_LATTICE: usize = 64;
 
 /// A lattice cell's hash in [0, 1) (the bake's noise; deterministic, so the look is the same every run).
 fn lattice_hash(x: i32, y: i32, seed: u32) -> f32 {
@@ -189,7 +189,7 @@ fn blur(f: &[f32], n: usize) -> Vec<f32> {
 
 /// The noise texture's RGBA bytes: red is one periodic value noise, green another (independent seeds),
 /// blurred once and stretched to the full range over the texture; blue and alpha are unused (255).
-fn bake_noise() -> Vec<u8> {
+pub(super) fn bake_noise() -> Vec<u8> {
     let (n, per) = (NOISE_TEXELS, NOISE_TEXELS / NOISE_LATTICE);
     let mut out = vec![255u8; n * n * 4];
     for c in 0..2 {
@@ -215,7 +215,7 @@ local! {
 
 /// The noise texture (baked once, repeating: the field is periodic in `NOISE_LATTICE` cells, and mipmapped
 /// for the distant ground, where a pixel spans several cells).
-fn noise_texture() -> Texture2D {
+pub(super) fn noise_texture() -> Texture2D {
     NOISE.with(|cell| {
         cell.borrow_mut()
             .get_or_insert_with(|| {

@@ -1,11 +1,11 @@
 ---
 title: Light, mist, water and weather
-description: The map look settings Razdor adds to the original (lighting and shadows, mist instead of black, moving water, weather, the living map) and the 2.5D buildings that stand on their ground.
+description: The map look settings Razdor adds to the original (lighting and shadows, mist instead of black, moving water, weather, the living map, natural ground, map decorations and cloud shadows) and the 2.5D buildings that stand on their ground.
 sidebar:
   order: 2
 ---
 
-The **Map** tab of the settings window has new rows that the original does not have: **Lighting**, **Mist instead of black**, **Moving water**, **Weather** and **Living map**. All of them are off by default, so a new install looks like Discord Times. **Ground blending** is on by default: it is the ground's usual look (see below).
+The **Map** tab of the settings window has new rows that the original does not have: **Lighting**, **Mist instead of black**, **Moving water**, **Weather**, **Living map**, **Cloud shadows**, **Map decorations** and **Natural ground**. All of them are off by default, so a new install looks like Discord Times. **Ground blending** is on by default: it is the ground's usual look (see below). **Natural ground** works only with it.
 
 These settings change only how the adventure map looks. The rules, what the player can see and do, movement, battles, the AI and saves work as in the original. Battles and full-screen windows keep the original look.
 
@@ -60,6 +60,15 @@ To see the day and night change without waiting, choose **"Game clock"** and pla
 The **"Ground blending"** setting (the "Map" tab, the row before "Mist instead of black", "On" by default) decides how neighbouring cells of ground meet. **"On"**: the ground blends smoothly from one cell to the next, as before. **"Off"**: each cell is drawn in its own colour with a hard edge, and the map draws faster.
 
 Turn it off on weak phones if the map is slow. The cost: the edges of roads, fields and shores become stepped. Nothing else on the map changes, and the setting is in none of the "Graphics quality" presets: "Low" stays "Low" with it off.
+
+## Natural ground
+
+The **"Natural ground"** row (off by default) changes the edges of fields, shores and roads. They no longer follow the cell grid. They bend in smooth curves.
+
+* **"Soft"**: the edges bend.
+* **"Strong"**: at the shores the bends are more visible, and the meadows get soft lighter and darker patches.
+
+This is only the look: cells, passability and water stay as in the original. Without **"Ground blending"**, the row changes nothing.
 
 ## Mist instead of black
 
@@ -120,6 +129,12 @@ The weather changes over time: each game day brings its own, and the land decide
 
 The weather over the map: here, the cloud shadows show.
 
+## Cloud shadows
+
+The **"Cloud shadows"** row (off by default) puts soft cloud shadows on the map. They drift slowly across it, and faster while the hero walks. The row works on its own, without **"Weather"**. The weather has cloud shadows too: that is its own look.
+
+Without **"Map animation"**, the shadows stand still.
+
 ## Living map
 
 The **"Living map"** switch brings the buildings and the sky to life on the explored part of the map:
@@ -135,6 +150,15 @@ The mill sails do not turn yet: the building pictures have no reliable place for
 Chimney smoke, waving flags and birds over the map.
 
 **Far zoom.** When the map is zoomed all the way out, the flags, the smoke and the birds do not animate: at that scale they cannot be seen anyway. Very small objects are not drawn, slightly larger ones fade in smoothly.
+
+## Map decorations
+
+The **"Map decorations"** row (off by default) adds small sprites from the game itself to the map: grass, flowers, reeds by the water and bushes at the edge of a forest.
+
+* **"Few"**: fewer decorations.
+* **"Normal"**: full density.
+
+The game places the decorations itself. They are not written into the map, do not affect movement, and never lie on roads, buildings or bridges. The same map always gets the same decorations.
 
 ## Buildings in 2.5D
 
@@ -157,8 +181,8 @@ The **"Depth model for mods"** row appears on the **"Map"** tab only in 2.5D, an
 ## How to turn it on
 
 1. Open the **"Sound, graphics and gameplay settings"** window and choose the **"Map"** tab.
-2. Find the **"Lighting"**, **"Mist instead of black"**, **"Moving water"**, **"Weather"** and **"Living map"** rows. The **"Water animation rate"** and **"Water quality"** rows appear under **"Moving water"** when it is on.
-3. A click on **"Lighting"** cycles through its values. For the other switches the values are **"Off"** and **"On"**.
+2. Find the **"Lighting"**, **"Mist instead of black"**, **"Moving water"**, **"Weather"**, **"Living map"**, **"Cloud shadows"**, **"Map decorations"** and **"Natural ground"** rows. The **"Water animation rate"** and **"Water quality"** rows appear under **"Moving water"** when it is on.
+3. A click on a row cycles through its values. **"Lighting"**, **"Mist instead of black"**, **"Natural ground"** and **"Map decorations"** have several values. The other rows have two: **"Off"** and **"On"**.
 4. For **"Real-time cycle"** the **"Day length"** row appears, and for **"Fixed hour"** the **"Hour"** row. Under **"Lighting"**, the **"Shadows"** and **"Light quality"** rows also appear.
 5. Press **"Apply"** to keep the changes.
 
@@ -168,4 +192,4 @@ The **"Map"** tab with the new rows. All of them are set to "Off".
 
 ## If the map is slow
 
-On a weak computer or a phone, turn off the switches you do not need: the light with its shadows (or set the quality to "Low"), the mist, the water, the weather and the living map. For a faster map there are also the **"Map resolution"** row and the **"Frame rate cap"** row on the same tab. With the settings off, the map is drawn as before.
+On a weak computer or a phone, turn off the switches you do not need: the light with its shadows (or set the quality to "Low"), the mist, the water, the weather, the living map, the cloud shadows, the decorations and the natural ground. For a faster map there are also the **"Map resolution"** row and the **"Frame rate cap"** row on the same tab. With the settings off, the map is drawn as before.

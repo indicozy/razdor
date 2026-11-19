@@ -47,6 +47,7 @@ use super::shadow;
 use super::terrain;
 use super::water;
 use super::weather;
+use super::cloud_shadow;
 use super::saves::{self, Back, LoadView, SaveView};
 
 /// The flat view's sprite fast path (option f, `RAZDOR_FLAT_FAST`).
@@ -55,6 +56,8 @@ mod flat_fast;
 mod object_records;
 /// The 2.5D view's sprite fast path (option f, stage 2, `RAZDOR_DEPTH_FAST`).
 mod depth_fast;
+/// Razdor's decorations of the map's kit (`RAZDOR_DECOR`): draw-only, drawn in the object pass.
+pub mod decor;
 use super::story;
 use super::widgets::*;
 use super::view25::{self, TiltCamera};
@@ -3510,6 +3513,8 @@ fn detail_visibility(picture: Rect, dpi: f32) -> f32 {
 enum Drawable {
     /// A standing object (its index in the map's objects) and its foot (computed once, for the sort key and the draw).
     Object(u32, Vec2),
+    /// A decoration (`decor`): its index in the decoration list and its foot.
+    Decor(usize, Vec2),
     Building(usize),
     /// A building drawn as one group of cards (2.5D, [`card_building`]): location. The group sorts by the building's
     /// foot as one item, and stands as one billboard about that foot ([`draw_building_group`]).
@@ -5892,6 +5897,18 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
     if !tilted {
         OBJ_MEMO.with_borrow_mut(|m| *m = Some(ObjMemo { key, rows, seen_row, entries }));
     }
+    // Razdor's decorations (`decor`, `RAZDOR_DECOR=1`): the map kit's small sprites, pushed as the map's own objects
+    // (the same seen test, the same sort key; their pictures, sway and fog are the objects' own). Off: none is pushed.
+    let decor = decor::for_map(game);
+    if let Some(list) = decor.as_ref() {
+        for j in decor::rows(list, r0 - up, r1 + below) {
+            let o = &list[j];
+            if seen(o) {
+                let foot = object_foot(o, cam);
+                items.push((sprite_key(cam, o.tile, foot, object_layer(o.class)), Drawable::Decor(j, foot)));
+            }
+        }
+    }
     // Stable: figures sharing a cell keep the order they were pushed in.
     items.sort_by_key(|a| a.0);
     // One sharp session for the pass: its art shares the material switch (see `sharp::session`). With the
@@ -5909,10 +5926,9 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
         let mut fast = flat_fast::Pass::begin(map, art, cam, &ctx);
         // The 2.5D view's objects on its fast path (`depth_fast`); the flat view's and the 2.5D's are never both on.
         let mut deep = depth_fast::Pass::begin(map, art, cam, &ctx);
-        let old_object = |i: u32, foot: Vec2| {
+        let old_object = |o: &Decoration, foot: Vec2| {
             // Razdor's (the owner's request, 2026-11-11): an object too small to see is not drawn, and one
             // just above that fades out (`detail_visibility`); the flat view fades it through `SPRITE_VIS`.
-            let o = &map.objects[i as usize];
             let picture = object_picture(o, art, cam);
             let detail = detail_visibility(picture, ctx.dpi);
             if detail > 0.0 {
@@ -5936,7 +5952,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                             // The check: the old path draws it, and its pieces are compared with the fast quad.
                             (Some(fp), _) if fp.checking() => {
                                 super::sharp::capture_start();
-                                old_object(*i, *foot);
+                                old_object(&map.objects[*i as usize], *foot);
                                 fp.check(*i, &super::sharp::capture_end());
                                 true
                             }
@@ -5945,7 +5961,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                             (None, Some(dp)) if dp.checking() => {
                                 super::sharp::capture_start();
                                 depth_fast::note_start();
-                                old_object(*i, *foot);
+                                old_object(&map.objects[*i as usize], *foot);
                                 let pieces = super::sharp::capture_end();
                                 dp.check(*i, *foot, &pieces, &depth_fast::note_end());
                                 true
@@ -5954,9 +5970,14 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
                             (None, None) => false,
                         };
                         if !handled {
-                            old_object(*i, *foot);
+                            old_object(&map.objects[*i as usize], *foot);
                         }
                     });
+                }
+                Drawable::Decor(j, foot) => {
+                    if let Some(list) = decor.as_ref() {
+                        old_object(&list[*j], *foot);
+                    }
                 }
                 Drawable::Building(i) => {
                     let l = &game.world.locations[*i];
@@ -7733,6 +7754,8 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     frame_probe::time(Stage::World, || {
         map_scale::draw(map_render_scale(), rgb(10, 12, 10), || {
             draw_world(game, assets, &cam, view.preview.as_ref().map(|p| p.1.as_slice()), show.as_ref(), hover, true, Veil { shows: &shows, now: show_now }, lit);
+            // The prototype's cloud shadows (`cloud_shadow`, `RAZDOR_CLOUD_SHADOWS=1`): the drifting shade on the world, before the fog.
+            draw_cloud_shadows(game, &cam);
             // Razdor's «Освещение» (off by default): the light over the world, before the flat fog, so the
             // fog's black stays black. With the mist on («Туман вместо черноты») the flat fog is a colour,
             // so the light goes over it too (the mist takes the night's tint). Off, the order is as before.
@@ -8277,6 +8300,36 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
         row_height: cam.grid.row_height(),
     };
     weather::draw(&pass);
+}
+
+/// The prototype's cloud shadows (`cloud_shadow`, `RAZDOR_CLOUD_SHADOWS=1`): the drifting shade over the explored
+/// map, multiplied onto the drawn world (the ground and what stands on it), before the fog and the light. Not in a
+/// bent view (its sprites are drawn in the ground's picture) and not under the windows' backdrops.
+fn draw_cloud_shadows(game: &Game, cam: &Camera) {
+    if !cloud_shadow::on() || cam.grid != Grid::Square8 || cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
+        return;
+    }
+    let map = &game.world.map;
+    let held = game.unshown_cells();
+    // The fog's shown darkness masks the shade: none on the unexplored land (the same texture the weather reads).
+    let fog = minimap::fog_layer_lit(&game.fog, &held).map(|(tex, _)| tex).filter(|_| game.fog.w == map.w && game.fog.h == map.h);
+    let projection = match cam.tilt {
+        None => weather::Projection::Flat { scale: cam.scale, offset: [(cam.origin.x - cam.view.x) / cam.scale, (cam.origin.y - cam.view.y) / cam.scale] },
+        Some(t) => match view25::ground_homography(&t.cam, cam.view) {
+            Some(h) => weather::Projection::Tilted { h },
+            None => return,
+        },
+    };
+    cloud_shadow::draw(&cloud_shadow::Pass {
+        fog: fog.as_ref(),
+        map: [map.w as f32, map.h as f32],
+        draw: [cam.draw.x, cam.draw.y, cam.draw.w, cam.draw.h],
+        projection,
+        row_height: cam.grid.row_height(),
+        now: super::map_anim::now(),
+        // The hero's walk (the path is being followed): the drift runs at its walking speed.
+        walking: game.moving(),
+    });
 }
 
 /// Razdor's «Живая вода» wakes (`water`, off by default): a sailing army in motion (and the hero's

@@ -53,6 +53,9 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Moving water** in additional settings (off by default): the water ripples, foam runs along the shores and waves roll up, glints shine on lakes and the sea, rivers flow and ships leave a wake. Only the view changes.
 * **Ground blending** in additional settings (on by default): turn it off on weak phones to draw the map faster; the edges of roads and fields become stepped. Only the view changes.
 * **Weather** in additional settings (off by default): snow over snowfields, rain over swamps, heat haze over deserts, ash over fire lands and cloud shadows. Only the view changes.
+* **Cloud shadows** in additional settings (off by default): soft shadows drift slowly over the map, faster while the hero walks. Only the view changes: [details](/razdor/wiki/en/differences/map-look/).
+* **Map decorations** in additional settings (off by default): grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites, "Few" or "Normal". Only the view changes: they do not affect movement and never lie on roads or buildings.
+* **Natural ground** in additional settings (off by default): the edges of fields, shores and roads bend in smooth curves. "Strong" adds tints to the meadows. Only the view changes. It works with "Ground blending".
 * **Hit shake** in the additional settings on the "Battle and army" tab (off by default): the battle field shakes briefly on a hit, more on a hard hit and when a unit falls. View only.
 * **Living map** in additional settings (off by default): smoke rises from the chimneys, flags wave and birds cross the map. Only the view changes.
 * **Extend the map past its edges** in additional settings (off, as in the original, where the area past the edges is black): a short stretch of ground goes on past the map's edges, then the same black fog as the unexplored map. Only the view changes: rules and paths stay as they are.

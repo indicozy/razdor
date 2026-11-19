@@ -577,6 +577,22 @@ Razdor's: none is the original's black fog of war; Simple is a plain mist; Cloud
 Ground blending = Смешивание земли
 Smooth transitions between the ground's cells. Turn it off on weak phones: the map draws faster, but the edges of roads and fields become stepped. = Плавные переходы между клетками земли. Выключите на слабых телефонах: карта рисуется быстрее, но края дорог и полей станут ступенчатыми.
 
+# Advanced settings: natural ground (Razdor's, off by default)
+Natural ground = Улучшенная земля
+Natural ground: off = Выкл
+Natural ground: soft = Мягко
+Natural ground: strong = Сильно
+Razdor's: uneven edges of fields, shores and roads; Strong also tints the meadows. Only the look: cells, passability and water stay the same. Does not work without «Ground blending». = Своё в Razdor: неровные края полей, берегов и дорог; в «Сильно» ещё и оттенки лугов. Только вид: клетки, проходимость и вода прежние. Не работает без «Смешивание земли».
+
+# Advanced settings: map decorations and cloud shadows (Razdor's, off by default)
+Map decorations = Украшения карты
+Map decor: off = Выкл
+Map decor: few = Мало
+Map decor: normal = Обычно
+Razdor's: grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites. Only the look: nothing is written into the map and nothing blocks the way. = Своё в Razdor: трава, цветы, камыш у воды и кусты у леса из спрайтов игры. Только вид: в карту не пишутся, на движение не влияют.
+Cloud shadows = Тени облаков
+Razdor's: soft cloud shadows drift slowly over the map, faster while the hero walks. Without «Map animation» they stand still. = Своё в Razdor: мягкие тени облаков медленно плывут по карте, быстрее, когда герой идёт. Без «Анимация карты» стоят на месте.
+
 # Advanced settings: moving water (Razdor's, off by default)
 Moving water = Живая вода
 Razdor's: the water ripples, foam runs along the shores, rivers flow and ships leave a wake. Style only. = Вода на карте рябит, у берегов бежит пена, реки текут, за кораблями остаётся след. Только вид.

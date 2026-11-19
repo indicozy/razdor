@@ -30,7 +30,7 @@ The map's buildings are in one file: `Graphics/Objects/Objects.ugs` in the game 
 
 Open "Sound, graphics and gameplay settings" and the **"Map"** tab.
 
-- Set **"Graphics quality"** to **"Custom settings"**. "Original" turns off the light, the living map, the weather, the mist and the moving water all at once, so you cannot see the building with light.
+- Set **"Graphics quality"** to **"Custom settings"**. "Original" turns off the light, the living map, the weather, the mist, the moving water, the natural ground, the decorations and the cloud shadows all at once, so you cannot see the building with light.
 - **"Map view"** cycles through: "Flat" → "2.5D" → "Third person" → "First person" → "Flat" again.
 - In **2.5D** a building stands as one whole picture, as in the flat view. Check that it stands in its place and is not cut off. Q and E turn the view by 45°: look at the building from every side.
 - **Third person** puts the camera behind the hero's back. The rows "Camera tilt" (5° to 60°), "Camera height", "Field of view" and "Camera follows the hero" set the frame.

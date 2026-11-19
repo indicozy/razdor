@@ -291,8 +291,20 @@ or AI change. Hex maps (the built-in demo) keep black.
 `terrain::variant_text` assembles it per `Variant` from `#define`s (`LIVE_WATER`, `WATER_CODE`, `OVERLAY_PASS`, `EDGE_MIST`),
 and `TerrainLayer::material` makes each variant on its first draw and keeps it. A draw takes the variant with only its
 blocks: the ground pass holds no water code, no fog and no `discard`; the cache's overlay holds the `discard`; the live
-water and the border's mist are in the variants that draw them. The unlit shader (`LEGACY_FRAGMENT`, do-not-edit) is gone:
+water and the border's mist are in the variants that draw them. The setting «Улучшенная земля» (`Settings::map_natural_ground`, `terrain::NaturalGround`: Выкл / Мягко / Сильно,
+off by default; «Оригинал» sets it off, no other preset says it) picks the natural look: `terrain::set_natural` takes the
+level in every frame (`display::follow_settings`), and `terrain::natural_look` turns it into the two blocks (`NAT_EDGES`
+in Мягко and Сильно, `NAT_TONE` in Сильно only) and the uniforms' tuning (`NatS`, `NatShore`, `NatFreq`, `NatH`,
+`NatTone`, `NatTonePeriod`; H 0.5, bend 0.30 on land and 0.15 at a shore, 0.25 at a shore in Сильно, tone 0.15, period
+12 cells). The dev switches `RAZDOR_NATURAL` (a level `off|soft|strong`, or the blocks `edges,tone`) and `RAZDOR_NAT_*` win
+over the setting. The blocks are two flags in the variant key (now `u16`), and the ground cache keeps the look it was drawn
+with, so a level or tuning change redraws the cached ground. The natural look is inert with «Смешивание земли» off. The unlit shader (`LEGACY_FRAGMENT`, do-not-edit) is gone:
 with live water off it is this source with the live block out, and its relief block never ran (`Strength` was always 0).
+
+The three looks of the owner's table (2026-11-19) are set by the «Качество графики» presets (`quality_preset`): «Оригинал» and
+«Низкое» have none of them, «Среднее» has the natural ground Soft, the cloud shadows and the decorations Few, «Высокое» the
+natural ground Strong, the cloud shadows and the decorations Normal. A hand change of one shows «Своё». An older file has none of
+the three keys (no effects), so its «Низкое» and «Оригинал» still show; an old «Среднее» or «Высокое» shows «Своё».
 
 **A moving camera (backlog 1618, B2).** `TerrainLayer::ground_target` returns a `GroundStep`: `Moving` when the cache key
 differs from the last frame's (`draw_ground` then draws `Mode::Full` straight to the screen and leaves the cache alone),
@@ -327,6 +339,23 @@ on by default, a file without the key reads on; the Map group's row next to «Ж
 (`terrain::set_blend`); `terrain::cheap_path` picks the path (the new shader only). The ground cache keeps the choice its
 cached ground was drawn with and redraws it when the choice changes, and the water pictures with it. The setting is in no
 «Качество графики» preset (`quality_preset`): `Look` does not hold it, so the row never turns «Низкое» into «Своё».
+
+**Cloud shadows («Тени облаков», `cloud_shadow`).** `Settings::map_cloud_shadows` (off by default) sets `cloud_shadow::set_pref`
+every frame (`display::follow_settings`); `RAZDOR_CLOUD_SHADOWS=1` wins over it. `world_view::draw_cloud_shadows` runs in
+`world_frame` after the world pass (the ground, the objects, the decorations, the buildings and the figures) and before the
+light and the flat fog, so a cell's colour is multiplied by `1 − cover × dark × tint`. The fog's shown darkness masks the shade
+(no shade on the war fog). It is skipped on a bent view and on the hex grid. The drift runs on a lattice that moves with
+`map_anim::now` (frozen with «Анимация карты» off), at the walking speed while the hero walks (`advance`, eased).
+
+**Decorations («Украшения карты», `world_view/decor.rs`).** `Settings::map_decor` (`DecorLevel`: Off, Few at 0.6 density,
+Normal at 1.0; off by default) sets `decor::set_pref` every frame; `RAZDOR_DECOR=1` and `RAZDOR_DECOR_DENSITY` win over it.
+`decor::for_map` builds the list once per map: `place` is a pure function of the cell and a seed from the map's size and
+terrain, so the same map always gets the same decorations. Rules: no decoration on a road, a building's or bridge's
+footprint, or on a cell next to one of them (`blocked`, the 8 neighbours); tufts and flowers in meadow patches (flowers in
+clumps); dead shrubs on dry ground; reeds only in clusters along the water (a shore cell with the noise high and at least two
+reed candidates among its neighbours); round bushes (sprites 2–6) rarely at a forest's edge. The list is drawn in
+`draw_world_in`'s object pass as ordinary `Decoration` values (`Drawable::Decor`): the same sort key, sway and fog as the
+map's own objects. Decorations are never written into `map.objects`, so they block nothing and change no save, cost map or pick.
 
 `src/ui/world_view.rs`: `draw_world` draws only the visible cells — `draw_terrain`
 (`TerrainLayer::draw` in `src/ui/terrain.rs`: one shader quad mixing the four nearest cell

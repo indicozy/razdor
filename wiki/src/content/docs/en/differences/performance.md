@@ -55,12 +55,12 @@ The game rules do not change.
 
 The **"Graphics quality"** row is the first one on the **"Map"** tab. A click steps through the presets: "Original", "Low", "Medium", "High", and back to "Original". One row sets all the settings below at once. The row shows "Custom settings" when one of them has been changed by hand. A new install starts on "Original", the original's look with no new effects. An installed game keeps its own settings.
 
-| Preset | Map resolution | Light | Shadows | Mist | Water | Weather and living map | Map animation |
-|---|---|---|---|---|---|---|---|
-| Original | 100% | off | "Painted" | "No" | off | off | "On" |
-| Low | 75% | off | "Painted" | "Simple" | off | off | "Near only" |
-| Medium | 100% | on, medium light quality | "From the sun" | "Simple" | on, every second frame, medium quality | on | "Near only" |
-| High | 100% | on, high light quality | "From the sun" | "Clouds" | on, every frame, high quality | on | "On" |
+| Preset | Map resolution | Light | Shadows | Mist | Water | Weather and living map | Map animation | Natural ground | Map decorations | Cloud shadows |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Original | 100% | off | "Painted" | "No" | off | off | "On" | off | off | off |
+| Low | 75% | off | "Painted" | "Simple" | off | off | "Near only" | off | off | off |
+| Medium | 100% | on, medium light quality | "From the sun" | "Simple" | on, every second frame, medium quality | on | "Near only" | "Soft" | "Few" | on |
+| High | 100% | on, high light quality | "From the sun" | "Clouds" | on, every frame, high quality | on | "On" | "Strong" | "Normal" | on |
 
 On a weak phone, start with "Low". Changing any one of these settings by itself makes the row show "Custom settings".
 

@@ -379,6 +379,19 @@ pub struct Settings {
     /// Not part of any «Качество графики» preset (`quality_preset`): the preset match ignores it.
     #[serde(default = "ground_blend_default")]
     pub map_ground_blend: bool,
+    /// Advanced, Razdor's, off by default: «Улучшенная земля». The field edges, shores and roads are uneven, and «Сильно»
+    /// also tints the meadows (`terrain::NaturalGround`). Style only; not shown without «Смешивание земли». A file without
+    /// the key gets «Выкл». Set only by the «Оригинал» preset (`quality_preset`).
+    #[serde(default)]
+    pub map_natural_ground: super::terrain::NaturalGround,
+    /// Advanced, Razdor's, off by default: «Тени облаков». Soft cloud shadows drift slowly over the map, faster while the
+    /// hero walks; they stand still without «Анимация карты». Style only (`cloud_shadow`). Set by «Среднее» and «Высокое».
+    #[serde(default)]
+    pub map_cloud_shadows: bool,
+    /// Advanced, Razdor's, off by default: «Украшения карты». Grass, flowers, reeds by the water and bushes at the forest's
+    /// edge, from the game's own sprites (`world_view::decor`). Look only. Set by «Среднее» (few) and «Высокое» (normal).
+    #[serde(default)]
+    pub map_decor: super::world_view::decor::DecorLevel,
     /// Advanced, Razdor's, off by default: «Погода». Snow over snow and ice, rain over swamps and
     /// lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere (`weather`).
     /// Style only.
@@ -468,7 +481,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
     }
 }
 
@@ -1481,6 +1494,37 @@ mod tests {
         let off = Settings { map_ground_blend: false, ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
         assert!(!back.map_ground_blend, "a player's «выключено» survives a save");
+    }
+
+    #[test]
+    fn map_natural_ground_defaults_off_and_survives_serialization() {
+        use super::super::terrain::NaturalGround;
+        // A file without the key (an older one included) keeps the ground as it was: off.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.map_natural_ground, NaturalGround::Off, "an older file: the natural ground is off");
+        assert_eq!(Settings::default().map_natural_ground, NaturalGround::Off);
+        let strong = Settings { map_natural_ground: NaturalGround::Strong, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&strong).unwrap()).unwrap();
+        assert_eq!(back.map_natural_ground, NaturalGround::Strong, "«Сильно» survives a save");
+        let soft: Settings = serde_json::from_str(r#"{"map_natural_ground": "Soft"}"#).unwrap();
+        assert_eq!(soft.map_natural_ground, NaturalGround::Soft);
+    }
+
+    #[test]
+    fn map_cloud_shadows_and_map_decor_default_off_and_survive_serialization() {
+        use super::super::world_view::decor::DecorLevel;
+        // A file without the keys (an older one included) keeps the map as it was: no clouds, no decorations.
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!old.map_cloud_shadows, "an older file: no cloud shadows");
+        assert_eq!(old.map_decor, DecorLevel::Off, "an older file: no decorations");
+        assert!(!Settings::default().map_cloud_shadows);
+        assert_eq!(Settings::default().map_decor, DecorLevel::Off);
+        let on = Settings { map_cloud_shadows: true, map_decor: DecorLevel::Few, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
+        assert!(back.map_cloud_shadows, "the cloud shadows survive a save");
+        assert_eq!(back.map_decor, DecorLevel::Few, "«Мало» survives a save");
+        let normal: Settings = serde_json::from_str(r#"{"map_decor": "Normal"}"#).unwrap();
+        assert_eq!(normal.map_decor, DecorLevel::Normal);
     }
 
     #[test]

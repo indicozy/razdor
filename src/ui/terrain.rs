@@ -165,7 +165,7 @@ void main() {
 "#;
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 18] = [
+const UNIFORMS: [(&str, UniformType); 24] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -184,6 +184,13 @@ const UNIFORMS: [(&str, UniformType); 18] = [
     ("Sky", UniformType::Float3),
     ("Detail", UniformType::Float1),
     ("Glint", UniformType::Float4),
+    // The natural look's tuning («Улучшенная земля», `natural_look`).
+    ("NatS", UniformType::Float1),
+    ("NatShore", UniformType::Float1),
+    ("NatFreq", UniformType::Float1),
+    ("NatH", UniformType::Float1),
+    ("NatTone", UniformType::Float1),
+    ("NatTonePeriod", UniformType::Float1),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -318,6 +325,145 @@ pub fn ab_options(v: &str) -> Option<Options> {
         _ => return None,
     };
     Some(Options { new_shader, cache, vrs: false, mediump, cheap: false })
+}
+
+/// «Улучшенная земля» (`Settings::map_natural_ground`): the look of the field edges, shores and roads, and the
+/// meadows' tone. Off by default. The shader's blocks: `NAT_EDGES` (Soft, Strong) and `NAT_TONE` (Strong only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NaturalGround {
+    /// «Выкл»: the ground as it always was.
+    #[default]
+    Off,
+    /// «Мягко»: the natural edges, the ramp's half-width 0.5, the bend 0.30 on land and 0.15 at a shore.
+    Soft,
+    /// «Сильно»: the «Мягко» look with the shore's bend at 0.25, and the meadows' tone (0.15, period 12 cells).
+    Strong,
+}
+
+/// The natural look's tuning, the values the shader's uniforms take (see [`NatLook`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NatTune {
+    /// The bend's amplitude on land, in cells (`NatS`): 0.30.
+    pub s: f32,
+    /// The bend's amplitude at a passable/blocked border, in cells (`NatShore`): 0.15, or 0.25 in «Сильно».
+    pub shore: f32,
+    /// The noise's cycles per cell (`NatFreq`): 0.45.
+    pub freq: f32,
+    /// The ramp's half-width (`NatH`): 0.5.
+    pub h: f32,
+    /// The meadow tone's amplitude (`NatTone`): 0.15.
+    pub tone: f32,
+    /// The meadow tone's period, in cells (`NatTonePeriod`): 12.
+    pub tone_period: f32,
+}
+
+/// What the natural look draws now: the two blocks' flags and the tuning.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NatLook {
+    /// The natural edges (`NAT_EDGES`).
+    pub edges: bool,
+    /// The meadow tone (`NAT_TONE`).
+    pub tone: bool,
+    /// The tuning (`NatTune`).
+    pub tune: NatTune,
+}
+
+impl NaturalGround {
+    /// The look of this level. Off draws nothing, and keeps the «Мягко» tuning, so a dev switch that turns the
+    /// edges on alone uses the same values.
+    pub fn look(self) -> NatLook {
+        let soft = NatTune { s: 0.30, shore: 0.15, freq: 0.45, h: 0.5, tone: 0.15, tone_period: 12.0 };
+        match self {
+            NaturalGround::Off => NatLook { edges: false, tone: false, tune: soft },
+            NaturalGround::Soft => NatLook { edges: true, tone: false, tune: soft },
+            NaturalGround::Strong => NatLook { edges: true, tone: true, tune: NatTune { shore: 0.25, ..soft } },
+        }
+    }
+}
+
+/// The setting level as the settings last pushed it (`display::follow_settings`, every frame): `NaturalGround`'s
+/// discriminant (Off 0, Soft 1, Strong 2).
+static NATURAL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Takes the setting «Улучшенная земля» in (every frame, from `display::follow_settings`).
+pub fn set_natural(level: NaturalGround) {
+    NATURAL.store(level as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The dev switches, read once. They win over the setting: `RAZDOR_NATURAL=off|soft|strong` sets the level, or
+/// `RAZDOR_NATURAL=edges,tone` sets the two blocks alone; `RAZDOR_NAT_S`, `RAZDOR_NAT_S_SHORE`, `RAZDOR_NAT_FREQ`,
+/// `RAZDOR_NAT_H`, `RAZDOR_NAT_TONE` and `RAZDOR_NAT_TONE_PERIOD` set the tuning (each clamped to its range).
+#[derive(Default)]
+struct NatEnv {
+    level: Option<NaturalGround>,
+    edges: Option<bool>,
+    tone: Option<bool>,
+    s: Option<f32>,
+    shore: Option<f32>,
+    freq: Option<f32>,
+    h: Option<f32>,
+    tone_amp: Option<f32>,
+    tone_period: Option<f32>,
+}
+
+fn natural_env() -> &'static NatEnv {
+    static ENV: OnceLock<NatEnv> = OnceLock::new();
+    ENV.get_or_init(|| {
+        let mut e = NatEnv::default();
+        let natural = std::env::var("RAZDOR_NATURAL").unwrap_or_default().trim().to_ascii_lowercase();
+        match natural.as_str() {
+            "" => {}
+            "off" => e.level = Some(NaturalGround::Off),
+            "soft" => e.level = Some(NaturalGround::Soft),
+            "strong" => e.level = Some(NaturalGround::Strong),
+            list => {
+                let has = |name: &str| list.split(',').any(|s| s.trim() == name);
+                e.edges = Some(has("edges"));
+                e.tone = Some(has("tone"));
+            }
+        }
+        let num = |name: &str| std::env::var(name).ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| v.is_finite());
+        e.s = num("RAZDOR_NAT_S");
+        e.shore = num("RAZDOR_NAT_S_SHORE");
+        e.freq = num("RAZDOR_NAT_FREQ");
+        e.h = num("RAZDOR_NAT_H");
+        e.tone_amp = num("RAZDOR_NAT_TONE");
+        e.tone_period = num("RAZDOR_NAT_TONE_PERIOD");
+        e
+    })
+}
+
+/// The natural look in effect: the dev switches over the setting's level (see [`NatEnv`]).
+pub fn natural_look() -> NatLook {
+    let env = natural_env();
+    let level = env.level.unwrap_or(match NATURAL.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => NaturalGround::Soft,
+        2 => NaturalGround::Strong,
+        _ => NaturalGround::Off,
+    });
+    let mut look = level.look();
+    look.edges = env.edges.unwrap_or(look.edges);
+    look.tone = env.tone.unwrap_or(look.tone);
+    let t = &mut look.tune;
+    if let Some(v) = env.s {
+        t.s = v.clamp(0.0, 0.45);
+    }
+    if let Some(v) = env.shore {
+        t.shore = v.clamp(0.0, 0.45);
+    }
+    if let Some(v) = env.freq {
+        t.freq = v.max(0.0);
+    }
+    if let Some(v) = env.h {
+        t.h = v.clamp(0.01, 0.5);
+    }
+    if let Some(v) = env.tone_amp {
+        t.tone = v.clamp(0.0, 0.5);
+    }
+    if let Some(v) = env.tone_period {
+        t.tone_period = v.max(0.5);
+    }
+    look
 }
 
 /// The «Смешивание земли» setting as the settings last pushed it (`display::follow_settings`, every frame). On by default.
@@ -508,6 +654,8 @@ struct GroundCache {
     wkey: Option<usize>,
     /// Whether the cached ground was drawn with the cheap ground (`cheap_path`): a change of «Смешивание земли» redraws it.
     cheap: bool,
+    /// The natural look (`natural_look`: the blocks and the tuning) the cached ground was drawn with: a change redraws it.
+    nat: NatLook,
 }
 
 /// The ground cache's steps taken so far, by kind (`Moving`, `Fill`, `Scroll`): the performance test's pan cells read
@@ -600,7 +748,7 @@ pub struct TerrainLayer {
     old: Option<Material>,
     /// The neighbours shader's variants (`Variant::key`, and the material or None when it does not compile), made on
     /// their first draw.
-    variants: RefCell<Vec<(u8, Option<Material>)>>,
+    variants: RefCell<Vec<(u16, Option<Material>)>>,
     /// The cache's copy, when option 2 is on.
     composite: Option<Material>,
     /// The options in effect for this layer (a shader that fails to compile turns its options off).
@@ -719,12 +867,23 @@ struct Variant {
     mist: bool,
     /// Option 5 (`RAZDOR_TERRAIN_CHEAP`): the nearest cell's code, no blend between the four.
     cheap: bool,
+    /// The natural edges (`NAT_EDGES`, «Улучшенная земля»): the blend fractions bent by a slow noise curve.
+    edges: bool,
+    /// The meadow tone (`NAT_TONE`, «Сильно»): a low-frequency tint on the land.
+    tone: bool,
 }
 
 impl Variant {
     /// The variant's index in the layer's list: one bit per flag.
-    fn key(self) -> u8 {
-        u8::from(self.mediump) | u8::from(self.live) << 1 | u8::from(self.water) << 2 | u8::from(self.overlay) << 3 | u8::from(self.mist) << 4 | u8::from(self.cheap) << 5
+    fn key(self) -> u16 {
+        u16::from(self.mediump)
+            | u16::from(self.live) << 1
+            | u16::from(self.water) << 2
+            | u16::from(self.overlay) << 3
+            | u16::from(self.mist) << 4
+            | u16::from(self.cheap) << 5
+            | u16::from(self.edges) << 6
+            | u16::from(self.tone) << 7
     }
 }
 
@@ -732,12 +891,14 @@ impl Variant {
 /// and the sharp sampling filled in.
 fn variant_text(v: Variant) -> String {
     let defines = format!(
-        "#define LIVE_WATER {}\n#define WATER_CODE {}\n#define OVERLAY_PASS {}\n#define EDGE_MIST {}\n#define CHEAP_GROUND {}\n",
+        "#define LIVE_WATER {}\n#define WATER_CODE {}\n#define OVERLAY_PASS {}\n#define EDGE_MIST {}\n#define CHEAP_GROUND {}\n#define NAT_EDGES {}\n#define NAT_TONE {}\n",
         u8::from(v.live),
         u8::from(v.water),
         u8::from(v.overlay),
         u8::from(v.mist),
-        u8::from(v.cheap)
+        u8::from(v.cheap),
+        u8::from(v.edges),
+        u8::from(v.tone)
     );
     let precision = if v.mediump { "mediump" } else { "highp" };
     NEW_FRAGMENT
@@ -759,11 +920,11 @@ impl TerrainLayer {
         let (image, (tw, th)) = pack_terrain_atlas(textures, fill)?;
         let mut opts = options();
         let (mut old, mut composite) = (None, None);
-        let mut variants: Vec<(u8, Option<Material>)> = Vec::new();
+        let mut variants: Vec<(u16, Option<Material>)> = Vec::new();
         if opts.new_shader {
             // The full variant (every block) is made at start: it proves the shader compiles (else the old one is used).
             // Its mediump twin proves option 4's text; the other variants are made on their first draw (`material`).
-            let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false };
+            let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false };
             match make_variant(full) {
                 Ok(m) => variants.push((full.key(), Some(m))),
                 Err(e) => razdor::diag!("terrain shader: {e}"),
@@ -914,8 +1075,10 @@ impl TerrainLayer {
         }
         // «Смешивание земли» changed: the cached ground (and the water pictures) hold the other look, so they are drawn again.
         let cheap = cheap_path(self.opts.new_shader, self.opts.cheap, blend_on());
-        if g.cheap != cheap {
+        let nat = natural_look();
+        if g.cheap != cheap || g.nat != nat {
             g.cheap = cheap;
+            g.nat = nat;
             g.key = None;
             g.wkey = None;
             *self.pictures.borrow_mut() = WaterPictures::default();
@@ -1028,7 +1191,9 @@ impl TerrainLayer {
         let edge_on = water_on && edge;
         // The variant holds the blocks this draw uses and no others (`Variant`); live water is drawn on the water's draws.
         let cheap = cheap_path(self.opts.new_shader, self.opts.cheap, blend_on());
-        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on, cheap };
+        // The natural look needs the blend: the cheap ground (blend off) draws without it.
+        let nat = natural_look();
+        let variant = Variant { mediump: self.opts.mediump, live: water_on && water::live(), water: water_on, overlay: mode == Mode::Overlay, mist: edge_on, cheap, edges: nat.edges && !cheap, tone: nat.tone && !cheap };
         let Some(m) = self.material(variant) else { return };
         let new = self.opts.new_shader;
         // The trailer's stills (dev-only): the atlas is sampled nearest, so the grass is not streaked.
@@ -1075,6 +1240,14 @@ impl TerrainLayer {
         // The sparkle's colour and strength: the light's hour (noon when the lighting is off).
         let glint = water::glint(daylight::shown_hour().unwrap_or(12.0));
         m.set_uniform("Glint", vec4(glint[0], glint[1], glint[2], glint[3]));
+        // The natural look's tuning («Улучшенная земля» and the dev switches, `natural_look`).
+        let nat = natural_look().tune;
+        m.set_uniform("NatS", nat.s);
+        m.set_uniform("NatShore", nat.shore);
+        m.set_uniform("NatFreq", nat.freq);
+        m.set_uniform("NatH", nat.h);
+        m.set_uniform("NatTone", nat.tone);
+        m.set_uniform("NatTonePeriod", nat.tone_period);
         let sky = daylight::sky_rgb();
         m.set_uniform("Sky", vec3(sky[0], sky[1], sky[2]));
         // The ground draws (the whole terrain, the cache's ground) get the shading rate (option 3).
@@ -1537,7 +1710,8 @@ mod variant_tests {
             let t = line.trim();
             if let Some(name) = t.strip_prefix("#if ") {
                 let parent = live(&stack);
-                let cond = defined.get(name.trim()).copied().unwrap_or(false);
+                // `A || B` is true when either define is set (the natural look's blocks share one noise reader).
+                let cond = name.split("||").any(|n| defined.get(n.trim()).copied().unwrap_or(false));
                 stack.push((parent, cond));
             } else if t == "#else" {
                 let top = stack.last_mut().expect("#else without #if");
@@ -1559,8 +1733,8 @@ mod variant_tests {
         out
     }
 
-    const GROUND: Variant = Variant { mediump: false, live: false, water: false, overlay: false, mist: false, cheap: false };
-    const OVERLAY_LIVE_MIST: Variant = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false };
+    const GROUND: Variant = Variant { mediump: false, live: false, water: false, overlay: false, mist: false, cheap: false, edges: false, tone: false };
+    const OVERLAY_LIVE_MIST: Variant = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false };
 
     #[test]
     fn the_ground_pass_holds_the_land_only() {
@@ -1582,7 +1756,7 @@ mod variant_tests {
 
     #[test]
     fn the_full_pass_without_live_water_has_no_live_code_and_no_discard() {
-        let full = Variant { mediump: false, live: false, water: true, overlay: false, mist: false, cheap: false };
+        let full = Variant { mediump: false, live: false, water: true, overlay: false, mist: false, cheap: false, edges: false, tone: false };
         let t = preprocess(&variant_text(full));
         assert!(t.contains("texture2D(Water"), "the water stage is drawn");
         for gone in ["discard;", "texture2D(Noise", "texture2D(Flow", "shore_foam(", "wnoise(", "vnoise(", "Edge.x"] {
@@ -1590,10 +1764,36 @@ mod variant_tests {
         }
     }
 
+    /// The variant of a key's bits (one flag per bit, `Variant::key`'s order).
+    fn of_bits(bits: u16) -> Variant {
+        Variant {
+            mediump: bits & 1 != 0,
+            live: bits & 2 != 0,
+            water: bits & 4 != 0,
+            overlay: bits & 8 != 0,
+            mist: bits & 16 != 0,
+            cheap: bits & 32 != 0,
+            edges: bits & 64 != 0,
+            tone: bits & 128 != 0,
+        }
+    }
+
+    #[test]
+    fn the_natural_blocks_are_out_unless_their_flag_is_set() {
+        let plain = preprocess(&variant_text(GROUND));
+        for gone in ["Nat", "nat_"] {
+            assert!(!plain.contains(gone), "the default ground holds `{gone}`");
+        }
+        let edges = preprocess(&variant_text(Variant { edges: true, ..GROUND }));
+        assert!(edges.contains("float nat_noise(") && edges.contains("nat_weights(p, f, k)") && !edges.contains("nat_land("), "the edges alone: the bend, no tone");
+        let tone = preprocess(&variant_text(Variant { tone: true, ..GROUND }));
+        assert!(tone.contains("float nat_noise(") && tone.contains("nat_land(k.x)") && !tone.contains("nat_weights("), "the tone alone: the tint, no bend");
+    }
+
     #[test]
     fn every_variant_text_is_fully_assembled() {
-        for bits in 0u8..64 {
-            let v = Variant { mediump: bits & 1 != 0, live: bits & 2 != 0, water: bits & 4 != 0, overlay: bits & 8 != 0, mist: bits & 16 != 0, cheap: bits & 32 != 0 };
+        for bits in 0u16..256 {
+            let v = of_bits(bits);
             let v = Variant { water: v.water || v.live || v.overlay, ..v };
             let t = variant_text(v);
             assert!(!t.contains("@CP@") && !t.contains("@SHARP_UV@"), "{v:?}: a placeholder is left");
@@ -1605,9 +1805,46 @@ mod variant_tests {
     #[test]
     fn variant_keys_are_distinct() {
         let mut seen = std::collections::HashSet::new();
-        for bits in 0u8..64 {
-            let v = Variant { mediump: bits & 1 != 0, live: bits & 2 != 0, water: bits & 4 != 0, overlay: bits & 8 != 0, mist: bits & 16 != 0, cheap: bits & 32 != 0 };
+        for bits in 0u16..256 {
+            let v = of_bits(bits);
             assert!(seen.insert(v.key()), "{v:?}: a key repeats");
         }
     }
 }
+
+#[cfg(test)]
+mod natural_tests {
+    use super::*;
+
+    #[test]
+    fn off_draws_no_natural_block() {
+        let look = NaturalGround::Off.look();
+        assert!(!look.edges && !look.tone);
+    }
+
+    #[test]
+    fn soft_is_the_edges_with_the_ramp_and_no_tone() {
+        let look = NaturalGround::Soft.look();
+        assert!(look.edges && !look.tone, "edges on, tone off");
+        assert_eq!(look.tune.h, 0.5, "the ramp's half-width");
+        assert_eq!(look.tune.s, 0.30, "the land's bend");
+        assert_eq!(look.tune.shore, 0.15, "the shore's bend");
+    }
+
+    #[test]
+    fn strong_adds_the_shore_limit_and_the_meadow_tone() {
+        let look = NaturalGround::Strong.look();
+        assert!(look.edges && look.tone, "edges and tone on");
+        assert_eq!(look.tune.shore, 0.25, "the shore's bend");
+        assert_eq!(look.tune.h, 0.5);
+        assert_eq!(look.tune.s, 0.30);
+        assert_eq!(look.tune.tone, 0.15, "the tone's amplitude");
+        assert_eq!(look.tune.tone_period, 12.0, "the tone's period in cells");
+    }
+
+    #[test]
+    fn the_setting_defaults_to_off() {
+        assert_eq!(NaturalGround::default(), NaturalGround::Off);
+    }
+}
+

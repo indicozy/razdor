@@ -11,6 +11,8 @@
 //   OVERLAY_PASS the cache's overlay: the pixels with no water and no border fog are discarded (they keep the cached
 //               ground), the others are drawn as the full shader draws them.
 //   EDGE_MIST   the border's fog («Продолжать карту за краем»), drawn over the ground past the map's edges.
+//   NAT_EDGES   «Улучшенная земля» (Soft, Strong): the natural edges (the blend fractions bent by a slow noise curve).
+//   NAT_TONE    «Улучшенная земля» (Strong): the meadow tone (a low-frequency patch of lighter and darker land, `main`).
 precision highp float;
 varying highp vec2 uv;
 uniform sampler2D Neighbours;
@@ -51,6 +53,17 @@ uniform sampler2D Flow;
 uniform vec3 Sky;
 // The water's noise texture (`water::noise_texels`): a wrapped 64×64 table of the lattice's hashes.
 uniform sampler2D Noise;
+#if NAT_EDGES || NAT_TONE
+// The natural look's tuning (`terrain::natural_look`: the setting's level, the RAZDOR_NAT_* environment variables win).
+// NatS and NatShore: the bend's amplitude in cells on land and at a passable/blocked border; NatFreq: the noise's
+// cycles per cell; NatH: the ramp's half-width; NatTone and NatTonePeriod: the meadow tone's amplitude and period.
+uniform float NatS;
+uniform float NatShore;
+uniform float NatFreq;
+uniform float NatH;
+uniform float NatTone;
+uniform float NatTonePeriod;
+#endif
 // @SHARP_UV@
 
 #if EDGE_MIST
@@ -152,6 +165,53 @@ vec4 shore_foam(float cov, vec2 p, vec2 fl, vec2 dr, vec4 nb, vec4 wgt) {
 }
 #endif
 
+#if NAT_EDGES || NAT_TONE
+// The natural look's noise: one fetch of the `Noise` table, the smooth value noise of `wnoise` (kept apart from it,
+// which sits inside LIVE_WATER). World position only, no clock, so the ground cache stays exact.
+float nat_noise(vec2 q) {
+    vec2 i = floor(q);
+    vec2 f = fract(q);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return texture2D(Noise, (mod(i, 64.0) + u + 0.5) / 64.0).r;
+}
+#endif
+
+#if NAT_EDGES
+// 1 on the blocked codes (water 0-2, lava 3, impassable swamp 9, snowdrifts 15), else 0 (the surface table).
+float nat_blocked(float code) {
+    return step(code, 3.5) + step(8.5, code) * step(code, 9.5) + step(14.5, code) * step(code, 15.5);
+}
+
+// The bias curve (§2.1): f' = f / ((1/t - 2)(1 - f) + 1). It keeps 0 and 1, is monotonic for t in (0, 1), and moves
+// the 0.5 line to f = 1 - t.
+float nat_bias(float f, float t) {
+    return f / ((1.0 / t - 2.0) * (1.0 - f) + 1.0);
+}
+
+// The natural blend weights of a mixed quad (`main`'s fx, fy): each fraction bent by its own slow noise curve, the
+// bend's size S continuous in the pixel's blocked share c (computed from the plain fractions), then narrowed to a
+// ramp. Every variant and the overlay run this one function, so the weights agree everywhere.
+vec2 nat_weights(vec2 p, vec2 f, vec4 k) {
+    float bx = mix(nat_blocked(k.x), nat_blocked(k.y), f.x);
+    float by = mix(nat_blocked(k.z), nat_blocked(k.w), f.x);
+    float c = mix(bx, by, f.y);
+    float s = mix(NatS, NatShore, smoothstep(0.0, 0.15, min(c, 1.0 - c)));
+    vec2 q = p * NatFreq;
+    vec2 n = vec2(nat_noise(q), nat_noise(q + vec2(31.7, 11.3))) * 2.0 - 1.0;
+    vec2 t = clamp(vec2(0.5) + s * n, vec2(0.01), vec2(0.99));
+    vec2 g = vec2(nat_bias(f.x, t.x), nat_bias(f.y, t.y));
+    return smoothstep(vec2(0.5 - NatH), vec2(0.5 + NatH), g);
+}
+#endif
+
+#if NAT_TONE
+// 1 on the land the meadow tone lies on: grass, dry plain, sand, clay and stony soil (codes 5-7, 10-12). Water, lava,
+// road, marsh, scorched and snowy ground and snowdrifts keep their colour.
+float nat_land(float code) {
+    return step(4.5, code) * step(code, 7.5) + step(9.5, code) * step(code, 12.5);
+}
+#endif
+
 @CP@ vec3 ground(float code, vec2 px, @CP@ vec3 water, @CP@ float sea) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
     vec2 t = mod(px, Tile);
@@ -196,6 +256,16 @@ void main() {
 #endif
     @CP@ float fx = f.x;
     @CP@ float fy = f.y;
+#if NAT_EDGES
+    // The natural edges («Улучшенная земля»): a mixed quad's weights are bent here, for the blend and the shore foam's
+    // coverage. The host turns the blocks off with the cheap ground (blend off), so the cheap path never gets them.
+    // A quad of one code keeps its plain fractions (the weights are moot there).
+    if (!(k.x == k.y && k.y == k.z && k.z == k.w)) {
+        vec2 nw = nat_weights(p, f, k);
+        fx = nw.x;
+        fy = nw.y;
+    }
+#endif
 #if WATER_CODE
     // The water stage's coordinates (as the old shader): read only where a code is water.
     @CP@ vec3 w = vec3(1.0);
@@ -262,6 +332,18 @@ void main() {
         @CP@ vec3 top = mix(ground(k.x, px, w, sea), ground(k.y, px, w, sea), fx);
         @CP@ vec3 bottom = mix(ground(k.z, px, w, sea), ground(k.w, px, w, sea), fx);
         col = mix(top, bottom, fy);
+    }
+#endif
+#if NAT_TONE
+    // The meadow tone (prototype): one low-frequency noise fetch, scaling the land share of the pixel, so water, lava,
+    // road and snowdrifts keep their colour. A few per cent lighter or darker, a little warmer or cooler.
+    {
+        float land = mix(mix(nat_land(k.x), nat_land(k.y), fx), mix(nat_land(k.z), nat_land(k.w), fx), fy);
+        if (land > 0.0) {
+            float tn = nat_noise(p / NatTonePeriod) * 2.0 - 1.0;
+            vec3 tint = vec3(1.0 + NatTone * 1.2 * tn, 1.0 + NatTone * tn, 1.0 - NatTone * 0.8 * tn);
+            col = mix(col, col * tint, land);
+        }
     }
 #endif
 #if LIVE_WATER

@@ -1,6 +1,7 @@
 //! Razdor's «Качество графики» (the owner's decision, 2026-11-12): one row of the map group sets the map's look in one
 //! go: its resolution, the light, the shadows, the mist, the moving water and its rate and quality, the weather, the
-//! living map and the map's animation. Nothing stores the choice. The row shows the first preset whose values all hold
+//! living map, the map's animation, and (the owner's table, 2026-11-19) the natural ground, the cloud shadows and the
+//! decorations. Nothing stores the choice. The row shows the first preset whose values all hold
 //! in the settings, or «Своё» when none does, so a setting changed by hand shows «Своё» by itself, and an install that
 //! has its settings keeps them as they are. A new install's settings are the original's look («Оригинал»).
 
@@ -11,7 +12,9 @@ use super::daylight::{LightMode, ShadowMode};
 use super::lights::Quality as LightQuality;
 use super::map_anim::Mode as AnimMode;
 use super::mist::MistMode;
+use super::terrain::NaturalGround;
 use super::water::{FrameRate, Quality as WaterQuality};
+use super::world_view::decor::DecorLevel;
 
 /// The presets, in the row's order: «Оригинал» first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,6 +44,13 @@ struct Look {
     weather: Option<bool>,
     living: Option<bool>,
     anim: Option<AnimMode>,
+    /// «Улучшенная земля» (`Settings::map_natural_ground`). «Оригинал» says Off, so a non-original look
+    /// never shows as «Оригинал».
+    natural: Option<NaturalGround>,
+    /// «Тени облаков» (`Settings::map_cloud_shadows`).
+    clouds: Option<bool>,
+    /// «Украшения карты» (`Settings::map_decor`).
+    decor: Option<DecorLevel>,
 }
 
 /// The values of each preset (the owner's decisions, 2026-11-12).
@@ -58,6 +68,9 @@ fn look(p: Preset) -> Look {
             weather: Some(false),
             living: Some(false),
             anim: Some(AnimMode::On),
+            natural: Some(NaturalGround::Off),
+            clouds: Some(false),
+            decor: Some(DecorLevel::Off),
         },
         Preset::Low => Look {
             render_scale: Some(0.75),
@@ -71,6 +84,9 @@ fn look(p: Preset) -> Look {
             weather: Some(false),
             living: Some(false),
             anim: Some(AnimMode::Near),
+            natural: Some(NaturalGround::Off),
+            clouds: Some(false),
+            decor: Some(DecorLevel::Off),
         },
         Preset::Medium => Look {
             render_scale: Some(1.0),
@@ -84,6 +100,9 @@ fn look(p: Preset) -> Look {
             weather: Some(true),
             living: Some(true),
             anim: Some(AnimMode::Near),
+            natural: Some(NaturalGround::Soft),
+            clouds: Some(true),
+            decor: Some(DecorLevel::Few),
         },
         Preset::High => Look {
             render_scale: Some(1.0),
@@ -97,6 +116,9 @@ fn look(p: Preset) -> Look {
             weather: Some(true),
             living: Some(true),
             anim: Some(AnimMode::On),
+            natural: Some(NaturalGround::Strong),
+            clouds: Some(true),
+            decor: Some(DecorLevel::Normal),
         },
     }
 }
@@ -116,6 +138,9 @@ impl Look {
             && self.weather.is_none_or(|on| s.map_weather == on)
             && self.living.is_none_or(|on| s.map_living == on)
             && self.anim.is_none_or(|m| s.map_anim == m)
+            && self.natural.is_none_or(|n| s.map_natural_ground == n)
+            && self.clouds.is_none_or(|on| s.map_cloud_shadows == on)
+            && self.decor.is_none_or(|d| s.map_decor == d)
     }
 }
 
@@ -166,6 +191,15 @@ pub fn set(s: &mut Settings, p: Preset) {
     if let Some(m) = l.anim {
         s.map_anim = m;
     }
+    if let Some(n) = l.natural {
+        s.map_natural_ground = n;
+    }
+    if let Some(on) = l.clouds {
+        s.map_cloud_shadows = on;
+    }
+    if let Some(d) = l.decor {
+        s.map_decor = d;
+    }
 }
 
 /// The preset a click on the row sets: «Оригинал», «Низкое», «Среднее», «Высокое», then «Оригинал» again; from «Своё»,
@@ -207,6 +241,53 @@ mod tests {
             set(&mut s, p);
             assert!(!s.map_ground_blend, "{p:?} does not set the blend");
         }
+    }
+
+    #[test]
+    fn the_effects_follow_the_owners_table() {
+        // «Улучшенная земля», «Тени облаков», «Украшения карты» (the owner's table, 2026-11-19).
+        let table = [
+            (Preset::Original, NaturalGround::Off, false, DecorLevel::Off),
+            (Preset::Low, NaturalGround::Off, false, DecorLevel::Off),
+            (Preset::Medium, NaturalGround::Soft, true, DecorLevel::Few),
+            (Preset::High, NaturalGround::Strong, true, DecorLevel::Normal),
+        ];
+        for (p, natural, clouds, decor) in table {
+            let mut s = Settings { map_natural_ground: NaturalGround::Strong, map_cloud_shadows: !clouds, map_decor: DecorLevel::Normal, ..Settings::default() };
+            set(&mut s, p);
+            assert_eq!((s.map_natural_ground, s.map_cloud_shadows, s.map_decor), (natural, clouds, decor), "{p:?} sets its three effects");
+            assert_eq!(current(&s), Some(p), "{p:?} shows with its effects");
+        }
+    }
+
+    #[test]
+    fn a_changed_effect_shows_custom() {
+        // Each of the three effects is part of the presets: a hand change of one shows «Своё» for «Среднее» and «Высокое».
+        for p in [Preset::Medium, Preset::High] {
+            let mut s = Settings::default();
+            set(&mut s, p);
+            assert_eq!(current(&s), Some(p));
+            s.map_cloud_shadows = !s.map_cloud_shadows;
+            assert_eq!(current(&s), None, "{p:?} with clouds changed");
+            s.map_cloud_shadows = !s.map_cloud_shadows;
+            s.map_decor = DecorLevel::Off;
+            assert_eq!(current(&s), None, "{p:?} with decorations changed");
+        }
+    }
+
+    #[test]
+    fn an_install_from_before_the_effects_keeps_its_low_and_original_look() {
+        // An older file has none of the three keys: the defaults (no effects). «Оригинал» and «Низкое» still hold;
+        // an old «Среднее» or «Высокое» (no effects) shows «Своё» until the player picks it again.
+        let mut s = Settings::default();
+        set(&mut s, Preset::Low);
+        assert_eq!(current(&s), Some(Preset::Low));
+        let mut s = Settings::default();
+        set(&mut s, Preset::Medium);
+        s.map_natural_ground = NaturalGround::Off;
+        s.map_cloud_shadows = false;
+        s.map_decor = DecorLevel::Off;
+        assert_eq!(current(&s), None, "the old «Среднее» values without the three effects");
     }
 
     #[test]

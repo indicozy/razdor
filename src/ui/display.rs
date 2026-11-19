@@ -872,6 +872,10 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::water::set_levels(Default::default(), Default::default());
         // `RAZDOR_WEATHER=1` (the snapshots' weather; `RAZDOR_WEATHER_DAY=<n>` fixes its day).
         crate::ui::weather::set_pref(std::env::var("RAZDOR_WEATHER").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_CLOUD_SHADOWS=1` (the drifting cloud shadows, `cloud_shadow`; its tuning is read there); the setting is not read here.
+        crate::ui::cloud_shadow::set_pref(env_switch("RAZDOR_CLOUD_SHADOWS").unwrap_or(false));
+        // `RAZDOR_DECOR=1` (the map's decorations, `world_view::decor`) and `RAZDOR_DECOR_DENSITY=<f32>` (1.0); the setting is not read here.
+        crate::ui::world_view::decor::set_pref(env_switch("RAZDOR_DECOR").unwrap_or(false), env_density().unwrap_or(1.0));
         // `RAZDOR_LIVING=1` (the snapshots' living map); the setting is not read here.
         crate::ui::living::set_prefs(false);
         // `RAZDOR_LIGHT_MODE=game|cycle` (the snapshots' light clock; the lighting is off otherwise): the game's
@@ -910,10 +914,26 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     crate::ui::map_anim::set_pref(settings.map_anim);
     crate::ui::water::set_prefs(settings.map_live_water);
     crate::ui::terrain::set_blend(settings.map_ground_blend);
+    // The natural ground («Улучшенная земля»): the dev switches `RAZDOR_NATURAL` and `RAZDOR_NAT_*` win over it (`terrain::natural_look`).
+    crate::ui::terrain::set_natural(settings.map_natural_ground);
+    // «Тени облаков» and «Украшения карты»: the dev switches `RAZDOR_CLOUD_SHADOWS` and `RAZDOR_DECOR` win over the settings.
+    crate::ui::cloud_shadow::set_pref(env_switch("RAZDOR_CLOUD_SHADOWS").unwrap_or(settings.map_cloud_shadows));
+    let decor = settings.map_decor;
+    crate::ui::world_view::decor::set_pref(env_switch("RAZDOR_DECOR").unwrap_or(decor != crate::ui::world_view::decor::DecorLevel::Off), env_density().unwrap_or(decor.density()));
     crate::ui::water::set_levels(settings.map_water_rate, settings.map_water_quality);
     crate::ui::weather::set_pref(settings.map_weather);
     crate::ui::living::set_prefs(settings.map_living);
     follow(settings.display.for_device(dp_px().is_some()));
+}
+
+/// A dev switch in the environment: `Some(on)` when the variable is set (on only for `1`), `None` when it is not.
+fn env_switch(name: &str) -> Option<bool> {
+    std::env::var(name).ok().map(|v| v.trim() == "1")
+}
+
+/// `RAZDOR_DECOR_DENSITY=<f32>`, a finite number, or `None`.
+fn env_density() -> Option<f32> {
+    std::env::var("RAZDOR_DECOR_DENSITY").ok().and_then(|s| s.trim().parse::<f32>().ok()).filter(|d| d.is_finite())
 }
 
 /// Puts the window in `mode` when it is not yet (called every frame; cheap when nothing
