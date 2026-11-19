@@ -4,7 +4,9 @@
 //! blocks round a pixel are blended, so the blocks join into soft-edged squares. One multiply pass over the
 //! map's drawn rectangle, after the world and before the fog and the light: a cell's colour is multiplied by
 //! `1 − cover × dark × tint`, where `cover` is the shade's density (0..1) and the fog's shown darkness masks it
-//! (no shade on the war fog). Style only: no rule, fog or save reads it.
+//! (no shade on the war fog). The shade is neutral black by default (`tint` 0: all channels darken alike). Its
+//! strength follows the daylight (`Pass::daylight`, `daylight::shade_at`): full by day, none at night, eased over
+//! dusk and dawn. Style only: no rule, fog or save reads it.
 //!
 //! The pattern reuses the mist's baked noise texture (`mist::noise_texture`: one periodic field in red and one in
 //! green, 64 lattice cells, mipmapped). Its two octaves are a fetch at the cloud size (red) and a fetch at twice the
@@ -46,7 +48,7 @@ pub fn on() -> bool {
 pub struct Tuning {
     /// The darkening at the middle of a shadow, as a share of the colour (`RAZDOR_CLOUD_DARK`).
     pub dark: f32,
-    /// The shade's cool tint, 0 neutral … 1 cool (`RAZDOR_CLOUD_TINT`).
+    /// The shade's cool tint, 0 neutral black … 1 cool blue (`RAZDOR_CLOUD_TINT`).
     pub tint: f32,
     /// The cloud's size in cells: one noise lattice cell (`RAZDOR_CLOUD_SCALE`).
     pub scale: f32,
@@ -64,7 +66,7 @@ pub struct Tuning {
 
 impl Default for Tuning {
     fn default() -> Self {
-        Tuning { dark: 0.25, tint: 1.0, scale: 5.0, cover: 0.4, soft: 0.15, block: 1.0, speed: 6.0, speed_walk: 30.0 }
+        Tuning { dark: 0.25, tint: 0.0, scale: 5.0, cover: 0.28, soft: 0.15, block: 1.0, speed: 6.0, speed_walk: 30.0 }
     }
 }
 
@@ -195,8 +197,8 @@ void main() {
 // projection (flat or the tilted plane); the pixel's cell is p (cells, centred on whole numbers). The density is
 // the two octaves of the mist's noise: red at the cloud size, green at twice the frequency; the drift is added in
 // lattice units. Round mode (Block 0): one density per pixel. Block mode: the density at each block's centre,
-// thresholded per block, the four blocks round the pixel blended bilinearly. Shade is cool: red takes the most,
-// blue the least; Tint 0 is neutral.
+// thresholded per block, the four blocks round the pixel blended bilinearly. Tint 0 (the default) is neutral
+// black; Tint 1 is the old cool shade (red takes the most, blue the least).
 const FRAGMENT: &str = r#"#version 100
 precision highp float;
 
@@ -340,6 +342,8 @@ pub struct Pass<'a> {
     pub now: f64,
     /// Whether the hero is walking this frame (the drift runs at the walking speed, eased).
     pub walking: bool,
+    /// The share of the daylight the shade keeps this frame (`daylight::shade_at`, 0..1): 1 by day, 0 at night.
+    pub daylight: f32,
 }
 
 /// Draws the cloud shadows of `pass` over its rectangle (window pixels), multiplied onto what is drawn. Without the
@@ -351,6 +355,10 @@ pub fn draw(pass: &Pass) {
     let cal = calibrated();
     let tu = tuning();
     advance(pass.now, pass.walking, &tu);
+    // At night the shade is gone: nothing to multiply (the drift still moves on).
+    if pass.daylight <= 0.0 {
+        return;
+    }
     let d = drift_now(&tu);
     let fog = pass.fog.cloned().unwrap_or_else(|| texel(&NO_FOG, [0, 0, 0, 0]));
     let noise = mist::noise_texture();
@@ -368,7 +376,8 @@ pub fn draw(pass: &Pass) {
         m.set_uniform("RowHeight", pass.row_height);
         m.set_uniform("Drift", vec2(d[0], d[1]));
         m.set_uniform("Scale", tu.scale);
-        m.set_uniform("Dark", tu.dark);
+        // The daylight scales the shade's strength: 0 at night (no multiply at all), full by day.
+        m.set_uniform("Dark", tu.dark * pass.daylight.clamp(0.0, 1.0));
         m.set_uniform("Thresh", cal.threshold);
         m.set_uniform("Soft", tu.soft);
         m.set_uniform("Tint", tu.tint);
@@ -400,7 +409,7 @@ mod tests {
     fn the_defaults_are_the_current_look_and_the_env_clamps() {
         let d = tuning_from(|_| None);
         assert_eq!(d, Tuning::default());
-        assert_eq!((d.dark, d.scale, d.soft, d.tint, d.block), (0.25, 5.0, 0.15, 1.0, 1.0));
+        assert_eq!((d.dark, d.scale, d.soft, d.tint, d.block), (0.25, 5.0, 0.15, 0.0, 1.0));
         assert_eq!((d.speed, d.speed_walk), (6.0, 30.0));
         let t = tuning_from(|k| match k {
             "RAZDOR_CLOUD_DARK" => Some("9".into()),
@@ -457,6 +466,24 @@ mod tests {
     }
 
     #[test]
+    fn the_shade_follows_the_daylight_none_at_night_full_by_day_and_continuous() {
+        use crate::ui::daylight::shade_at;
+        assert_eq!(shade_at(0.0), 0.0, "midnight: no shade");
+        assert_eq!(shade_at(12.0), 1.0, "noon: full shade");
+        assert!(shade_at(18.0) > 0.0 && shade_at(18.0) < 1.0, "dusk eases");
+        assert!(shade_at(5.0) > 0.0 && shade_at(5.0) < 1.0, "dawn eases in");
+        // Minute steps over a whole day (and back to midnight): the largest step is well under 0.012
+        // (the factor's slope is at most 0.66 an hour).
+        let mut prev = shade_at(0.0);
+        for k in 1..=(24 * 60) {
+            let now = shade_at(k as f32 / 60.0);
+            assert!((now - prev).abs() < 0.012, "a jump of {} at minute {k}", now - prev);
+            prev = now;
+        }
+        assert_eq!(prev, 0.0, "back at midnight");
+    }
+
+    #[test]
     fn a_frozen_clock_moves_nothing() {
         let tu = Tuning::default();
         local_reset();
@@ -476,7 +503,7 @@ mod tests {
     #[test]
     fn the_threshold_covers_the_asked_share_of_the_texture() {
         let bytes = mist::bake_noise();
-        for cover in [0.2f32, 0.4, 0.6] {
+        for cover in [0.2f32, 0.28, 0.4, 0.6] {
             let thr = threshold_for_cover(density_of(&bytes), cover);
             let mut hit = 0usize;
             let steps = 128usize;

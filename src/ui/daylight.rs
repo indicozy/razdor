@@ -50,6 +50,14 @@ pub fn light_at(hour: f32) -> Light {
     Light { tint, glow: 1.0 - smoothstep(-0.15, 0.20, e) }
 }
 
+/// The share of the daylight at `hour` (0..1) that the cloud shadows keep (`cloud_shadow`): 1 by day, 0 at
+/// night, eased over dusk and dawn. The same sun's sine as the light: full while the sine is 0.3 or more,
+/// none at -0.3 or less. Continuous over the hours (it wraps at midnight).
+pub fn shade_at(hour: f32) -> f32 {
+    let (e, _, _) = sun(hour);
+    smoothstep(-0.3, 0.3, e)
+}
+
 /// «Ровная яркость» (`Settings::map_steady`): the tint's luminance is held at this at every hour. Above
 /// about 0.71 the night's blue channel must clip at 1 (its own ratios would push it past 1), so the night
 /// gives up some of its blue. At 0.85 it still reads blue (about 0.75, 0.87, 1.0), and the day is 15 %

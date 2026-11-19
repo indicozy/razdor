@@ -7971,9 +7971,13 @@ fn glow_texture() -> Texture2D {
 /// The frame's light (`daylight::frame_light`) from the game's clock, once per map frame: before the
 /// world (its painted shadows' factor is read there, `daylight::frame_shadow_k`) and the tint after it.
 fn frame_light_of(game: &Game) -> Option<daylight::Light> {
-    let hour = (game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32;
     let now = crate::ui::clock::now();
-    daylight::frame_light(hour, now, get_frame_time())
+    daylight::frame_light(game_hour(game), now, get_frame_time())
+}
+
+/// The game clock's hour of day (0..24, fractional).
+fn game_hour(game: &Game) -> f32 {
+    (game.clock.total_minutes() % razdor::rules::clock::MINUTES_PER_DAY as f64 / 60.0) as f32
 }
 
 /// The point lights of this frame (`lights`, unsorted: `lights::Frame::new` takes the nearest first): one per
@@ -8329,6 +8333,9 @@ fn draw_cloud_shadows(game: &Game, cam: &Camera) {
         now: super::map_anim::now(),
         // The hero's walk (the path is being followed): the drift runs at its walking speed.
         walking: game.moving(),
+        // The shade follows the daylight: the lighting's hour when it is on («Освещение» or a snapshot's
+        // RAZDOR_LIGHT_HOUR), else the game clock's (the sun is the same either way). Full by day, none at night.
+        daylight: daylight::shade_at(daylight::shown_hour().unwrap_or_else(|| game_hour(game))),
     });
 }
 

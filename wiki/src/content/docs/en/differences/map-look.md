@@ -131,7 +131,7 @@ The weather over the map: here, the cloud shadows show.
 
 ## Cloud shadows
 
-The **"Cloud shadows"** row (off by default) puts soft cloud shadows on the map. They drift slowly across it, and faster while the hero walks. The row works on its own, without **"Weather"**. The weather has cloud shadows too: that is its own look.
+The **"Cloud shadows"** row (off by default) puts soft cloud shadows on the map. They drift slowly across it, and faster while the hero walks. The shadows are black, not blue. By day they are full, they fade toward dusk, and at night there are none. The row works on its own, without **"Weather"**. The weather has cloud shadows too: that is its own look.
 
 Without **"Map animation"**, the shadows stand still.
 
