@@ -195,10 +195,10 @@ pub fn weights_holiday(code: u8) -> ([f32; 4], f32) {
 /// The snow the holiday look keeps on the land every day, whatever the schedule says.
 pub const HOLIDAY_SNOW: f32 = 0.6;
 
-/// The levels under the holiday look: snow at least [`HOLIDAY_SNOW`] every day; the rain as scheduled;
+/// The levels under the holiday look: snow at least [`HOLIDAY_SNOW`] every day; no rain (only snow falls),
 /// no heat haze and no ash (winter has neither).
 pub fn holiday_levels(base: Levels) -> Levels {
-    Levels { snow: base.snow.max(HOLIDAY_SNOW), heat: 0.0, ash: 0.0, ..base }
+    Levels { snow: base.snow.max(HOLIDAY_SNOW), swamp: 0.0, lowland: 0.0, heat: 0.0, ash: 0.0 }
 }
 
 /// The two mask textures' bytes for a map's terrain codes, one texel per cell, row by row: the
@@ -1117,11 +1117,11 @@ mod tests {
     }
 
     #[test]
-    fn holiday_levels_lift_snow_to_winter_and_keep_the_rain_but_not_the_heat_or_ash() {
+    fn holiday_levels_lift_snow_to_winter_and_drop_the_rain_the_heat_and_the_ash() {
         let base = Levels { snow: 0.0, swamp: 0.3, lowland: 0.5, heat: 0.9, ash: 0.7 };
         let h = holiday_levels(base);
         assert_eq!(h.snow, 0.6, "no snow today still means winter");
-        assert_eq!((h.swamp, h.lowland), (0.3, 0.5), "the rain stays");
+        assert_eq!((h.swamp, h.lowland), (0.0, 0.0), "no rain in winter: only snow falls");
         assert_eq!((h.heat, h.ash), (0.0, 0.0), "winter has no haze and no ash");
         assert_eq!(holiday_levels(Levels { snow: 0.9, ..base }).snow, 0.9, "heavy snow stays heavy");
     }
