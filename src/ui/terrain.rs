@@ -43,6 +43,9 @@ use super::{daylight, sharp, water};
 #[allow(dead_code)]
 mod road_bake;
 
+/// The holiday look's water clock as a share of the real time (the flow, ripples and foam run at a quarter speed).
+const HOLIDAY_WATER_CLOCK: f32 = 0.25;
+
 /// The period of the `Clock` uniform (the water clock, seconds): 6400 = 64 × 100. Every drift in the
 /// shaders moves its noise by whole lattice periods (64 cells) over it, and every sine has a whole
 /// number of cycles in it, so the wrap is invisible. Keep the shader constants in step with the tests.
@@ -89,6 +92,10 @@ uniform vec2 WaterScale;
 uniform vec4 Edge;
 uniform vec2 Ramp;
 uniform float Clock;
+// The holiday look (`holiday.glsl`): Holiday and HolidayCheap are 0 or 1; SnowByCode is the snow share of each code.
+uniform float Holiday;
+uniform float HolidayCheap;
+uniform sampler2D SnowByCode;
 // @SHARP_UV@
 
 // Soft value noise (cheap, drifts with Clock): a hashed lattice, smoothly interpolated.
@@ -113,6 +120,8 @@ float code_at(vec2 c) {
     return floor(texture2D(Cells, (c + 0.5) / MapSize).r * 15.0 + 0.5);
 }
 
+// @HOLIDAY@
+
 vec3 ground(float code, vec2 px, vec3 water) {
     vec2 slot = vec2(mod(code, 4.0), floor(code / 4.0));
     vec2 t = mod(px, Tile);
@@ -129,9 +138,15 @@ void main() {
     // The water stage's coordinates: 1/3 per cell from the corner of the cell before map cell 0
     // (the original's terrain has a 1-cell border); the frame texture repeats.
     vec3 w = texture2D(Water, sharp_uv((p + 1.5) / 3.0, WaterSize, WaterScale)).rgb;
-    vec3 top = mix(ground(code_at(i), px, w), ground(code_at(i + vec2(1.0, 0.0)), px, w), f.x);
-    vec3 bottom = mix(ground(code_at(i + vec2(0.0, 1.0)), px, w), ground(code_at(i + vec2(1.0, 1.0)), px, w), f.x);
+    vec4 k = vec4(code_at(i), code_at(i + vec2(1.0, 0.0)), code_at(i + vec2(0.0, 1.0)), code_at(i + vec2(1.0, 1.0)));
+    vec3 top = mix(ground(k.x, px, w), ground(k.y, px, w), f.x);
+    vec3 bottom = mix(ground(k.z, px, w), ground(k.w, px, w), f.x);
     vec3 col = mix(top, bottom, f.y);
+    // The holiday look: the snow over the ground, the ice over the water (`holiday.glsl`).
+    col = holiday_ground(col, k, f.x, f.y, p, 0.0);
+    if (Holiday > 0.5 && WaterOn > 0.5) {
+        col = holiday_ice(col, water_blend(k, f.x, f.y));
+    }
     if (Edge.x > 0.5) {
         // Past the border (p in cell units, the border at -0.5 and MapSize - 0.5): the war fog's
         // own colour, its opacity rising from the border (thin wisps, darker and lighter with two
@@ -154,6 +169,9 @@ void main() {
 // The neighbours shader: `terrain/neighbours.glsl`, one source for every variant (`variant_text`).
 const NEW_FRAGMENT: &str = include_str!("terrain/neighbours.glsl");
 
+// The holiday look's snow and ice, the same text in both shaders (`holiday.glsl`).
+const HOLIDAY_GLSL: &str = include_str!("terrain/holiday.glsl");
+
 /// The cache's composite: the cached ground at each pixel of the quad, read by the pixel's
 /// window position (`gl_FragCoord`), so the quad's own geometry decides the coverage, as the
 /// terrain's own draw does.
@@ -169,7 +187,7 @@ void main() {
 "#;
 
 /// The uniforms every terrain shader declares (the old one leaves `Overlay` out of its code).
-const UNIFORMS: [(&str, UniformType); 31] = [
+const UNIFORMS: [(&str, UniformType); 33] = [
     ("View", UniformType::Float4),
     ("MapSize", UniformType::Float2),
     ("CellPx", UniformType::Float2),
@@ -203,6 +221,9 @@ const UNIFORMS: [(&str, UniformType); 31] = [
     ("NatWarpFreq", UniformType::Float1),
     ("DetAmp", UniformType::Float1),
     ("DetScale", UniformType::Float1),
+    // The holiday look («Новогодний вид», `holiday.rs`): the snow and the ice, and the cheap ground's flat mix.
+    ("Holiday", UniformType::Float1),
+    ("HolidayCheap", UniformType::Float1),
 ];
 
 /// Wrapped border around each atlas slot, in pixels.
@@ -273,6 +294,33 @@ pub fn fog_opacity(d: f32) -> f32 {
 fn smoothstep01(e0: f32, e1: f32, x: f32) -> f32 {
     let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// The holiday look's ground snow by `.DTm` terrain code (`gfx::TERRAIN_TEXTURES`): the share of the ground the snow
+/// covers, 0 bare to 1 white.
+///
+/// | code | texture | snow |
+/// |---|---|---|
+/// | 0, 1, 2 | Shallow, Water, DeepWater | 0 (water: iced by the shader, not snowed) |
+/// | 3 | FlameLand | 0 (fire land) |
+/// | 4 | Road | 0 (roads stay readable) |
+/// | 5, 6, 7 | LowLand, land, plain | 1.0 (open land) |
+/// | 8, 9 | Swamp, DeepSwamp | 0.6 |
+/// | 10 | Desert | 0.5 |
+/// | 11 | Badground | 0 (scorched ground) |
+/// | 12 | Rock | 0.5 (stony soil) |
+/// | 13 | Dust | 0.5 |
+/// | 14, 15 | Snow, Ice | 0 (already white) |
+/// | 16 and up | none (a mod's code past the table) | 0 |
+///
+/// The design's forest floor has no code in DT's standard table, so it has no share here.
+pub fn snow_amount(code: u8) -> f32 {
+    match code {
+        5..=7 => 1.0,
+        8 | 9 => 0.6,
+        10 | 12 | 13 => 0.5,
+        _ => 0.0,
+    }
 }
 
 /// The terrain profiling switches (see the module doc), as they are in effect.
@@ -738,6 +786,8 @@ struct GroundCache {
     cheap: bool,
     /// The natural look (`natural_look`: the blocks and the tuning) the cached ground was drawn with: a change redraws it.
     nat: NatLook,
+    /// The holiday look (on, cheap) the cached ground was drawn with: a change redraws it.
+    holiday: (bool, bool),
 }
 
 /// The ground cache's steps taken so far, by kind (`Moving`, `Fill`, `Scroll`): the performance test's pan cells read
@@ -842,6 +892,8 @@ pub struct TerrainLayer {
     water: Vec<Texture2D>,
     /// The live water's noise (`water::noise_texels`), read by the neighbours shader's `wnoise`.
     noise: Texture2D,
+    /// The holiday look's snow share by code (`snow_amount`): a 16×1 texture, red the share.
+    snow: Texture2D,
     /// Surface codes and size of the map in `cells`, to rebuild it when the map changes.
     cells: RefCell<Option<CellTextures>>,
     ground: RefCell<GroundCache>,
@@ -902,6 +954,17 @@ fn noise_texture() -> Texture2D {
     tex
 }
 
+/// The holiday look's snow table as a texture (`snow_amount` by code, nearest: one texel per code).
+fn snow_texture() -> Texture2D {
+    let bytes: Vec<u8> = (0..16u8).flat_map(|c| {
+        let v = (snow_amount(c) * 255.0).round() as u8;
+        [v, v, v, 255]
+    }).collect();
+    let tex = Texture2D::from_rgba8(16, 1, &bytes);
+    tex.set_filter(FilterMode::Nearest);
+    tex
+}
+
 /// A material of `fragment` with the uniforms and textures it declares.
 fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
     let params = MaterialParams {
@@ -929,7 +992,7 @@ fn make_blended_material(fragment: &str, uniforms: &[(&str, UniformType)], textu
 }
 
 /// The textures the neighbours shader declares (every variant declares the same list).
-const NEW_TEXTURES: [&str; 7] = ["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank", "Paths"];
+const NEW_TEXTURES: [&str; 8] = ["Neighbours", "Atlas", "Water", "Flow", "Noise", "Bank", "Paths", "SnowByCode"];
 
 /// One variant of the neighbours shader (`neighbours.glsl`): the blocks a material holds. A draw picks the variant
 /// that holds only the blocks it uses, so the ground pass carries no water code and no fog, and the unlit and the
@@ -995,6 +1058,7 @@ fn variant_text(v: Variant) -> String {
         .replacen("#version 100\n", &format!("#version 100\n{defines}"), 1)
         .replace("@CP@", precision)
         .replace("@SHARP_UV@", sharp::SHARP_UV_GLSL)
+        .replace("// @HOLIDAY@", HOLIDAY_GLSL)
 }
 
 /// The neighbours shader's material for variant `v`.
@@ -1035,7 +1099,7 @@ impl TerrainLayer {
             }
         }
         if !opts.new_shader {
-            old = Some(make_material(&FRAGMENT.replace("// @SHARP_UV@", sharp::SHARP_UV_GLSL), &UNIFORMS, &["Cells", "Atlas", "Water"]).map_err(|e| razdor::diag!("terrain shader: {e}")).ok()?);
+            old = Some(make_material(&FRAGMENT.replace("// @SHARP_UV@", sharp::SHARP_UV_GLSL).replace("// @HOLIDAY@", HOLIDAY_GLSL), &UNIFORMS, &["Cells", "Atlas", "Water", "SnowByCode"]).map_err(|e| razdor::diag!("terrain shader: {e}")).ok()?);
         }
         if opts.cache {
             composite = make_material(COMPOSITE_FRAGMENT, &[("ScreenSize", UniformType::Float2), ("Shift", UniformType::Float2)], &["Ground"]).map_err(|e| razdor::diag!("terrain cache copy: {e}")).ok();
@@ -1066,6 +1130,7 @@ impl TerrainLayer {
             slot: vec2((tw + 2 * PAD) as f32, (th + 2 * PAD) as f32),
             water,
             noise: noise_texture(),
+            snow: snow_texture(),
             cells: RefCell::new(None),
             ground: RefCell::new(GroundCache::default()),
             pictures: RefCell::new(WaterPictures::default()),
@@ -1183,9 +1248,11 @@ impl TerrainLayer {
         // «Смешивание земли» changed: the cached ground (and the water pictures) hold the other look, so they are drawn again.
         let cheap = cheap_path(self.opts.new_shader, self.opts.cheap, blend_on());
         let nat = natural_look();
-        if g.cheap != cheap || g.nat != nat {
+        let holiday = (super::holiday::on(), super::holiday::cheap());
+        if g.cheap != cheap || g.nat != nat || g.holiday != holiday {
             g.cheap = cheap;
             g.nat = nat;
+            g.holiday = holiday;
             g.key = None;
             g.wkey = None;
             *self.pictures.borrow_mut() = WaterPictures::default();
@@ -1331,6 +1398,10 @@ impl TerrainLayer {
             m.set_texture("Cells", maps.cells.clone());
         }
         m.set_texture("Atlas", self.atlas.clone());
+        m.set_texture("SnowByCode", self.snow.clone());
+        // The holiday look (`holiday.rs`): the snow and the ice; the cheap look's flat mix.
+        m.set_uniform("Holiday", if super::holiday::on() { 1.0f32 } else { 0.0 });
+        m.set_uniform("HolidayCheap", if super::holiday::cheap() { 1.0f32 } else { 0.0 });
         let water = water_ms.filter(|_| water_on && !self.water.is_empty()).map(|ms| self.water[water_frame(ms)].clone());
         m.set_uniform("WaterOn", if water.is_some() { 1.0f32 } else { 0.0 });
         let water = water.unwrap_or_else(|| self.atlas.clone());
@@ -1350,7 +1421,9 @@ impl TerrainLayer {
         let fog = edge_fog_colour();
         m.set_uniform("Edge", vec4(if edge_on { 1.0 } else { 0.0 }, fog[0], fog[1], fog[2]));
         m.set_uniform("Ramp", vec2(EDGE_SOLID, EDGE_FULL));
-        m.set_uniform("Clock", water_ms.map_or(0.0, |ms| (ms as f32 / 1000.0) % CLOCK_PERIOD));
+        // The holiday look slows the water's clock (its flow, ripples and foam) to a quarter; the period still wraps whole.
+        let clock = if super::holiday::on() { HOLIDAY_WATER_CLOCK } else { 1.0 };
+        m.set_uniform("Clock", water_ms.map_or(0.0, |ms| (ms as f32 / 1000.0 * clock) % CLOCK_PERIOD));
         m.set_uniform("Overlay", if mode == Mode::Overlay { 1.0f32 } else { 0.0 });
         // Live water («Живая вода»): the water's draws only (the full pass and the overlay). The
         // sky's colour is the lighting's (the day's with the lighting off).
@@ -1937,7 +2010,7 @@ mod variant_tests {
             let v = of_bits(bits);
             let v = Variant { water: v.water || v.live || v.overlay, ..v };
             let t = variant_text(v);
-            assert!(!t.contains("@CP@") && !t.contains("@SHARP_UV@"), "{v:?}: a placeholder is left");
+            assert!(!t.contains("@CP@") && !t.contains("@SHARP_UV@") && !t.contains("// @HOLIDAY@"), "{v:?}: a placeholder is left");
             assert!(t.starts_with("#version 100\n#define LIVE_WATER "), "{v:?}: the defines follow the version line");
             assert_eq!(t.contains("mediump vec3 ground"), v.mediump, "{v:?}: the precision");
         }
@@ -1999,3 +2072,70 @@ mod natural_tests {
     }
 }
 
+
+#[cfg(test)]
+mod holiday_tests {
+    use super::*;
+    use razdor::dt::gfx::TERRAIN_TEXTURES;
+
+    #[test]
+    fn the_codes_name_the_classes_the_snow_table_is_about() {
+        let name = |c: u8| TERRAIN_TEXTURES[c as usize];
+        for c in [0, 1, 2] {
+            assert!(name(c).contains("Water") || name(c).contains("Shallow"), "{c}: {}", name(c));
+        }
+        assert_eq!(name(4), "Road.lit");
+        for c in [5, 6, 7] {
+            assert!(["LowLand.lit", "land.lit", "plain.lit"].contains(&name(c)), "{c}: {}", name(c));
+        }
+        for c in [8, 9] {
+            assert!(["Swamp.lit", "DeepSwamp.lit"].contains(&name(c)), "{c}: {}", name(c));
+        }
+        assert_eq!(name(10), "Desert.lit");
+        assert_eq!(name(14), "Snow.lit");
+        assert_eq!(name(15), "Ice.lit");
+    }
+
+    #[test]
+    fn open_land_gets_full_snow_and_swamp_and_sand_less() {
+        for c in [5u8, 6, 7] {
+            assert_eq!(snow_amount(c), 1.0, "open land {c}");
+        }
+        for c in [8u8, 9] {
+            assert_eq!(snow_amount(c), 0.6, "swamp {c}");
+        }
+        assert_eq!(snow_amount(10), 0.5, "desert");
+        assert_eq!(snow_amount(13), 0.5, "dust, as the desert");
+        assert_eq!(snow_amount(12), 0.5, "stony soil");
+    }
+
+    #[test]
+    fn snow_and_ice_are_already_white_and_roads_stay_bare() {
+        assert_eq!(snow_amount(14), 0.0, "snow is already white");
+        assert_eq!(snow_amount(15), 0.0, "ice is already white");
+        assert_eq!(snow_amount(4), 0.0, "roads stay readable");
+    }
+
+    #[test]
+    fn water_is_not_snow_and_fire_or_ash_gets_none() {
+        for c in [0u8, 1, 2] {
+            assert_eq!(snow_amount(c), 0.0, "water {c} is iced by the shader, not snowed");
+        }
+        assert_eq!(snow_amount(3), 0.0, "flame land");
+        assert_eq!(snow_amount(11), 0.0, "scorched ground");
+    }
+
+    #[test]
+    fn a_code_past_the_standard_table_gets_no_snow() {
+        assert_eq!(snow_amount(16), 0.0);
+        assert_eq!(snow_amount(255), 0.0, "a mod's code past the table");
+    }
+
+    #[test]
+    fn every_amount_is_a_fraction() {
+        for c in 0..=255u8 {
+            let a = snow_amount(c);
+            assert!((0.0..=1.0).contains(&a), "code {c}: {a}");
+        }
+    }
+}
