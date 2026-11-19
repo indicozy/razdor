@@ -15,6 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use macroquad::prelude::*;
 use razdor::local;
 
+use super::holiday;
+
 /// The setting (`Settings::map_weather`), pushed every frame by `display::follow_settings`.
 static ON: AtomicBool = AtomicBool::new(false);
 
@@ -23,9 +25,9 @@ pub fn set_pref(on: bool) {
     ON.store(on, Ordering::Relaxed);
 }
 
-/// Whether the weather is drawn (the setting, or `RAZDOR_WEATHER=1`).
+/// Whether the weather is drawn (the setting, or `RAZDOR_WEATHER=1`; the holiday look always draws it).
 pub fn on() -> bool {
-    ON.load(Ordering::Relaxed)
+    ON.load(Ordering::Relaxed) || holiday::on()
 }
 
 /// The weather kinds. Each has its own spell per day; the land decides where each one falls.
@@ -179,14 +181,35 @@ pub fn weights(code: u8) -> ([f32; 4], f32) {
     }
 }
 
+/// The weights of a terrain code under the holiday look («Новогодний вид»): as [`weights`], but snow
+/// lies on every land code (1.0), not on the water (codes 0 to 2). Codes past the standard table (a mod's)
+/// get none, as the ground snow does.
+pub fn weights_holiday(code: u8) -> ([f32; 4], f32) {
+    let (mut w, l) = weights(code);
+    if code > 2 && code < 16 {
+        w[0] = 1.0;
+    }
+    (w, l)
+}
+
+/// The snow the holiday look keeps on the land every day, whatever the schedule says.
+pub const HOLIDAY_SNOW: f32 = 0.6;
+
+/// The levels under the holiday look: snow at least [`HOLIDAY_SNOW`] every day; the rain as scheduled;
+/// no heat haze and no ash (winter has neither).
+pub fn holiday_levels(base: Levels) -> Levels {
+    Levels { snow: base.snow.max(HOLIDAY_SNOW), heat: 0.0, ash: 0.0, ..base }
+}
+
 /// The two mask textures' bytes for a map's terrain codes, one texel per cell, row by row: the
-/// `weather` texture (RGBA) and the `lowland` texture (red; green, blue 0; alpha 255).
-pub fn mask_texels(codes: &[u8]) -> (Vec<u8>, Vec<u8>) {
+/// `weather` texture (RGBA) and the `lowland` texture (red; green, blue 0; alpha 255). `holiday`: the
+/// snow weights of [`weights_holiday`].
+pub fn mask_texels(codes: &[u8], holiday: bool) -> (Vec<u8>, Vec<u8>) {
     let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
     let mut weather = Vec::with_capacity(codes.len() * 4);
     let mut lowland = Vec::with_capacity(codes.len() * 4);
     for &code in codes {
-        let (w, l) = weights(code);
+        let (w, l) = if holiday { weights_holiday(code) } else { weights(code) };
         weather.extend(w.map(byte));
         lowland.extend([byte(l), 0, 0, 255]);
     }
@@ -392,6 +415,7 @@ pub fn frame_levels(schedule: &Schedule, t: f64, now: f64) -> Option<Levels> {
         return None;
     }
     let target = Levels::at(schedule, t);
+    let target = if holiday::on() { holiday_levels(target) } else { target };
     let (shown, at) = SHOWN.get().unwrap_or((target, now));
     let shown = shown.eased_toward(target, (now - at).clamp(0.0, 1.0) as f32);
     SHOWN.set(Some((shown, now)));
@@ -908,7 +932,7 @@ mod tests {
 
     #[test]
     fn the_mask_texels_hold_one_texel_per_cell_with_the_weights_as_bytes() {
-        let (weather, lowland) = mask_texels(&[14, 6, 3, 0]);
+        let (weather, lowland) = mask_texels(&[14, 6, 3, 0], false);
         assert_eq!(weather, vec![255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 255, 0, 0, 0, 0]);
         assert_eq!(lowland, vec![0, 0, 0, 255, 255, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
     }
@@ -1090,5 +1114,36 @@ mod tests {
         assert_eq!(scissor_of([10.5, 3.0, 4.0, 5.0], 2.0), (21, 6, 8, 10));
         // A fraction of a physical pixel still counts as a pixel.
         assert_eq!(scissor_of([0.2, 0.2, 0.3, 0.3], 1.0), (0, 0, 1, 1));
+    }
+
+    #[test]
+    fn holiday_levels_lift_snow_to_winter_and_keep_the_rain_but_not_the_heat_or_ash() {
+        let base = Levels { snow: 0.0, swamp: 0.3, lowland: 0.5, heat: 0.9, ash: 0.7 };
+        let h = holiday_levels(base);
+        assert_eq!(h.snow, 0.6, "no snow today still means winter");
+        assert_eq!((h.swamp, h.lowland), (0.3, 0.5), "the rain stays");
+        assert_eq!((h.heat, h.ash), (0.0, 0.0), "winter has no haze and no ash");
+        assert_eq!(holiday_levels(Levels { snow: 0.9, ..base }).snow, 0.9, "heavy snow stays heavy");
+    }
+
+    #[test]
+    fn weights_holiday_snows_every_land_code_and_no_water_or_unknown_code() {
+        assert_eq!(weights_holiday(6), ([1.0, 0.0, 0.0, 0.0], 1.0), "grass");
+        assert_eq!(weights_holiday(0), ([0.0; 4], 0.0), "shallow water");
+        assert_eq!(weights_holiday(2), ([0.0; 4], 0.0), "deep water");
+        assert_eq!(weights_holiday(8), ([1.0, 1.0, 0.0, 0.0], 0.0), "swamp: snow over the swamp rain");
+        assert_eq!(weights_holiday(200), ([0.0; 4], 0.0), "a mod's code past the table: none");
+    }
+
+    #[test]
+    fn the_look_turns_the_weather_on_and_snows_every_day() {
+        holiday::set_pref(true, false);
+        assert!(on());
+        for day in 0..30 {
+            let levels = frame_levels(&schedule(1), day as f64 + 0.5, 0.0).expect("winter: always some snow");
+            assert!(levels.snow >= 0.6, "day {day}: {}", levels.snow);
+            assert_eq!((levels.heat, levels.ash), (0.0, 0.0), "day {day}");
+        }
+        holiday::set_pref(false, false);
     }
 }

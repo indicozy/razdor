@@ -26,9 +26,9 @@ pub fn set_prefs(on: bool) {
     LIVING.set(on || ENV_ON.with(|e| *e));
 }
 
-/// Whether the map is alive this frame (the setting, or `RAZDOR_LIVING=1`).
+/// Whether the map is alive this frame (the setting, `RAZDOR_LIVING=1`, or the holiday look).
 pub fn on() -> bool {
-    LIVING.get()
+    LIVING.get() || super::holiday::on()
 }
 
 // ----- Smoke -----
@@ -426,6 +426,16 @@ mod tests {
 
     fn image(w: u32, h: u32) -> Image {
         Image { width: w, height: h, rgba: vec![200; (w * h * 4) as usize] }
+    }
+
+    #[test]
+    fn the_holiday_look_turns_the_map_alive_too() {
+        set_prefs(false);
+        assert!(!on());
+        crate::ui::holiday::set_pref(true, false);
+        assert!(on(), "the look's smoke, flags and birds");
+        crate::ui::holiday::set_pref(false, false);
+        assert!(!on());
     }
 
     #[test]

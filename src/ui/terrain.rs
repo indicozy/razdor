@@ -652,6 +652,8 @@ struct CellTextures {
     gen: Option<u64>,
     flow_len: usize,
     size: (u32, u32),
+    /// Whether the holiday look was on when the masks were made (its snow weights differ).
+    holiday: bool,
     tex: MapTextures,
 }
 
@@ -1084,11 +1086,13 @@ impl TerrainLayer {
     /// surface and hills), so the same generation means the same flow.
     fn cells(&self, codes: &[u8], w: u32, h: u32, flow: &[(f32, f32)], gen: Option<u64>) -> MapTextures {
         let mut cache = self.cells.borrow_mut();
+        let holiday = super::holiday::on();
         if let Some(c) = cache.as_ref() {
-            let same = match gen {
-                Some(g) => c.gen == Some(g) && c.size == (w, h) && c.flow_len == flow.len(),
-                None => c.gen.is_none() && c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow,
-            };
+            let same = c.holiday == holiday
+                && match gen {
+                    Some(g) => c.gen == Some(g) && c.size == (w, h) && c.flow_len == flow.len(),
+                    None => c.gen.is_none() && c.size == (w, h) && c.codes == codes && c.flow.as_slice() == flow,
+                };
             if same {
                 return c.tex.clone();
             }
@@ -1126,7 +1130,7 @@ impl TerrainLayer {
                 (t, 0)
             }
         };
-        let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes);
+        let (biome_bytes, lowland_bytes) = super::weather::mask_texels(codes, holiday);
         // Nearest: the shader blends the four cells itself (`weather::mask4`).
         let weather = Texture2D::from_rgba8(w as u16, h as u16, &biome_bytes);
         weather.set_filter(FilterMode::Nearest);
@@ -1138,7 +1142,7 @@ impl TerrainLayer {
         let tex = MapTextures { cells, neighbours, flow: flow_tex, bank: bank_tex, paths: paths_tex, paths_baked: baked.is_some(), weather, lowland, weather_boxes, weather_seed };
         // The keyed entries hold no copy of the codes and the flow (nothing to compare then).
         let (kept_codes, kept_flow) = if gen.is_some() { (Vec::new(), Vec::new()) } else { (codes.to_vec(), flow.to_vec()) };
-        *cache = Some(CellTextures { codes: kept_codes, flow: kept_flow, gen, flow_len: flow.len(), size: (w, h), tex: tex.clone() });
+        *cache = Some(CellTextures { codes: kept_codes, flow: kept_flow, gen, flow_len: flow.len(), size: (w, h), holiday, tex: tex.clone() });
         tex
     }
 
