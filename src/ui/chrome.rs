@@ -255,7 +255,7 @@ pub fn warm(budget_ms: f64) -> f64 {
     if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
         return 0.0;
     }
-    let start = std::time::Instant::now();
+    let start = web_time::Instant::now();
     WARM.with(|w| {
         let mut queue = std::mem::take(&mut *w.borrow_mut());
         if queue.is_empty() {
@@ -265,7 +265,7 @@ pub fn warm(budget_ms: f64) -> f64 {
             &mut queue,
             |(path, _)| preload::is_ready(path),
             |(path, rel)| {
-                let t0 = std::time::Instant::now();
+                let t0 = web_time::Instant::now();
                 let _ = art(rel, Fx::Plain);
                 if razdor::diag::profiling() {
                     let ms = t0.elapsed().as_secs_f64() * 1000.0;

@@ -980,7 +980,7 @@ fn now_secs() -> u64 {
     if crate::ui::clock::is_snapshot() {
         return SNAPSHOT_SECS;
     }
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 /// The date a snapshot shows for the computer's time (2025-06-15 12:00 UTC).

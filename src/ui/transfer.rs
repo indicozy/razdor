@@ -334,5 +334,5 @@ fn import_failed(why: &str) -> Done {
 
 /// Seconds since 1970 now.
 fn now_secs() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }

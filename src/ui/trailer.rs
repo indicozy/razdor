@@ -347,7 +347,7 @@ pub fn phone_layout() -> Option<f32> {
 /// since the shot's clock is the frame count (a counter on it would read the shot's fps).
 pub fn wall_seconds() -> f64 {
     local! {
-        static START: std::time::Instant = std::time::Instant::now();
+        static START: web_time::Instant = web_time::Instant::now();
     }
     START.with(|s| s.elapsed().as_secs_f64())
 }
@@ -1023,7 +1023,7 @@ struct Sinks {
     hashes: Option<std::fs::File>,
     hash_path: Option<PathBuf>,
     out: Option<PathBuf>,
-    started: std::time::Instant,
+    started: web_time::Instant,
     frame_times: Vec<f64>,
 }
 
@@ -1100,7 +1100,7 @@ fn open_sinks(cfg: &Config) -> Result<(), String> {
             hashes,
             hash_path: cfg.hashes.clone(),
             out: cfg.out.clone(),
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             frame_times: Vec::new(),
         })
     });

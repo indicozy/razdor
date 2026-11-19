@@ -530,11 +530,11 @@ fn retire_folder(folder: &Path, name: &str) {
 }
 
 fn now_secs() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
 fn now_millis() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis())
+    web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_millis())
 }
 
 /// The session slot's file in save folder `dir`: `auto/session.rzsave`.
@@ -738,7 +738,7 @@ fn read_meta_uncached(path: &Path) -> Result<SaveMeta, SaveError> {
 }
 
 /// What tells a save file's versions apart: its length and its time of writing.
-type FileStamp = (u64, Option<std::time::SystemTime>);
+type FileStamp = (u64, Option<web_time::SystemTime>);
 
 fn file_stamp(path: &Path) -> std::io::Result<FileStamp> {
     let m = std::fs::metadata(path)?;
@@ -893,7 +893,7 @@ pub fn list_files(dir: &Path, kind: SaveKind) -> Vec<ListedSave> {
         .into_iter()
         .filter(|(p, s)| !failed_meta(p, *s))
         .map(|(path, stamp)| {
-            let written = stamp.1.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+            let written = stamp.1.and_then(|t| t.duration_since(web_time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
             let pinned = file_name(&path).is_some_and(|n| pins.contains(&n));
             let meta = cached_meta(&path, stamp);
             ListedSave { path, stamp, written, pinned, meta }
@@ -1749,7 +1749,7 @@ pub(crate) mod tests {
 
     /// Fills `v` until no meta is waiting (the readers are threads), or fails after 10 s.
     fn fill_all(v: &mut Vec<ListedSave>) {
-        let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let until = web_time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             let states: Vec<MetaState> = v.iter_mut().map(ListedSave::fill).collect();
             let mut k = 0;
@@ -1760,7 +1760,7 @@ pub(crate) mod tests {
             if !states.contains(&MetaState::Waiting) {
                 return;
             }
-            assert!(std::time::Instant::now() < until, "the metas never came");
+            assert!(web_time::Instant::now() < until, "the metas never came");
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }

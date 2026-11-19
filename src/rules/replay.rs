@@ -703,7 +703,7 @@ fn smoke_every_map() {
             _ => Driver::new(&dt, &c, &m.name, HeroClass::Knight),
         };
         let from = if follows { " (from the last map)" } else { "" };
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         'rounds: for _round in 0..3 {
             let mut todo: Vec<u16> = d.g.world.locations.iter().filter(|l| !l.kind.is_bridge() && l.id != 0).map(|l| l.id).collect();
             while !todo.is_empty() {

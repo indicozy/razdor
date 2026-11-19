@@ -7603,7 +7603,7 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     if ticked {
         // The AI's moves of a step may take more than the frame has: they stop at the budget and
         // go on in the next frames, which keep drawing (`Game::tick_within`).
-        let frame_start = std::time::Instant::now();
+        let frame_start = web_time::Instant::now();
         let mut within_budget = || frame_start.elapsed() < AI_FRAME_BUDGET;
         events = frame_probe::time(Stage::Tick, || game.tick_shown_within(crate::ui::clock::frame_dt().min(0.1), &mut within_budget));
     }

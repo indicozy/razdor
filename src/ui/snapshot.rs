@@ -383,7 +383,7 @@ pub fn open_later(app: &mut App, frame: u64) -> bool {
     }) else {
         return false;
     };
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     // The F1 key list (`keys`) over the scene: the phones' «Клавиши» opens it the same way.
     if what == "keys" {
         app.help = true;

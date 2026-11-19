@@ -1319,7 +1319,7 @@ mod tests {
 
     /// The mock hub's catalog (nothing from the game), in a folder of its own.
     fn mock_catalog(tag: &str) -> Catalog {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         let local = std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id()));
         Hub { source: Source::Mock, local }.catalog().unwrap()
     }
@@ -1352,7 +1352,7 @@ mod tests {
     const URL: &str = "https://example.org/hub/latest/download";
 
     fn hub_at(source: Source, tag: &str) -> Hub {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         Hub { source, local: std::env::temp_dir().join(format!("razdor-hubview-{tag}-{}-{nanos}", std::process::id())) }
     }
 

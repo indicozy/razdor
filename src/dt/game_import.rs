@@ -376,7 +376,8 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
     use std::io::{Cursor, Write as _};
-    use std::time::{Duration, SystemTime};
+    use std::time::Duration;
+    use web_time::SystemTime;
 
     /// A fresh folder for a test, removed by the test at its end.
     struct Scratch(PathBuf);

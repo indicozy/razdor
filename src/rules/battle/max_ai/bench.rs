@@ -361,7 +361,7 @@ fn write_baseline(battles: &[Entry]) {
 #[test]
 #[ignore]
 fn max_bench() {
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     let entries = run(battles(DEMO_BATTLES, BENCH_EVERY));
     let wall = started.elapsed().as_secs_f64();
     let (max, base, greedy) = summarize(&entries);

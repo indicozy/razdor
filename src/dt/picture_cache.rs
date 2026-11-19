@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::UNIX_EPOCH;
+use web_time::UNIX_EPOCH;
 
 use super::gfx::Image;
 
@@ -276,7 +276,7 @@ fn write_with(budget: &Budget, cap: u64, dir: &Path, key: u64, frames: &[Image])
     if std::fs::create_dir_all(dir).is_err() || !budget.reserve(dir, len, cap) {
         return;
     }
-    let nanos = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let nanos = web_time::SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     let tmp = dir.join(format!(".{key:016x}.{}.{nanos}.tmp", std::process::id()));
     if std::fs::write(&tmp, &bytes).is_err() || std::fs::rename(&tmp, entry_path(dir, key)).is_err() {
         let _ = std::fs::remove_file(&tmp);

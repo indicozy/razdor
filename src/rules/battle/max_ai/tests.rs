@@ -983,7 +983,7 @@ fn a_long_quick_battle_keeps_to_its_time() {
     let dt = DtInstall::load(std::path::Path::new(&dir)).unwrap();
     let c = Arc::new(Content::from_dt(&dt));
     let (name, mut b) = custom_battles(&c, "custom", 37, 12, 23).remove(36);
-    let t = std::time::Instant::now();
+    let t = web_time::Instant::now();
     b.max_play_to_end(MAX_QUICK_BUDGET);
     let scale = std::env::var("RAZDOR_PERF_BUDGET_SCALE").ok().and_then(|s| s.trim().parse::<f64>().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
     assert!(t.elapsed() <= Duration::from_secs(8).mul_f64(scale), "{name}: {:?}", t.elapsed());

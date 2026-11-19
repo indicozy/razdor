@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 

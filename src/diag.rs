@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use web_time::Instant;
 
 struct Log {
     file: Option<File>,

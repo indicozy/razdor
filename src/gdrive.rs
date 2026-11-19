@@ -596,7 +596,7 @@ mod tests {
         let dir = PathBuf::from(dir);
         let dest = dir.join("game.zip");
         let progress = Progress::default();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let result = download_game(&Http, &game(), &dest, &progress);
         println!("e2e: {result:?}; bytes {}; seconds {:.1}", progress.bytes(), started.elapsed().as_secs_f64());
         assert!(result.is_ok(), "{result:?}");

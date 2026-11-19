@@ -672,7 +672,7 @@ pub fn drop_game_folder(local: &Path, id: &str) {
 /// oldest, and ties go by id. Saves and `files/` are never touched (see [`drop_game_folder`]).
 pub fn keep_recent_game_folders(local: &Path, keep: usize) {
     let Ok(read) = std::fs::read_dir(local.join("mods")) else { return };
-    let mut mods: Vec<(String, Option<std::time::SystemTime>)> = read
+    let mut mods: Vec<(String, Option<web_time::SystemTime>)> = read
         .flatten()
         .filter(|entry| entry.path().is_dir())
         .map(|entry| {
@@ -971,7 +971,7 @@ fn base_fingerprint(base: &Path) -> Result<String, String> {
         }
         before_stat(&path);
         let meta = std::fs::metadata(&path).map_err(|e| format!("{rel}: {e}"))?;
-        let time = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+        let time = meta.modified().ok().and_then(|t| t.duration_since(web_time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
         lines.push(format!("{rel}\t{}\t{time}", meta.len()));
     }
     lines.sort();
@@ -984,7 +984,7 @@ mod tests {
     use crate::hub::{safe_name, Catalog, Installed};
 
     fn temp(tag: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         std::env::temp_dir().join(format!("razdor-mods-{tag}-{}-{nanos}", std::process::id()))
     }
 
@@ -1106,7 +1106,7 @@ mod tests {
         assert_eq!(stamp.layers.last().unwrap().files, hashed, "the stamp holds the digests of the decoded bytes");
         // A stamp that is kept is not rewritten: its mtime stays where it is set.
         let path = game.join(STAMP);
-        let past = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let past = web_time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
         std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(past).unwrap();
         let again = prepare_mod(&local, &base, "m1").unwrap();
         assert_eq!(again, game, "the same folder");
@@ -1468,12 +1468,12 @@ mod tests {
 
     /// A time for a mod's `last_played` marker: `n` seconds after a fixed start, so the tests
     /// order the markers without relying on the clock.
-    fn played_at(n: u64) -> std::time::SystemTime {
-        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000 + n)
+    fn played_at(n: u64) -> web_time::SystemTime {
+        web_time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000 + n)
     }
 
     /// Sets mod `id`'s `last_played` marker to `at`.
-    fn set_played(local: &Path, id: &str, at: std::time::SystemTime) {
+    fn set_played(local: &Path, id: &str, at: web_time::SystemTime) {
         let path = mod_dir(local, id).join(LAST_PLAYED);
         std::fs::OpenOptions::new().write(true).open(&path).unwrap().set_modified(at).unwrap();
     }

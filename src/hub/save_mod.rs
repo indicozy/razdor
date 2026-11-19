@@ -176,7 +176,7 @@ mod tests {
 
     impl Scratch {
         fn new(tag: &str) -> Scratch {
-            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
             let local = std::env::temp_dir().join(format!("razdor-savemod-{tag}-{}-{nanos}", std::process::id()));
             let base = local.join("base");
             std::fs::create_dir_all(&base).unwrap();

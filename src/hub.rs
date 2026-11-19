@@ -1738,7 +1738,7 @@ mod tests {
     use crate::dt::dtm::Scenario;
 
     fn temp(tag: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         std::env::temp_dir().join(format!("razdor-hub-{tag}-{}-{nanos}", std::process::id()))
     }
 

@@ -186,7 +186,7 @@ pub(crate) mod tests {
 
     /// A fresh folder under the system temp dir (left for the OS to clean).
     pub(crate) fn temp_dir(tag: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         let d = std::env::temp_dir().join(format!("razdor-editor-{tag}-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d

@@ -17,7 +17,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use macroquad::prelude::{screen_height, screen_width};
 use razdor::i18n::{n_, tr};
@@ -962,7 +963,7 @@ pub fn handle_escape(app: &mut App) -> bool {
 /// clipboard where that works. Returns the file or why it was not written.
 pub fn save(report: &Report) -> Result<PathBuf, String> {
     let dir = razdor::platform::app_dir().ok_or_else(|| tr("No folder to save into.").to_string())?;
-    let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let epoch = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(file_name(epoch));
     std::fs::write(&path, report_text(report)).map_err(|e| e.to_string())?;

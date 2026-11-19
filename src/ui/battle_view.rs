@@ -2331,7 +2331,8 @@ mod tests {
     /// played once it comes, and the battle reaches its end.
     #[test]
     fn max_thinks_on_a_worker_and_the_frame_goes_on() {
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use web_time::Instant;
         let mut view = bandit_camp();
         view.battle.set_max_ai(true);
         let t0 = Instant::now();
@@ -2363,7 +2364,8 @@ mod tests {
     /// `Battle::max_play_to_end` does and never holds the frame.
     #[test]
     fn max_plays_both_sides_of_the_watched_and_the_quick_battle() {
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use web_time::Instant;
         let mut watched = bandit_camp();
         watched.battle.set_max_ai(true);
         watched.toggle_watch();

@@ -7,7 +7,7 @@
 //! Run: `RAZDOR_DEPTH_MODEL=<file> cargo test --release --lib depth::parity -- --nocapture`
 
 use std::path::Path;
-use std::time::Instant;
+use web_time::Instant;
 
 use super::cut::cut;
 use super::{cards_for, DepthModel};

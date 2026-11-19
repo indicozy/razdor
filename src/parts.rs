@@ -33,7 +33,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The pieces a file is fetched in at once.
 pub const PIECES: u64 = 8;

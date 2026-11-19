@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(decode(&code, &c).unwrap().setup, s);
         // A paste of megabytes: refused without decoding it.
         let huge = format!("{PREFIX}{}", "z".repeat(4_000_000));
-        let t = std::time::Instant::now();
+        let t = web_time::Instant::now();
         assert_eq!(decode(&huge, &c), Err(CodeError::Damaged));
         assert_eq!(decode(&format!("{PREFIX}{}", "z".repeat(MAX_BODY + 1)), &c), Err(CodeError::Damaged));
         assert!(t.elapsed().as_millis() < 1000, "{:?}", t.elapsed());

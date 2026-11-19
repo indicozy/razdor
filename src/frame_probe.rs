@@ -58,7 +58,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The per-frame CSV's columns (`RAZDOR_PROFILE_FRAMES`): the times in ms, `tick` the game's
 /// tick, `world` the map with `terrain` inside it, `rebuilds` the texture rebuilds, `draws` the

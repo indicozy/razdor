@@ -250,7 +250,7 @@ impl EventRng {
 
     /// Seeded from the clock, as the original does from the time-stamp counter.
     pub fn from_clock() -> Self {
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+        let t = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
         EventRng(t as u32 ^ (t >> 32) as u32)
     }
 

@@ -18,7 +18,8 @@ use razdor::rules::game::Game;
 use razdor::rules::save::{self, ScenarioRef};
 use std::cell::{Cell, RefCell};
 use std::ffi::CStr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// How often the thermal line is written in the debug mode.
 pub const THERMAL_EVERY: Duration = Duration::from_secs(60);

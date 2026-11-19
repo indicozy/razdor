@@ -132,7 +132,7 @@ pub fn run(job: &mut Job, path: Option<&Path>, s: &Settings, stop: &AtomicBool, 
         let texts: Vec<&str> = batch.iter().map(|&i| job.entries[i].src.as_str()).collect();
         let prompt = llm::user_prompt(&texts, &glossary, &job.language, &s.style);
         report(job, Event::Sending { items: batch.len(), first: texts[0].chars().take(60).collect() });
-        let t0 = std::time::Instant::now();
+        let t0 = web_time::Instant::now();
         // The job's own language and letters.
         let rules = llm::system_prompt(&Settings { language: job.language.clone(), any_script: job.any_script, ..s.clone() });
         if job.made_with.is_none() || job.done() == 0 {
@@ -144,7 +144,7 @@ pub fn run(job: &mut Job, path: Option<&Path>, s: &Settings, stop: &AtomicBool, 
             path,
             &format!(
                 "{REQUEST_HEAD}{request} | {} (unix s) | model {} | {} texts\n--- system\n{rules}\n--- user\n{prompt}\n--- answer\n{}\n",
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
+                web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs()),
                 s.model,
                 batch.len(),
                 match &asked {

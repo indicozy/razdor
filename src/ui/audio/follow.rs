@@ -7,7 +7,8 @@
 //! [`MAX_TRIES`] tries for that id (a new default restarts the count).
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Tries for one default output before giving up on it (until the default changes again).
 pub const MAX_TRIES: u32 = 3;

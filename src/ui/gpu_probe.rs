@@ -51,7 +51,7 @@ pub fn gpu_wait(stage: Stage) {
 mod timers {
     use macroquad::miniquad::gl;
     use razdor::frame_probe::{self, Stage};
-    use std::time::Instant;
+    use web_time::Instant;
 
     /// Queries not read back yet are kept this long before they are dropped (a lost result must
     /// not grow the list without end).
@@ -179,7 +179,7 @@ pub fn timed<R>(f: impl FnOnce() -> R) -> R {
     unsafe {
         macroquad::window::get_internal_gl().flush();
         macroquad::miniquad::gl::glFinish();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let r = f();
         macroquad::window::get_internal_gl().flush();
         macroquad::miniquad::gl::glFinish();

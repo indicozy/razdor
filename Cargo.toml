@@ -27,6 +27,8 @@ rustybuzz = "0.20"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 sha2 = "0.10.9"
+# The clock (`Instant`, `SystemTime`): std's on every native target; on wasm32 the browser's, where std's panics.
+web-time = "1.1"
 # The system language (`ui::language`): the first start picks Russian or English from it. Pinned:
 # 0.3.2 (2024-11-01) reads the locale on Linux, macOS, iOS, Windows and Android.
 sys-locale = "=0.3.2"

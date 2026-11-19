@@ -37,7 +37,8 @@
 //! lets it sacrifice its units for a win it has proven.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::*;
 use crate::rules::recording::hook;

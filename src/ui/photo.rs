@@ -322,7 +322,7 @@ fn local_offset(_secs: i64) -> i64 {
 
 /// The local date and time now.
 pub fn now_stamp() -> Stamp {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let secs = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
     stamp_of(secs, local_offset(secs))
 }
 

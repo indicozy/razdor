@@ -3,7 +3,7 @@
 //! are `#[ignore]`d: run them by name, see `docs/flows/testing-and-tools.md`. The maps are built
 //! in memory, never written into the repo.
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use super::real_maps::{fight_it_out, play_days, DAYS};
 use super::*;

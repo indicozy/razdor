@@ -773,7 +773,7 @@ fn a_thirty_day_replay_is_small_and_its_keyframes_do_not_block_the_frame() {
     d.g.replay = Some(sess.clone());
     d.session = Some(sess);
         let mut f = Frames::new(DT_A, BUDGET_A);
-        let t0 = std::time::Instant::now();
+        let t0 = web_time::Instant::now();
         let _ = session(&mut d, &mut f, 30);
         let secs = t0.elapsed().as_secs_f64();
         d.session.as_ref().unwrap().finish();
@@ -783,10 +783,10 @@ fn a_thirty_day_replay_is_small_and_its_keyframes_do_not_block_the_frame() {
         let entries: usize = file.segments.iter().map(|s| s.entries.len()).sum();
         println!("REPLAY {prefix}: 30 days, {} bytes, {} entries ({:.1} bytes an entry), {} segments, played in {secs:.1} s", len, entries, len as f64 / entries.max(1) as f64, file.segments.len());
         // The frame's part of a keyframe (the state's JSON and hash) and the thread's (packing).
-        let t1 = std::time::Instant::now();
+        let t1 = web_time::Instant::now();
         let (json, _) = super::snapshot::capture(&d.g).unwrap();
         let capture_ms = t1.elapsed().as_secs_f64() * 1e3;
-        let t2 = std::time::Instant::now();
+        let t2 = web_time::Instant::now();
         let packed = save::pack(&json).unwrap();
         let pack_ms = t2.elapsed().as_secs_f64() * 1e3;
         println!("KEYFRAME {prefix}: frame part {capture_ms:.2} ms, thread part {pack_ms:.2} ms, {} bytes packed", packed.len());

@@ -36,7 +36,7 @@ struct Inner {
     /// The day of the last keyframe (a segment's start counts).
     keyframe_day: u64,
     /// When the last keyframe was written (a segment's start counts), for [`KEYFRAME_MIN_INTERVAL`].
-    last_keyframe: std::time::Instant,
+    last_keyframe: web_time::Instant,
 }
 
 impl Inner {
@@ -64,7 +64,7 @@ impl Recorder for SessionRecorder {
 }
 
 fn new_name() -> String {
-    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let millis = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
     format!("replay-{millis}.rzreplay")
 }
 
@@ -95,7 +95,7 @@ impl Session {
 
     fn begin(writer: Writer, name: String, game: &Game) -> Result<Session, String> {
         let day = game.clock.day_index();
-        let inner = Inner { writer, name, pending: Vec::new(), day, keyframe_day: day, last_keyframe: std::time::Instant::now() };
+        let inner = Inner { writer, name, pending: Vec::new(), day, keyframe_day: day, last_keyframe: web_time::Instant::now() };
         let (json, hash) = capture(game)?;
         inner.writer.keyframe(true, game.stamp(), day, hash, json);
         let inner = Arc::new(Mutex::new(inner));
@@ -144,7 +144,7 @@ impl Session {
                         g.flush();
                         g.writer.keyframe(false, game.stamp(), day, hash, json);
                         g.keyframe_day = day;
-                        g.last_keyframe = std::time::Instant::now();
+                        g.last_keyframe = web_time::Instant::now();
                     }
                     Err(_) => hook::request_keyframe(),
                 }

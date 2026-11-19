@@ -885,7 +885,7 @@ impl Audio {
     /// The system's default output changed (Windows): the sounds move to the new output, once for
     /// each change (`follow`). The music starts again from its beginning; the settings stay.
     fn follow_output(&mut self) {
-        let now = std::time::Instant::now();
+        let now = web_time::Instant::now();
         let Some(f) = self.follow.as_ref() else { return };
         let current = output::current();
         if !f.state.wants(now, current.as_deref()) {
@@ -950,7 +950,7 @@ impl Backend {
     /// The sounds of `dir` read and loaded into the open output, with the time it took; `None`
     /// (the reason logged) when the sound table cannot be read.
     fn load_dir(dir: &Path) -> Option<Backend> {
-        let t0 = std::time::Instant::now();
+        let t0 = web_time::Instant::now();
         match Backend::load(dir) {
             Ok(b) => {
                 let (fx, tracks, ms) = (b.sfx.len(), b.table.backgrounds.len(), t0.elapsed().as_millis());
@@ -1078,7 +1078,7 @@ impl Backend {
             }
             Change::Play(track) => {
                 let file = self.table.background(track).unwrap_or_default().to_string();
-                let t0 = std::time::Instant::now();
+                let t0 = web_time::Instant::now();
                 // Razdor's own: a read that fails for now is retried after a wait (`transient`),
                 // a file that cannot be played stays failed for the run.
                 let loaded: Result<(Sound, f64), (String, bool)> = match sound::read_sound(&self.dir, &file, self.raw_rate) {

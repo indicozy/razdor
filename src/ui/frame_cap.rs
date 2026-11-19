@@ -4,7 +4,8 @@
 //! and the trailer. Profiling switch: `RAZDOR_FRAME_CAP=30` (desktop), the file `profile-frame-cap-30`
 //! (or `-60`) in the app folder (Android); it overrides the setting.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The values the setting takes, in the order its row cycles them (0 is off).
 pub const CAPS: [u32; 3] = [0, 30, 60];

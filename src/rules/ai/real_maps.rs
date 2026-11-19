@@ -1,7 +1,7 @@
 //! The AI on the player's maps; skipped without `RAZDOR_DT_DIR`. Numbers only.
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::time::Instant;
+use web_time::Instant;
 
 use super::*;
 use crate::dt::dtm::Scenario;

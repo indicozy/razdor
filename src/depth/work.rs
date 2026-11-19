@@ -180,15 +180,15 @@ mod tests {
 
         let dir = std::env::temp_dir().join(format!("razdor-depth-work-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let mut service = Service::start(PathBuf::from(model), Some(dir.clone())).expect("a thread starts");
         for (img, id) in &picks {
             assert!(service.submit(Job { id: *id, img: img.clone() }), "the loader accepts jobs");
         }
         let mut answers = Vec::new();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        let deadline = web_time::Instant::now() + std::time::Duration::from_secs(300);
         while answers.len() < picks.len() {
-            assert!(std::time::Instant::now() < deadline, "the workers answer in time");
+            assert!(web_time::Instant::now() < deadline, "the workers answer in time");
             answers.extend(service.drain());
             std::thread::sleep(std::time::Duration::from_millis(20));
         }

@@ -211,7 +211,7 @@ fn pref_path() -> Option<PathBuf> {
 
 /// Saves `to` at `path` (written whole under a temporary name, then renamed). A failure is logged.
 fn write_pref(path: &Path, to: Host) {
-    let since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let since = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let json = serde_json::json!({ "host": to.name(), "since": since }).to_string();
     let tmp = path.with_extension("json.part");
     let written = path.parent().map_or(Ok(()), fs::create_dir_all).and_then(|_| fs::write(&tmp, json)).and_then(|_| fs::rename(&tmp, path));

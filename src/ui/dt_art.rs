@@ -569,12 +569,12 @@ impl DtArt {
         if queue.is_empty() {
             return 0.0;
         }
-        let start = std::time::Instant::now();
+        let start = web_time::Instant::now();
         preload::upload_within_budget(
             &mut queue,
             |(path, _)| preload::is_ready(path),
             |(path, item)| {
-                let t0 = std::time::Instant::now();
+                let t0 = web_time::Instant::now();
                 match *item {
                     Warm::Terrain(code) => {
                         self.terrain(code);

@@ -52,7 +52,7 @@ struct Store {
     /// Bytes of the ready pictures' frames (RGBA), against [`default_cap`].
     ready_bytes: usize,
     /// The first queue of the process ([`preload`]): its start, for the log of its end.
-    started: Option<std::time::Instant>,
+    started: Option<web_time::Instant>,
     /// Pictures the queue has stored as ready since [`preload`] started.
     queued_done: usize,
     /// The end of the queue is logged once per [`preload`] round.
@@ -182,7 +182,7 @@ pub fn decode_shared(path: &Path) -> Result<Arc<Vec<Image>>, DtError> {
         let generation = s.generation;
         let reread = s.dropped.contains(path);
         drop(s);
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let loaded = load(path);
         if reread && crate::diag::profiling() {
             crate::diag!("slow load: re-read {} from the picture cache, {:.1} ms (dropped from the store)", path.display(), started.elapsed().as_secs_f64() * 1000.0);
@@ -200,7 +200,7 @@ pub fn preload(paths: Vec<PathBuf>) {
     }
     let spawn = {
         let mut s = lock();
-        s.started.get_or_insert_with(std::time::Instant::now);
+        s.started.get_or_insert_with(web_time::Instant::now);
         s.done_logged = false;
         for p in paths {
             if s.ready.contains_key(&p) || s.pending.contains_key(&p) {
@@ -700,12 +700,12 @@ mod tests {
         let dir_tmp = std::env::temp_dir().join(format!("razdor-pc-time-{}", std::process::id()));
         for rel in ["Graphics/Windows/Win-paper.lit", "Graphics/Windows/Castle.lit", "Graphics/Textures/Ice.lit", "Graphics/Objects/Persones.ugs"] {
             let Ok(path) = crate::dt::stored::find_file(&dir, rel) else { continue };
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             let frames = gfx::decode_uncached(&path).expect("decodes");
             let decode = t.elapsed().as_secs_f64() * 1000.0;
             let key = picture_cache::source_key(&path).expect("key");
             picture_cache::write(&dir_tmp, key, &frames);
-            let t = std::time::Instant::now();
+            let t = web_time::Instant::now();
             let back = picture_cache::read(&dir_tmp, key).expect("reads");
             let read = t.elapsed().as_secs_f64() * 1000.0;
             assert!(back == frames);

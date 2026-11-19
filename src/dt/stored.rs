@@ -498,7 +498,7 @@ mod background_tests {
     /// is read from its `.lz4`: the same bytes and length, no error.
     #[test]
     fn a_plain_picture_converted_after_it_was_found_reads_its_lz4() {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         let dir = std::env::temp_dir().join(format!("razdor-stored-race-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("a.ugs"), b"unit picture bytes").unwrap();
@@ -514,7 +514,7 @@ mod background_tests {
     /// a file that is in neither form is not.
     #[test]
     fn present_follows_a_picture_converted_after_it_was_found() {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         let dir = std::env::temp_dir().join(format!("razdor-stored-present-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("a.ugs"), b"unit picture bytes").unwrap();
@@ -532,7 +532,7 @@ mod background_tests {
     /// conversion holds it, nothing returns; when the conversion ends, the wait returns.
     #[test]
     fn wait_converted_holds_while_a_conversion_runs_and_returns_when_it_ends() {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         let dir = std::env::temp_dir().join(format!("razdor-stored-gate-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         assert!(!wait_converted(&dir), "a folder that is not converting does not wait");
@@ -551,7 +551,7 @@ mod background_tests {
     /// The non-blocking check ([`is_converting`]) follows the same guard as the wait does.
     #[test]
     fn is_converting_follows_the_conversion_guard() {
-        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).unwrap().as_nanos();
         let dir = std::env::temp_dir().join(format!("razdor-stored-converting-{}-{nanos}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         assert!(!is_converting(&dir), "a folder that is not converting");
@@ -1096,7 +1096,7 @@ mod tests {
         let mut plain = Vec::new();
         collect_files(&copy, &mut plain);
         let plain_total: u64 = plain.iter().map(|p| fs::metadata(p).unwrap().len()).sum();
-        let started = std::time::Instant::now();
+        let started = web_time::Instant::now();
         let first = convert_owned(&copy).unwrap();
         let seconds = started.elapsed().as_secs_f64();
         let mut all = Vec::new();
