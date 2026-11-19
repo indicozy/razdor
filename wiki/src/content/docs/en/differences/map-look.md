@@ -120,18 +120,17 @@ The **"Weather"** switch shows weather that depends on the land under it:
 * snow over snowfields and ice;
 * rain over swamps and lowlands;
 * heat haze over deserts;
-* ash over fire lands;
-* cloud shadows across the whole map.
+* ash over fire lands.
 
 The weather changes over time: each game day brings its own, and the land decides which one it will be. When a window is open over the map, the weather keeps falling behind its edge. It is only a look.
 
 ![Weather on the map](../../../../assets/shots/weather.webp)
 
-The weather over the map: here, the cloud shadows show.
+The weather over the map: snow and rain on their own lands.
 
 ## Cloud shadows
 
-The **"Cloud shadows"** row (off by default) puts soft cloud shadows on the map. They drift slowly across it, and faster while the hero walks. The shadows are black, not blue. By day they are full, they fade toward dusk, and at night there are none. The row works on its own, without **"Weather"**. The weather has cloud shadows too: that is its own look.
+The **"Cloud shadows"** row (off by default) puts soft cloud shadows on the map. They drift slowly across it, and faster while the hero walks. The shadows are black, not blue. By day they are full, they fade toward dusk, and at night there are none. The row works on its own, without **"Weather"**. The weather draws no cloud shadows: only this row does.
 
 Without **"Map animation"**, the shadows stand still.
 

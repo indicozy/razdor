@@ -8295,7 +8295,6 @@ fn draw_weather(game: &Game, assets: &Assets, cam: &Camera, light: Option<daylig
         projection,
         levels,
         phase: (now % weather::PERIOD as f64) as f32,
-        clock: (now % super::terrain::CLOCK_PERIOD as f64) as f32,
         tint: light_tint,
         layers: if crate::ui::display::dp_px().is_some() { 2.0 } else { 3.0 },
         zoom: cam.scale / PX,

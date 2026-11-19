@@ -52,7 +52,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Mist instead of black** in additional settings ("No" by default, as in the original): unexplored land is hidden by an even haze ("Simple"), by drifting clouds ("Clouds") or by a rolling mist ("Billows"). Only the view changes.
 * **Moving water** in additional settings (off by default): the water ripples, foam runs along the shores and waves roll up, glints shine on lakes and the sea, rivers flow and ships leave a wake. Only the view changes.
 * **Ground blending** in additional settings (on by default): turn it off on weak phones to draw the map faster; the edges of roads and fields become stepped. Only the view changes.
-* **Weather** in additional settings (off by default): snow over snowfields, rain over swamps, heat haze over deserts, ash over fire lands and cloud shadows. Only the view changes.
+* **Weather** in additional settings (off by default): snow over snowfields, rain over swamps, heat haze over deserts, ash over fire lands. Only the view changes.
 * **Cloud shadows** in additional settings (off by default): soft shadows drift slowly over the map, faster while the hero walks. Only the view changes: [details](/razdor/wiki/en/differences/map-look/).
 * **Map decorations** in additional settings (off by default): grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites, "Few" or "Normal". Only the view changes: they do not affect movement and never lie on roads or buildings.
 * **Natural ground** in additional settings (off by default): the edges of fields, shores and roads bend in smooth curves. "Strong" adds tints to the meadows. Only the view changes. It works with "Ground blending".

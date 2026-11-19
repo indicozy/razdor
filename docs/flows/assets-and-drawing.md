@@ -946,7 +946,8 @@ swamp 8 and 9, lowland 5 to 7, desert 10 and 13, fire lands 3 and 11), written a
 (`mask_texels`, from the terrain's cached cells: `TerrainLayer::weather_masks`, rebuilt only when the codes
 change). The masks are nearest-filtered and blended by four taps in the shader (`mask4`). Each game day's spell
 per biome is `spell`, a hash of the map's seed (`map_seed`), the day and the biome: `Biome::chance` (snow 60 %,
-swamp rain 45 %, lowland rain 20 %, heat 80 %, ash 70 %, clouds 70 %), heavy on 40 % of those days. `Schedule::level`
+swamp rain 45 %, lowland rain 20 %, heat 80 %, ash 70 %), heavy on 40 % of those days. No clouds: Razdor's cloud shade
+is the separate «Тени облаков» pass (`cloud_shadow`, below), so the weather never draws it twice. `Schedule::level`
 blends each midnight over one game hour; `frame_levels` eases the shown levels in real time (`LEVEL_TAU`) and
 forgets them when the weather is off or the map is forgotten (`forget`). `world_view::draw_weather` runs once a
 frame after the flat fog and the daylight, before the clash marks and the UI: the projection maps each pixel to
@@ -954,14 +955,13 @@ its ground cell (`Projection::matrix`: a homography, flat from the camera's scal
 `view25::ground_homography`, four corner picks by `TiltCamera::pick`), the
 fog's shown darkness masks the weather to explored ground (`minimap::fog_layer_lit`: the texels below alpha 255 are the
 explored box), and `weather::draw` draws only the window rectangle over the cells that can show (`weather::reach`: the
-explored box, cut to the boxes of the levels on, `Boxes` made with the masks, or the whole explored box under clouds, which
-cover everything; grown by two cells; `pixel_rect` maps it to the window; nothing is drawn when it is empty). The pass
-composes snow, rain, heat haze,
-ash and cloud shadows in one fragment pass (the layers at level 0 are skipped; two particle depths on a phone,
+explored box, cut to the boxes of the levels on, `Boxes` made with the masks; grown by two cells; `pixel_rect` maps it to the window; nothing is drawn when it is empty). The pass
+composes snow, rain, heat haze
+and ash in one fragment pass (the layers at level 0 are skipped; two particle depths on a phone,
 three on the desktop, `display::dp_px`; the flakes and streaks grow with the zoom). The cell coordinate is centred on whole numbers (cells span ±½), so a mask lookup is
 `(p + ½) / MapSize`, and the world's y is divided by the grid's row height first. Known: the heat haze is wavering
 warm light, not a distortion (no frame readback); the bent first-person and eyes views use the plane's fit (hidden
-from players); the cloud shadows darken the sprites too. The heat haze's shimmer rises over the hot ground and follows the
+from players). The heat haze's shimmer rises over the hot ground and follows the
 sun (`sun_at`: the lighting's shown hour, else the game clock; none at night). Sand gusts run in a heavy spell on an
 8 s gate (on for a few seconds, then off): ochre streaks and drifting veils. Ash adds a faint dark haze.
 **Living map** (the setting «Живая карта», `Settings::map_living`, off by default; `living::set_prefs` takes it

@@ -1,7 +1,8 @@
 //! Razdor's «Погода» (`Settings::map_weather`, off by default): the weather follows the land. Snow
-//! over snow and ice, rain over swamps and lowlands, heat haze over deserts, ash over fire lands and
-//! cloud shadows everywhere, each biome's weather drawn for its day. Style only: no rule, fog, path,
-//! AI or save reads it, and nothing is kept (the weather is recomputed from the map and the clock).
+//! over snow and ice, rain over swamps and lowlands, heat haze over deserts and ash over fire lands, each
+//! biome's weather drawn for its day. No clouds: the cloud shadows are their own setting («Тени облаков»).
+//! Style only: no rule, fog, path, AI or save reads it, and nothing is kept (the weather is recomputed from the map
+//! and the clock).
 //!
 //! The pure part is tested here: the biomes of the terrain codes ([`weights`]), each day's spell per
 //! biome from a hash of the map and the day ([`Schedule`]), the blend over each midnight, and the
@@ -39,13 +40,11 @@ pub enum Biome {
     Heat,
     /// Fire lands and badground: ash (and haze, see [`weights`]).
     Ash,
-    /// Everywhere: cloud shadows.
-    Clouds,
 }
 
 impl Biome {
     #[cfg(test)]
-    pub const ALL: [Biome; 6] = [Biome::Snow, Biome::SwampRain, Biome::LowlandRain, Biome::Heat, Biome::Ash, Biome::Clouds];
+    pub const ALL: [Biome; 5] = [Biome::Snow, Biome::SwampRain, Biome::LowlandRain, Biome::Heat, Biome::Ash];
 
     /// The chance that the biome has weather on a day (the owner's brief, 2026-11-10).
     pub fn chance(self) -> f32 {
@@ -55,7 +54,6 @@ impl Biome {
             Biome::LowlandRain => 0.20,
             Biome::Heat => 0.80,
             Biome::Ash => 0.70,
-            Biome::Clouds => 0.70,
         }
     }
 }
@@ -250,27 +248,22 @@ fn empty(b: [i32; 4]) -> bool {
 }
 
 /// The cells the pass can colour at all (x0, y0, x1, y1, exclusive, inside the map of `map` cells): the explored
-/// cells (`explored`, the fog's texels that are not fully dark) and, unless the clouds (which cover everything)
-/// are on, the boxes of the effects whose level is on. Each is grown by two cells, the bilinear footprint and the
-/// mask's four taps, so every pixel outside the result is zero in the whole pass. None when nothing can show: the
+/// cells (`explored`, the fog's texels that are not fully dark) and the boxes of the effects whose level is on.
+/// Each is grown by two cells, the bilinear footprint and the mask's four taps, so every pixel outside the result is zero in the whole pass. None when nothing can show: the
 /// pass is then not drawn.
 pub fn reach(levels: &Levels, explored: [i32; 4], boxes: &Boxes, map: [i32; 2]) -> Option<[i32; 4]> {
-    let biome = if levels.clouds > 0.01 {
-        [0, 0, map[0], map[1]]
-    } else {
-        // The shader's gates: snow (`Snow`), swamp (`SwampLevel` times the green), lowland (`LowlandLevel`), heat
-        // (`Heat`, and the gusts and haze under it) and ash (`Ash`).
-        [
-            (levels.snow, boxes.snow),
-            (levels.swamp, boxes.swamp),
-            (levels.lowland, boxes.lowland),
-            (levels.heat, boxes.heat),
-            (levels.ash, boxes.ash),
-        ]
-        .into_iter()
-        .filter(|(level, _)| *level > 0.01)
-        .fold(None, |u, (_, b)| join(u, b))?
-    };
+    // The shader's gates: snow (`Snow`), swamp (`SwampLevel` times the green), lowland (`LowlandLevel`), heat
+    // (`Heat`, and the gusts and haze under it) and ash (`Ash`).
+    let biome = [
+        (levels.snow, boxes.snow),
+        (levels.swamp, boxes.swamp),
+        (levels.lowland, boxes.lowland),
+        (levels.heat, boxes.heat),
+        (levels.ash, boxes.ash),
+    ]
+    .into_iter()
+    .filter(|(level, _)| *level > 0.01)
+    .fold(None, |u, (_, b)| join(u, b))?;
     if empty(explored) || empty(biome) {
         return None;
     }
@@ -347,7 +340,6 @@ pub struct Levels {
     pub lowland: f32,
     pub heat: f32,
     pub ash: f32,
-    pub clouds: f32,
 }
 
 impl Levels {
@@ -359,13 +351,12 @@ impl Levels {
             lowland: schedule.level(t, Biome::LowlandRain),
             heat: schedule.level(t, Biome::Heat),
             ash: schedule.level(t, Biome::Ash),
-            clouds: schedule.level(t, Biome::Clouds),
         }
     }
 
     /// Whether any weather is drawn at these levels.
     pub fn any(&self) -> bool {
-        [self.snow, self.swamp, self.lowland, self.heat, self.ash, self.clouds].iter().any(|&v| v > 0.001)
+        [self.snow, self.swamp, self.lowland, self.heat, self.ash].iter().any(|&v| v > 0.001)
     }
 
     /// Each level moved toward `target` by the real time `dt` (seconds): an exponential approach
@@ -380,7 +371,6 @@ impl Levels {
             lowland: ease(self.lowland, target.lowland),
             heat: ease(self.heat, target.heat),
             ash: ease(self.ash, target.ash),
-            clouds: ease(self.clouds, target.clouds),
         }
     }
 }
@@ -460,8 +450,6 @@ pub struct Pass<'a> {
     pub levels: Levels,
     /// Seconds modulo [`PERIOD`]: every particle loops exactly with it.
     pub phase: f32,
-    /// The terrain's clock (modulo its period): the clouds' drift.
-    pub clock: f32,
     /// The daylight tint (white with the lighting off).
     pub tint: [f32; 3],
     /// Particle depths: 3 on the desktop, 2 on a phone.
@@ -497,7 +485,7 @@ void main() {
 "#;
 
 // The fragment: every weather layer in one pass, composed into one straight-alpha colour. Darkness
-// (the clouds, the wet ground) and light (specks, streaks, haze) are kept apart and combined as
+// (the wet ground) and light (specks, streaks, haze) are kept apart and combined as
 // (1 - a_total) = (1 - a_light)(1 - a_dark), so one blend gives both. The ground under the pixel
 // comes from the projection (flat or the ray's hit with Y = 0). Cells span ±½ around their centres
 // (the terrain's convention), so the mask lookup is (p + ½) / MapSize.
@@ -519,9 +507,7 @@ uniform float SwampLevel;
 uniform float LowlandLevel;
 uniform float Heat;
 uniform float Ash;
-uniform float Clouds;
 uniform float Phase;
-uniform float Clock;
 uniform vec3 Tint;
 uniform float Layers;
 uniform float Sun;
@@ -676,16 +662,6 @@ void main() {
     float oa = 0.0;
     vec3 ov = vec3(0.0);
 
-    // Cloud shadows: soft blobs of 2 to 5 cells, drifting slowly over the ground in its own coordinates.
-    // They are everywhere (no biome mask), a cool shade, feathered by a wide smoothstep.
-    if (Clouds > 0.01) {
-        vec2 q = p * 0.25 + Clock * vec2(0.02, 0.01);
-        float cover = smoothstep(0.42, 0.60, fbm2(q)) * Clouds * vis;
-        float a = cover * 0.34;
-        ov += vec3(0.36, 0.46, 0.62) * a;
-        oa += a;
-    }
-
     // Snow: soft round flakes down and to the left, three depths (near is faster and bigger), swaying.
     if (Snow > 0.01 && bw.r > 0.01) {
         float s = flakes(pix, 48.0, vec2(-30.0, 45.0), 2.6, 0.50 * Snow, 0.0, 4.0);
@@ -797,9 +773,7 @@ fn load() -> Option<Material> {
         ("LowlandLevel", UniformType::Float1),
         ("Heat", UniformType::Float1),
         ("Ash", UniformType::Float1),
-        ("Clouds", UniformType::Float1),
         ("Phase", UniformType::Float1),
-        ("Clock", UniformType::Float1),
         ("Tint", UniformType::Float3),
         ("Layers", UniformType::Float1),
         ("Sun", UniformType::Float1),
@@ -848,9 +822,7 @@ pub fn draw(pass: &Pass) {
         m.set_uniform("LowlandLevel", l.lowland);
         m.set_uniform("Heat", l.heat);
         m.set_uniform("Ash", l.ash);
-        m.set_uniform("Clouds", l.clouds);
         m.set_uniform("Phase", pass.phase);
-        m.set_uniform("Clock", pass.clock);
         m.set_uniform("Tint", vec3(pass.tint[0], pass.tint[1], pass.tint[2]));
         m.set_uniform("Layers", pass.layers);
         m.set_uniform("Sun", pass.sun);
@@ -1053,8 +1025,8 @@ mod tests {
         assert!(frame_levels(&schedule(1), 0.5, 0.0).is_none(), "off: nothing");
     }
 
-    fn lv(snow: f32, swamp: f32, lowland: f32, heat: f32, ash: f32, clouds: f32) -> Levels {
-        Levels { snow, swamp, lowland, heat, ash, clouds }
+    fn lv(snow: f32, swamp: f32, lowland: f32, heat: f32, ash: f32) -> Levels {
+        Levels { snow, swamp, lowland, heat, ash }
     }
 
     #[test]
@@ -1078,16 +1050,14 @@ mod tests {
         let boxes = Boxes { snow: Some([4, 4, 6, 5]), swamp: Some([0, 0, 1, 1]), ..Boxes::default() };
         let explored = [0, 0, 10, 8];
         // Only snow on: its box, grown by two, cut to the map.
-        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0, 0.0), explored, &boxes, map), Some([2, 2, 8, 7]));
+        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0), explored, &boxes, map), Some([2, 2, 8, 7]));
         // Swamp at the gate (0.01, not above it): nothing to show, so no pass.
-        assert_eq!(reach(&lv(0.0, 0.01, 0.0, 0.0, 0.0, 0.0), explored, &boxes, map), None);
-        // Clouds everywhere: the explored box alone.
-        assert_eq!(reach(&lv(0.0, 0.0, 0.0, 0.0, 0.0, 1.0), explored, &boxes, map), Some([0, 0, 10, 8]));
+        assert_eq!(reach(&lv(0.0, 0.01, 0.0, 0.0, 0.0), explored, &boxes, map), None);
         // The explored box cuts the biome box: explored x < 5 grown to 7.
-        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0, 0.0), [0, 0, 5, 8], &boxes, map), Some([2, 2, 7, 7]));
+        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0), [0, 0, 5, 8], &boxes, map), Some([2, 2, 7, 7]));
         // Nothing explored, or no effect's box on the map: no pass.
-        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0, 0.0), [0; 4], &boxes, map), None);
-        assert_eq!(reach(&lv(0.0, 0.0, 0.0, 1.0, 0.0, 0.0), explored, &boxes, map), None, "heat has no cells here");
+        assert_eq!(reach(&lv(1.0, 0.0, 0.0, 0.0, 0.0), [0; 4], &boxes, map), None);
+        assert_eq!(reach(&lv(0.0, 0.0, 0.0, 1.0, 0.0), explored, &boxes, map), None, "heat has no cells here");
     }
 
     #[test]
