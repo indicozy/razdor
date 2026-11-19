@@ -250,7 +250,7 @@ pub fn view_kind(tilted: bool, first_person: bool) -> &'static str {
 pub fn settings_line(s: &Settings) -> String {
     let preset = quality_preset::current(s).map_or("none".to_string(), |p| format!("{p:?}"));
     format!(
-        "quality={preset} map_render_scale={} frame_cap={} battery_saver={} map_anim={:?} map_light={:?} map_light_quality={:?} map_shadows={:?} map_mist={:?} map_live_water={} map_water_rate={:?} map_water_quality={:?} map_weather={} map_living={} map_tilt={} map_first_person={} map_eyes={} map_horizon={} map_globe={} map_sprite_size={} map_extended={} map_steady={} map_zoom={} ui_scale={} text_size={} display={:?} show_fps={} debug_mode={} record_game={}",
+        "quality={preset} map_render_scale={} frame_cap={} battery_saver={} map_anim={:?} map_light={:?} map_light_quality={:?} map_shadows={:?} map_mist={:?} map_live_water={} map_water_rate={:?} map_water_quality={:?} map_weather={} map_living={} map_holiday={} map_tilt={} map_first_person={} map_eyes={} map_horizon={} map_globe={} map_sprite_size={} map_extended={} map_steady={} map_zoom={} ui_scale={} text_size={} display={:?} show_fps={} debug_mode={} record_game={}",
         s.map_render_scale,
         s.frame_cap,
         s.battery_saver,
@@ -264,6 +264,7 @@ pub fn settings_line(s: &Settings) -> String {
         s.map_water_quality,
         s.map_weather,
         s.map_living,
+        s.map_holiday,
         s.map_tilt,
         s.map_first_person,
         s.map_eyes,
