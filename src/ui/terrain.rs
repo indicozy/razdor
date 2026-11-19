@@ -347,7 +347,7 @@ pub enum NaturalGround {
     #[default]
     Off,
     /// «Мягко»: the natural edges, the ramp's half-width 0.5, the bend 0.30 on land and 0.15 at a shore, and the land
-    /// textures' anti-tiling (`NAT_DETAIL`).
+    /// textures' anti-tiling block (`NAT_DETAIL`), whose phase offset is off (`NatTune::warp`).
     Soft,
     /// «Сильно»: the «Мягко» look with the shore's bend at 0.25, the meadows' tone (0.15, period 12 cells) and the fine
     /// grain (0.15, features of about 1.5 cells).
@@ -373,7 +373,8 @@ pub struct NatTune {
     pub path_w: f32,
     /// The winding path's edge softness, in cells (`NatPathSoft`): 0.45.
     pub path_soft: f32,
-    /// The anti-tiling offset's amplitude, in tiles (`NatWarp`): 1.5 (the offset is at most three quarters of a tile each way).
+    /// The anti-tiling offset's amplitude, in tiles (`NatWarp`): 0.0, off. A phase that changes from cell to cell stretches
+    /// the texture: at 1.5 the grass smeared into swirls. The dev switch `RAZDOR_NAT_DETAIL_WARP` sets it back.
     pub warp: f32,
     /// The anti-tiling offset's noise, cycles per cell (`NatWarpFreq`): 0.10 (features of about 10 cells).
     pub warp_freq: f32,
@@ -392,7 +393,7 @@ pub struct NatLook {
     pub tone: bool,
     /// The winding paths (`NAT_PATHS`).
     pub paths: bool,
-    /// The anti-tiling of the land textures and the fine grain's block (`NAT_DETAIL`).
+    /// The land textures' block (`NAT_DETAIL`): the fine grain (Strong) and the phase offset, off by default.
     pub detail: bool,
     /// The tuning (`NatTune`).
     pub tune: NatTune,
@@ -402,7 +403,7 @@ impl NaturalGround {
     /// The look of this level. Off draws nothing, and keeps the «Мягко» tuning, so a dev switch that turns the
     /// edges on alone uses the same values.
     pub fn look(self) -> NatLook {
-        let soft = NatTune { s: 0.30, shore: 0.15, freq: 0.45, h: 0.5, tone: 0.15, tone_period: 12.0, path_w: 0.55, path_soft: 0.45, warp: 1.5, warp_freq: 0.10, fine: 0.0, fine_scale: 0.7 };
+        let soft = NatTune { s: 0.30, shore: 0.15, freq: 0.45, h: 0.5, tone: 0.15, tone_period: 12.0, path_w: 0.55, path_soft: 0.45, warp: 0.0, warp_freq: 0.10, fine: 0.0, fine_scale: 0.7 };
         match self {
             NaturalGround::Off => NatLook { edges: false, tone: false, paths: false, detail: false, tune: soft },
             NaturalGround::Soft => NatLook { edges: true, tone: false, paths: false, detail: true, tune: soft },
@@ -424,7 +425,7 @@ pub fn set_natural(level: NaturalGround) {
 /// `RAZDOR_NATURAL=edges,tone,detail` sets the blocks alone; `RAZDOR_NAT_S`, `RAZDOR_NAT_S_SHORE`, `RAZDOR_NAT_FREQ`,
 /// `RAZDOR_NAT_H`, `RAZDOR_NAT_TONE` and `RAZDOR_NAT_TONE_PERIOD` set the tuning (each clamped to its range), and
 /// `RAZDOR_NAT_DETAIL_WARP`, `RAZDOR_NAT_DETAIL_WARP_FREQ`, `RAZDOR_NAT_DETAIL_AMP` and `RAZDOR_NAT_DETAIL_SCALE` the
-/// anti-tiling and the fine grain.
+/// phase offset (off by default) and the fine grain.
 #[derive(Default)]
 struct NatEnv {
     level: Option<NaturalGround>,
@@ -952,7 +953,7 @@ struct Variant {
     tone: bool,
     /// The winding paths (`NAT_PATHS`, «Сильно»): the roads narrow to paths in the mixed quads.
     paths: bool,
-    /// The land textures' anti-tiling and the fine grain (`NAT_DETAIL`, «Улучшенная земля»).
+    /// The land textures' block (`NAT_DETAIL`, «Улучшенная земля»): the phase offset (off by default) and the fine grain.
     detail: bool,
 }
 
@@ -1968,9 +1969,11 @@ mod natural_tests {
     }
 
     #[test]
-    fn soft_and_strong_both_anti_tile_and_only_strong_grains() {
-        assert!(NaturalGround::Soft.look().detail && NaturalGround::Strong.look().detail, "both levels stop the tiling");
-        assert!(!NaturalGround::Off.look().detail, "off keeps the tiling");
+    fn the_detail_block_is_on_in_soft_and_strong_with_no_phase_offset() {
+        assert!(NaturalGround::Soft.look().detail && NaturalGround::Strong.look().detail, "both levels have the block");
+        assert!(!NaturalGround::Off.look().detail, "off has no block");
+        assert_eq!(NaturalGround::Soft.look().tune.warp, 0.0, "no phase offset in «Мягко»: it smeared the grass");
+        assert_eq!(NaturalGround::Strong.look().tune.warp, 0.0, "no phase offset in «Сильно»");
         assert_eq!(NaturalGround::Soft.look().tune.fine, 0.0, "no grain in «Мягко»");
         assert!(NaturalGround::Strong.look().tune.fine > 0.0, "the grain in «Сильно»");
     }

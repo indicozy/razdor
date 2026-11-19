@@ -15,8 +15,8 @@
 //   NAT_TONE    «Улучшенная земля» (Strong): the meadow tone (a low-frequency patch of lighter and darker land, `main`).
 //   NAT_PATHS   «Улучшенная земля» (Strong): the winding paths: a road in a mixed quad narrows to a path through the road
 //               cells' centres (`Paths`, the baked distance; `main`).
-//   NAT_DETAIL  «Улучшенная земля» (Soft, Strong): the land textures' anti-tiling (a slow offset of each texture's phase,
-//               `det_offset`, in `ground`) and, in Strong, the fine grain (`DetAmp`, the brightness and hue, in `main`).
+//   NAT_DETAIL  «Улучшенная земля» (Soft, Strong): the land textures' phase offset (`det_offset`, in `ground`; its amplitude
+//               is zero by default, since it smeared the grass) and, in Strong, the fine grain (`DetAmp`, in `main`).
 precision highp float;
 varying highp vec2 uv;
 uniform sampler2D Neighbours;
@@ -257,6 +257,9 @@ float det_land(float code) {
 // NatWarp / 2 tiles each way. The field is continuous and the textures tile seamlessly, so no seam shows, and the `mod` in
 // `ground` keeps any phase inside its tile. World position only, no clock.
 vec2 det_offset(vec2 p) {
+    if (NatWarp == 0.0) {
+        return vec2(0.0);
+    }
     vec2 q = p * NatWarpFreq;
     return (vec2(nat_noise(q), nat_noise(q + vec2(31.7, 11.3))) - 0.5) * NatWarp * Tile;
 }

@@ -296,15 +296,16 @@ off by default; «Оригинал» sets it off, no other preset says it) picks
 level in every frame (`display::follow_settings`), and `terrain::natural_look` turns it into the two blocks (`NAT_EDGES`
 in Мягко and Сильно, `NAT_TONE` in Сильно only) and the uniforms' tuning (`NatS`, `NatShore`, `NatFreq`, `NatH`,
 `NatTone`, `NatTonePeriod`; H 0.5, bend 0.30 on land and 0.15 at a shore, 0.25 at a shore in Сильно, tone 0.15, period
-12 cells). **The anti-tiling and the grain** (`NAT_DETAIL`, Мягко and Сильно; the shader's `det_offset`, `det_land`, `det_px`,
+12 cells). **The land block and the grain** (`NAT_DETAIL`, Мягко and Сильно; the shader's `det_offset`, `det_land`, `det_px`,
 the `DetAmp` block in `main`): the land codes (grass, marsh, sand, clay, stony, scorched, snow: 5-8 and 10-14; water, lava,
-road, the impassable swamp 9 and the snowdrifts 15 keep theirs) sample each texture at its own pixel plus a phase offset
-that is one slow noise read (`NatWarpFreq` 0.10 cycles a cell, at most three quarters of a tile each way, `NatWarp` 1.5). The field is
-continuous and the textures tile, so there is no seam, and the offset is kept in the tile by the `mod`. It costs two
-Noise reads a land pixel and no atlas fetch. In Сильно a fine grain (`DetAmp` 0.15, `DetScale` 0.7 cycles a cell: brightness
-and a slight warm or cool hue, two Noise reads) is laid on the land share of the pixel. The dev switches `RAZDOR_NAT_DETAIL_WARP`,
-`RAZDOR_NAT_DETAIL_WARP_FREQ`, `RAZDOR_NAT_DETAIL_AMP` and `RAZDOR_NAT_DETAIL_SCALE` tune them, and `RAZDOR_NATURAL=detail`
-in the list turns the anti-tiling on alone. The dev switches `RAZDOR_NATURAL` (a level `off|soft|strong`, or the blocks `edges,tone,detail`) and `RAZDOR_NAT_*` win
+road, the impassable swamp 9 and the snowdrifts 15 keep theirs) would sample each texture at its own pixel plus a phase
+offset from one slow noise read (`NatWarpFreq` 0.10 cycles a cell, `NatWarp` in tiles). **The phase offset is off by
+default (`NatWarp` 0, `det_offset` returns zero, no noise read):** a phase that changes from cell to cell stretches the texture,
+and at 1.5 tiles the grass smeared into big swirls (the owner's screenshot, 2026-11-19). The offset is kept as a dev switch
+(`RAZDOR_NAT_DETAIL_WARP`, `RAZDOR_NAT_DETAIL_WARP_FREQ`). In Сильно a fine grain (`DetAmp` 0.15, `DetScale` 0.7 cycles a cell:
+brightness and a slight warm or cool hue, two Noise reads) is laid on the land share of the pixel; it stands still with the map
+and does not stretch anything. `RAZDOR_NAT_DETAIL_AMP` and `RAZDOR_NAT_DETAIL_SCALE` tune it, and `RAZDOR_NATURAL=detail`
+in the list turns the block on alone. The dev switches `RAZDOR_NATURAL` (a level `off|soft|strong`, or the blocks `edges,tone,detail`) and `RAZDOR_NAT_*` win
 over the setting. The blocks are two flags in the variant key (now `u16`), and the ground cache keeps the look it was drawn
 with, so a level or tuning change redraws the cached ground. The natural look is inert with «Смешивание земли» off. «Сильно» also draws the winding paths (`NAT_PATHS`, `NatLook::paths`, the tuning `NatPathW` 0.55 and `NatPathSoft` 0.45, env `RAZDOR_NAT_PATH_W`/`RAZDOR_NAT_PATH_SOFT`, switch `paths` in `RAZDOR_NATURAL`): `road_bake::bake_for_map` (CPU, once per map in `TerrainLayer::cells`; no bake over 1024 cells a side, 8 texels per cell up to 512, else 4) makes the road centrelines (Chaikin-smoothed through the road cells' centres, staircases read as diagonals, fills a soft ramp) and the distance to them, uploaded as the `Paths` texture (RGBA, red). `Bank` blue is the safe byte (`safe_cells`: no water, lava, swamp or snowdrift in the 3×3 block), so a road by them keeps its width. In a mixed quad with road codes, the road mixes into the blend of the other codes (renormalised over their weights, convex, so it never darkens) by the path mask (noise wobble 0.04, the edge 0.10 soft), faded out below 8–12 screen pixels per cell (`PathPx`); a quad of four road codes, and every other quad, keep today's blend. Seven samplers in every variant. The unlit shader (`LEGACY_FRAGMENT`, do-not-edit) is gone:
 with live water off it is this source with the live block out, and its relief block never ran (`Strength` was always 0).
