@@ -21,6 +21,7 @@ use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
 
 use super::atlas_cut;
+use super::holiday;
 use super::living;
 use super::terrain::TerrainLayer;
 use super::world_view::surface_color;
@@ -135,6 +136,9 @@ pub struct Atlas {
     /// The living map's parts of the building sprites that have light points (`dt::lights`), by the
     /// same key: their chimneys and their moving parts (`living`).
     living: HashMap<(u32, u32, u32), Living>,
+    /// The garland points of the building sprites with window, door or gate boxes (`holiday::garland_points`), by the
+    /// same key. Built with the atlas whatever the look says; read only when the look is on.
+    garlands: HashMap<(u32, u32, u32), Vec<holiday::Garland>>,
 }
 
 /// A building sprite's living parts (Razdor's «Живая карта», `living`): its chimneys, the boxes
@@ -223,6 +227,11 @@ impl Atlas {
     /// The living parts of a building's sprite (`None` for a picture with no light points).
     pub fn living(&self, picture_type: u8, variant: u8) -> Option<&Living> {
         self.living.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into()))
+    }
+
+    /// The garland points of a building's sprite (empty for a picture with no window, door or gate box).
+    pub fn garlands(&self, picture_type: u8, variant: u8) -> &[holiday::Garland] {
+        self.garlands.get(&(ObjectSprite::BUILDINGS, picture_type.into(), variant.into())).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -679,6 +688,7 @@ impl DtArt {
                 let mut cards = HashMap::new();
                 let mut live = Overlay::default();
                 let mut living_map = HashMap::new();
+                let mut garlands = HashMap::new();
                 let mut known = Vec::with_capacity(sprites.len());
                 for (i, s) in sprites.iter().enumerate() {
                     let id = (s.section, s.cat, s.idx);
@@ -692,6 +702,11 @@ impl DtArt {
                     let points = building.then(|| lights::builtin().get(&key).filter(|k| k.w == s.image.width && k.h == s.image.height)).flatten();
                     if let Some(p) = points {
                         let w = s.image.width as f32;
+                        let boxes: Vec<(Kind, [i32; 4])> = p.points.iter().map(|q| (q.kind, q.rect.map(|v| v.round() as i32))).collect();
+                        let g = holiday::garland_points(&boxes);
+                        if !g.is_empty() {
+                            garlands.insert(id, g);
+                        }
                         let chimneys: Vec<[f32; 4]> = p.points.iter().filter(|p| p.kind == Kind::Chimney).map(|p| p.rect).collect();
                         // Only a box whose pixels look like cloth moves, so a
                         // windmill's roof or a figure's blob stays still.
@@ -717,7 +732,7 @@ impl DtArt {
                 }
                 let pending: VecDeque<usize> = queue::unknown(known).into();
                 depth::set_unknown(pending.len());
-                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), living: living_map, lod })
+                Some(Atlas { texture, rects, cards, live: RefCell::new(live), pending: RefCell::new(pending), living: living_map, garlands, lod })
             })
             .as_ref()
     }
