@@ -8463,6 +8463,12 @@ fn draw_birds(game: &Game, cam: &Camera) {
     // The flocks cross the part of the world in view (a flock's course is drawn in it).
     let view = cam.world_rect();
     let Some(flock) = living::flock_at(now, BIRD_SEED, [view.x, view.y, view.x + view.w, view.y + view.h]) else { return };
+    // The holiday look's sleigh flies the flock's trip instead (absent its pictures: the birds).
+    if holiday::on() {
+        if let Some(sleigh) = holiday::sleigh() {
+            return draw_sleigh(game, cam, &flock, &sleigh, now);
+        }
+    }
     let fog = &game.fog;
     let span = 0.22 * cam.cell_size().x;
     let lift = 1.2 * cam.cell_size().x;
@@ -8480,6 +8486,38 @@ fn draw_birds(game: &Game, cam: &Camera) {
         let (dx, dy) = (span * a.cos(), span * a.sin());
         draw_line(c.x, c.y, c.x - dx, c.y - dy, 1.5, col);
         draw_line(c.x, c.y, c.x + dx, c.y - dy, 1.5, col);
+    }
+}
+
+/// Santa's sleigh on the holiday look (`holiday::sleigh`): it flies each flock's trip in the birds' place, along the
+/// same course and timing, at the map figures' scale, mirrored when it flies left. While it flies it drops a present
+/// every 1.5 s, which falls and fades (`holiday::present_fall`); the cheap path drops none. Only over explored cells.
+fn draw_sleigh(game: &Game, cam: &Camera, flock: &living::Flock, s: &holiday::Sleigh, now: f64) {
+    /// The sleigh's size against the map figures' scale (the sprite's own pixels times the zoom).
+    const SLEIGH_SCALE: f32 = 0.9;
+    let (map, fog) = (&game.world.map, &game.fog);
+    let zoom = cam.scale / PX;
+    let lift = 1.2 * cam.cell_size().x;
+    // Where the sleigh is at `t`, on screen, if its cell is explored.
+    let at = |t: f64| {
+        let p = living::lead_at(flock, t);
+        fog.explored(map.tile_at(p)).then(|| cam.screen_at(p) - vec2(0.0, lift))
+    };
+    if let Some(c) = at(now) {
+        let frame = &s.frames[holiday::gallop_frame(now)];
+        let (w, h) = (frame.width() * zoom * SLEIGH_SCALE, frame.height() * zoom * SLEIGH_SCALE);
+        let params = DrawTextureParams { dest_size: Some(vec2(w, h)), flip_x: holiday::sleigh_flies_left(flock.from, flock.to), ..Default::default() };
+        super::sharp::draw(frame, c.x - w / 2.0, c.y - h / 2.0, WHITE, params);
+    }
+    if holiday::cheap() {
+        return;
+    }
+    for (k, t) in holiday::present_drop_times(flock.start, living::BIRD_TRIP).into_iter().enumerate() {
+        let Some((dx, dy, a)) = holiday::present_fall(now - t, holiday::present_drift(flock.seed, k)) else { continue };
+        let Some(c) = at(t) else { continue };
+        let size = s.present.width() * zoom;
+        let c = c + vec2(dx, dy);
+        super::sharp::draw(&s.present, c.x - size / 2.0, c.y - size / 2.0, Color { a, ..WHITE }, DrawTextureParams { dest_size: Some(vec2(size, size)), ..Default::default() });
     }
 }
 

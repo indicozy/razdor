@@ -9,12 +9,15 @@
 #![allow(dead_code)]
 
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use macroquad::prelude::{FilterMode, Image, Texture2D};
 use razdor::local;
 use razdor::rules::marks::civil;
 
 use super::audio::Settings;
+use super::living;
 use razdor::dt::lights::Kind;
 
 local! {
@@ -111,6 +114,85 @@ pub fn garland_points(boxes: &[(Kind, [i32; 4])]) -> Vec<Garland> {
 /// quarter period behind the last, from 0.35 (faint) to 1 (full).
 pub fn chase(t: f64, index: u8) -> f32 {
     (0.35 + 0.65 * (std::f64::consts::TAU * (t * 0.8 - f64::from(index) / 4.0)).sin().max(0.0)) as f32
+}
+
+/// Seconds between two presents dropped from one sleigh.
+pub const PRESENT_EVERY: f64 = 1.5;
+/// Seconds a present takes to fall.
+pub const PRESENT_FALL: f64 = 0.8;
+/// Seconds a landed present takes to fade out.
+pub const PRESENT_FADE: f64 = 0.3;
+/// How far a present falls, in screen pixels.
+pub const PRESENT_DROP_PX: f32 = 40.0;
+/// The gallop's frames per second (four frames in a cycle).
+const GALLOP_FPS: f64 = 8.0;
+
+/// Whether the sleigh flies left (its sprite is flipped): the course runs to the left.
+pub fn sleigh_flies_left(from: (f32, f32), to: (f32, f32)) -> bool {
+    to.0 < from.0
+}
+
+/// The gallop frame (0 to 3) at time `t` seconds: the frames change 8 times a second.
+pub fn gallop_frame(t: f64) -> usize {
+    ((t * GALLOP_FPS).floor() as i64).rem_euclid(4) as usize
+}
+
+/// The times of the presents one trip drops (the trip starts at `start` and lasts `trip` seconds): one every
+/// [`PRESENT_EVERY`] seconds, each in the middle of its stretch, none at or after the trip's end.
+pub fn present_drop_times(start: f64, trip: f64) -> Vec<f64> {
+    (0..).map(|k| start + PRESENT_EVERY * (k as f64 + 0.5)).take_while(|t| *t < start + trip).collect()
+}
+
+/// A present's sideways drift in screen pixels (-6 to 6), from its flock's seed and its drop's number.
+pub fn present_drift(seed: u64, k: usize) -> f32 {
+    (living::unit(seed, 100 + k as u64) - 0.5) * 12.0
+}
+
+/// A present `age` seconds after its drop, with its drift: its screen offset (x, y in pixels, y down) and its
+/// alpha. None before the drop and once the fade is over. It falls straight down at a steady pace, then fades.
+pub fn present_fall(age: f64, drift: f32) -> Option<(f32, f32, f32)> {
+    if !(0.0..PRESENT_FALL + PRESENT_FADE).contains(&age) {
+        return None;
+    }
+    let f = (age / PRESENT_FALL).min(1.0) as f32;
+    let alpha = if age <= PRESENT_FALL { 1.0 } else { 1.0 - ((age - PRESENT_FALL) / PRESENT_FADE) as f32 };
+    Some((drift * f, PRESENT_DROP_PX * f, alpha))
+}
+
+/// Santa's sleigh's pictures: four gallop frames (flying right) and a present.
+#[derive(Clone)]
+pub struct Sleigh {
+    pub frames: [Texture2D; 4],
+    pub present: Texture2D,
+}
+
+/// Where the sleigh's pictures are: `RAZDOR_HOLIDAY_SLEIGH` (a folder), else the hub's `holiday/sleigh`.
+fn sleigh_dir() -> Option<PathBuf> {
+    std::env::var_os("RAZDOR_HOLIDAY_SLEIGH")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| razdor::hub::local_dir().map(|local| razdor::hub::holiday_sleigh_dir(&local)))
+}
+
+/// Loads the sleigh's pictures (nearest filtering), or None when one of them is missing or broken.
+fn load_sleigh() -> Option<Sleigh> {
+    let dir = sleigh_dir()?;
+    let pic = |name: &str| -> Option<Texture2D> {
+        let bytes = std::fs::read(dir.join(name)).ok()?;
+        let tex = Texture2D::from_image(&Image::from_file_with_format(&bytes, None).ok()?);
+        tex.set_filter(FilterMode::Nearest);
+        Some(tex)
+    };
+    let frames = [pic("frame-0.png")?, pic("frame-1.png")?, pic("frame-2.png")?, pic("frame-3.png")?];
+    Some(Sleigh { frames, present: pic("present.png")? })
+}
+
+/// The sleigh's pictures, loaded on first use. None when they are missing or broken: the birds fly instead.
+pub fn sleigh() -> Option<Sleigh> {
+    local! {
+        static SLEIGH: Option<Sleigh> = load_sleigh();
+    }
+    SLEIGH.with(Clone::clone)
 }
 
 #[cfg(test)]
@@ -210,5 +292,54 @@ mod tests {
         set_pref(true, false);
         assert!(!cheap());
         set_pref(false, false);
+    }
+
+    #[test]
+    fn the_sleigh_faces_the_way_it_flies() {
+        assert!(sleigh_flies_left((30.0, 5.0), (10.0, 5.0)), "a course to the left: mirrored");
+        assert!(!sleigh_flies_left((10.0, 5.0), (30.0, 5.0)), "a course to the right: as drawn");
+        assert!(!sleigh_flies_left((10.0, 5.0), (10.0, 9.0)), "straight down: not mirrored");
+    }
+
+    #[test]
+    fn the_gallop_runs_four_frames_at_eight_a_second() {
+        let frames: Vec<usize> = (0..10).map(|k| gallop_frame(f64::from(k) * 0.125)).collect();
+        assert_eq!(frames, vec![0, 1, 2, 3, 0, 1, 2, 3, 0, 1]);
+        assert_eq!(gallop_frame(100.0), gallop_frame(100.0 + 0.5), "the cycle is 0.5 s");
+        assert!(gallop_frame(-0.01) < 4, "before time 0 it still cycles");
+    }
+
+    #[test]
+    fn a_trip_drops_a_present_every_1_5_seconds_and_none_after_it_ends() {
+        let drops = present_drop_times(100.0, living::BIRD_TRIP);
+        assert_eq!(drops.len(), 9, "1.5, 3, ... 13.5 s into a 14 s trip: {drops:?}");
+        assert!((drops[0] - 100.75).abs() < 1e-9, "the first one at the middle of its stretch");
+        for w in drops.windows(2) {
+            assert!((w[1] - w[0] - PRESENT_EVERY).abs() < 1e-9, "one every 1.5 s");
+        }
+        assert!(drops.iter().all(|t| *t >= 100.0 && *t < 100.0 + living::BIRD_TRIP));
+        assert_eq!(drops, present_drop_times(100.0, living::BIRD_TRIP), "the same trip, the same drops");
+        assert!(present_drop_times(100.0, 0.5).is_empty(), "a short trip drops none");
+    }
+
+    #[test]
+    fn a_present_drifts_a_little_from_its_flocks_seed() {
+        for k in 0..20 {
+            let d = present_drift(0xABCD, k);
+            assert!((-6.0..6.0).contains(&d), "a slight drift: {d}");
+            assert_eq!(d, present_drift(0xABCD, k), "deterministic");
+        }
+        assert_ne!(present_drift(1, 0), present_drift(2, 0), "another flock, another drift");
+    }
+
+    #[test]
+    fn a_present_falls_forty_pixels_then_fades() {
+        assert_eq!(present_fall(-0.1, 0.0), None, "not dropped yet");
+        assert_eq!(present_fall(0.0, 3.0), Some((0.0, 0.0, 1.0)), "at the drop: its place");
+        let (dx, dy, a) = present_fall(PRESENT_FALL, 3.0).unwrap();
+        assert!((dy - 40.0).abs() < 1e-4 && (dx - 3.0).abs() < 1e-4 && a == 1.0, "landed: 40 px down, full");
+        let (_, _, a) = present_fall(PRESENT_FALL + PRESENT_FADE / 2.0, 0.0).unwrap();
+        assert!((a - 0.5).abs() < 1e-4, "half faded halfway through the fade");
+        assert_eq!(present_fall(PRESENT_FALL + PRESENT_FADE, 0.0), None, "gone after the fade");
     }
 }
