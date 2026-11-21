@@ -127,7 +127,7 @@ pub fn begin_frame() {
     // Under the debug switch (`ui::fake_touch`) the mouse is a finger: its place is the finger's
     // and its own buttons are off, as a phone's are.
     let fake = fake_touch::mode().is_some();
-    let mouse = if fake { fake_touch::at() } else { mq::mouse_position() };
+    let mouse = if fake { fake_touch::at() } else { raw_mouse() };
     let mouse_used = !fake && [MouseButton::Left, MouseButton::Right, MouseButton::Middle].into_iter().any(mq::is_mouse_button_pressed);
     STATE.with(|s| {
         let s = &mut *s.borrow_mut();
@@ -195,27 +195,35 @@ pub fn begin_frame() {
     });
 }
 
+/// The mouse's position as the picture shows it (`crt::pointer`: the curved screen's, when it is on).
+fn raw_mouse() -> (f32, f32) {
+    super::crt::pointer(mq::mouse_position())
+}
+
 /// This frame's touches, as the touchpad reads them (under the debug switch, the mouse's: `ui::fake_touch`).
 fn touch_points() -> Vec<TouchPoint> {
     if fake_touch::mode().is_some() {
         let held = mq::is_mouse_button_down(MouseButton::Left);
         let pressed = mq::is_mouse_button_pressed(MouseButton::Left);
         let released = mq::is_mouse_button_released(MouseButton::Left);
-        return fake_touch::frame(held, pressed, released, mq::mouse_position());
+        return fake_touch::frame(held, pressed, released, raw_mouse());
     }
     mq::touches()
         .into_iter()
-        .map(|t| TouchPoint {
-            id: t.id,
-            x: t.position.x,
-            y: t.position.y,
-            phase: match t.phase {
-                mq::TouchPhase::Started => Phase::Started,
-                mq::TouchPhase::Stationary => Phase::Stationary,
-                mq::TouchPhase::Moved => Phase::Moved,
-                mq::TouchPhase::Ended => Phase::Ended,
-                mq::TouchPhase::Cancelled => Phase::Cancelled,
-            },
+        .map(|t| {
+            let (x, y) = super::crt::pointer((t.position.x, t.position.y));
+            TouchPoint {
+                id: t.id,
+                x,
+                y,
+                phase: match t.phase {
+                    mq::TouchPhase::Started => Phase::Started,
+                    mq::TouchPhase::Stationary => Phase::Stationary,
+                    mq::TouchPhase::Moved => Phase::Moved,
+                    mq::TouchPhase::Ended => Phase::Ended,
+                    mq::TouchPhase::Cancelled => Phase::Cancelled,
+                },
+            }
         })
         .collect()
 }
@@ -411,7 +419,7 @@ pub fn mouse_position() -> (f32, f32) {
 
 /// The pointer on the screen: the pad's while it is in use, else the mouse's (not panned).
 pub fn screen_pointer() -> (f32, f32) {
-    pad_pointer().unwrap_or_else(mq::mouse_position)
+    pad_pointer().unwrap_or_else(raw_mouse)
 }
 
 /// The wheel this frame (x, y; up is positive): the mouse's and the pad's.
