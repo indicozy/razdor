@@ -55,6 +55,8 @@ pub mod memo;
 pub mod minimap;
 pub mod living;
 pub mod holiday;
+pub mod holiday_start;
+pub mod holiday_windows;
 pub mod cloud_shadow;
 pub mod crt;
 pub mod mist;
@@ -366,6 +368,9 @@ pub struct App {
     pub screen: Screen,
     /// One-line notice shown on the world map / town screens.
     pub message: Option<String>,
+    /// The season start's worker (`holiday_start`), and whether it was tried this session.
+    holiday_job: Option<std::sync::mpsc::Receiver<Result<holiday_start::Start, String>>>,
+    holiday_tried: bool,
     /// Modal windows waiting to be read (noon reports, victories), first on top.
     pub dialogs: VecDeque<Dialog>,
     pub map_view: MapView,
@@ -488,6 +493,8 @@ impl App {
             game: None,
             screen: Screen::MainMenu,
             message: None,
+            holiday_job: None,
+            holiday_tried: false,
             dialogs: VecDeque::new(),
             map_view: MapView::default(),
             pending_load: None,
@@ -1313,7 +1320,7 @@ impl App {
     pub(super) fn draw_menu_while_waiting(&mut self) {
         display::follow_settings(&self.audio.settings);
         widgets::set_input_blocked(true);
-        let _ = main_menu::frame(&mut self.audio.settings, false, &self.mods, self.active_mod.as_deref(), true);
+        let _ = main_menu::frame(false, &self.mods, self.active_mod.as_deref(), true);
         widgets::set_input_blocked(false);
     }
 
@@ -1676,11 +1683,15 @@ impl App {
             None => false,
         };
         widgets::set_outside_tap(outside);
+        // The season start (once a season, on the main menu only; nothing is loaded yet).
+        if matches!(self.screen, Screen::MainMenu) {
+            self.holiday_start_tick();
+        }
         // The «Итоги» page's exit, taken after the match (it may start the next map, which needs the app).
         let mut summary_exit = None;
         // The screen's own draw and input (the frame probe's `screen_body`; the menu's stages are nested in it).
         let mut next = razdor::frame_probe::time(razdor::frame_probe::Stage::ScreenBody, || match (&mut self.screen, &mut self.game) {
-            (Screen::MainMenu, _) => match main_menu::frame(&mut self.audio.settings, self.dt_content.is_none(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some()) {
+            (Screen::MainMenu, _) => match main_menu::frame(self.dt_content.is_none(), &self.mods, self.active_mod.as_deref(), self.mod_switch.is_some()) {
                 Some(main_menu::Pick::NewGame) if new_game::tutorial_map(&self.scenarios).is_some() => {
                     new_game::open_list();
                     Some(Screen::TutorialOffer)

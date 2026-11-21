@@ -52,7 +52,7 @@ screenshot review, and players who say yes get a snowy, festive map that runs we
   Saves and replays made with it on play the same with it off.
 - No change to battles. Battle screens stay as they are (a later idea, not now).
 - No new art from the game in git. All snow is computed at runtime from the player's install.
-- No turning on by date. Only the player's yes or the setting turns it on.
+- No turning on by date. (Changed by the owner, 2026-11-21: from 1 December the game, on the first start of a season, downloads the Christmas mod, plays it, turns the look on and shows a welcome with «OK», once per season; the player can switch the mod or the look off at any time, and a season is not redone. Only the setting or the mod turns it off.)
 
 ## Anti-goals (a failure even if it works)
 

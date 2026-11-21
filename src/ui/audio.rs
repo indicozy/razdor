@@ -412,10 +412,12 @@ pub struct Settings {
     /// sails turn, the flags wave and birds cross the explored map (`living`). Style only.
     pub map_living: bool,
     /// Advanced, Razdor's, off by default: «Новогодний вид» (`holiday`): snow, garlands and festive hats on the
-    /// map, and a holiday question and menu theme on the main menu. Style only.
+    /// map, and the Christmas menu theme on the main menu. Style only. From 1 December the game turns it on
+    /// itself, once a season (`holiday_asked`).
     #[serde(default)]
     pub map_holiday: bool,
-    /// The season year (`holiday::season`) the holiday question was last answered for; `None` until asked.
+    /// The season year (`holiday::season`) the season start (the Christmas mod, the look, the welcome) was
+    /// last done for; `None` until it is done. The look or the mod switched off later is not redone this season.
     #[serde(default)]
     pub holiday_asked: Option<i64>,
     /// Advanced, Razdor's: «Частота анимации воды» (every other frame on a phone, every frame elsewhere, by

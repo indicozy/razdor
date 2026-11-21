@@ -609,8 +609,10 @@ Razdor's: weather by the land: snow on snow and ice, rain on swamps and lowlands
 Living map = Живая карта
 Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only. = Раздора: из труб идёт дым, развеваются флаги, пролетают птицы. Только вид.
 Holiday look = Новогодний вид
-Turn on the holiday look? = Включить новогодний вид?
-Snow, garlands and a Christmas menu theme. Style only; you can change it in Settings. = Снег, гирлянды и рождественская музыка в меню. Это только вид: поменять можно в настройках.
+Happy holidays! We've dressed up the world of Razdor: snow, garlands, Santa hats and a sleigh in the sky. The Christmas mod is already on. You can turn it off any time in Maps and mods and in the settings. Warmth to you and glorious victories! = С наступающим Новым годом! Мы принарядили мир Раздора: снег, гирлянды, новогодние колпаки и сани в небе. Новогодний мод уже включён. Выключить его можно в любой момент в «Картах и модах» и в настройках. Тепла вам и славных побед!
+Letter to Ded Moroz = Письмо Деду Морозу
+What would you like in Razdor next year? = Что вы хотите получить в Раздоре в новом году?
+Your letter is on its way to Ded Moroz! = Письмо отправлено Деду Морозу!
 Razdor's: snow on the land, roofs and trees, frozen water, snowfall, garlands and festive hats on the heroes, and a Christmas menu theme from the Hub. Style only. = Раздора: снег на земле, крышах и деревьях, замёрзшая вода, снегопад, гирлянды и праздничные шапки на героях и рождественская музыка меню из Хаба. Только вид.
 Depth model for mods = Модель глубины для модов
 Download (50 MB) = Скачать (50 МБ)
