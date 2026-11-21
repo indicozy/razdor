@@ -74,29 +74,43 @@ pub fn today() -> (i64, u32, u32) {
     civil((secs / 86_400) as i64)
 }
 
-/// The garlands' points on a building's light boxes (`garland_points`): sprite pixels and the colour index (0 red,
-/// 1 green, 2 gold, 3 blue), one point every 6 px along the top edge of each window, door and gate box.
-pub type Garland = (f32, f32, u8);
+/// The garlands' points on a building's light boxes (`garland_points`): sprite pixels, the colour index (0 red,
+/// 1 green, 2 gold, 3 blue) and the dot's index in its box (the chase's order).
+pub type Garland = (f32, f32, u8, u8);
 
-/// Spacing of the garland points along a box's top edge, in sprite pixels.
+/// Spacing of the garland dots along a box's edges, in sprite pixels.
 pub const GARLAND_STEP: i32 = 6;
 
-/// The garland points of a building's light boxes: along the top edge `y0` of each window, door and gate box
-/// (`[x0, y0, x1, y1]`), one point every [`GARLAND_STEP`] px from `x0` to `x1` (both ends included). Colours
-/// cycle 0 to 3 across all the points in order. Chimneys, flags, sails and the other kinds give none.
+/// The garland dots of a building's light boxes: each window, door and gate box (`[x0, y0, x1, y1]`) gets a frame
+/// of dots, one every [`GARLAND_STEP`] px: along the top edge `y0` from `x0` to `x1` (both ends included), down the
+/// right side `x1`, then up the left side `x0` (the chase runs clockwise). The dot index restarts in each box and
+/// the colour is the index mod 4. Chimneys, flags, sails and the other kinds give none.
 pub fn garland_points(boxes: &[(Kind, [i32; 4])]) -> Vec<Garland> {
     let mut out = Vec::new();
-    for (kind, [x0, y0, x1, _]) in boxes {
+    for (kind, [x0, y0, x1, y1]) in boxes {
         if !matches!(kind, Kind::Window | Kind::Door | Kind::Gate) {
             continue;
         }
+        let mut frame: Vec<(i32, i32)> = Vec::new();
         let mut x = *x0;
         while x <= *x1 {
-            out.push((x as f32, *y0 as f32, (out.len() % 4) as u8));
+            frame.push((x, *y0));
             x += GARLAND_STEP;
+        }
+        let rows: Vec<i32> = (1..).map(|k| y0 + k * GARLAND_STEP).take_while(|y| y < y1).collect();
+        frame.extend(rows.iter().map(|&y| (*x1, y)));
+        frame.extend(rows.iter().rev().map(|&y| (*x0, y)));
+        for (i, (x, y)) in frame.into_iter().enumerate() {
+            out.push((x as f32, y as f32, (i % 4) as u8, i as u8));
         }
     }
     out
+}
+
+/// The chase's brightness of dot `index` at time `t` seconds: a wave of light runs along the frame, one dot a
+/// quarter period behind the last, from 0.35 (faint) to 1 (full).
+pub fn chase(t: f64, index: u8) -> f32 {
+    (0.35 + 0.65 * (std::f64::consts::TAU * (t * 0.8 - f64::from(index) / 4.0)).sin().max(0.0)) as f32
 }
 
 #[cfg(test)]
@@ -129,14 +143,39 @@ mod tests {
     }
 
     #[test]
-    fn a_window_top_edge_gets_a_point_every_6_px_with_cycling_colours() {
+    fn a_frame_runs_clockwise_from_the_top_left_corner() {
+        // Top edge left to right, then the right side down, then the left side up: 7 dots for a 24 x 10 box.
         let pts = garland_points(&[(Kind::Window, [10, 20, 34, 30])]);
-        assert!((4..=5).contains(&pts.len()), "a 24-px box: {pts:?}");
-        assert_eq!(pts[0], (10.0, 20.0, 0), "from the left end, on the top edge");
-        assert_eq!(pts[1], (16.0, 20.0, 1));
-        assert_eq!(pts[2], (22.0, 20.0, 2));
-        assert_eq!(pts[3], (28.0, 20.0, 3));
-        assert_eq!(pts[4].2, 0, "the colours cycle");
+        assert_eq!(
+            pts,
+            vec![(10.0, 20.0, 0, 0), (16.0, 20.0, 1, 1), (22.0, 20.0, 2, 2), (28.0, 20.0, 3, 3), (34.0, 20.0, 0, 4), (34.0, 26.0, 1, 5), (10.0, 26.0, 2, 6)],
+            "the dot index runs along the frame, the colour cycles by it"
+        );
+    }
+
+    #[test]
+    fn a_short_box_gets_only_its_top_edge() {
+        let pts = garland_points(&[(Kind::Window, [0, 0, 12, 4])]);
+        assert_eq!(pts.len(), 3, "a 4-px box has no side dots: {pts:?}");
+    }
+
+    #[test]
+    fn the_chase_wave_travels_along_the_frame() {
+        // Dot i lags dot 0 by i/4 of a wave: 1/4 / 0.8 s per dot.
+        for i in 0..4u8 {
+            for k in 0..20 {
+                let t = 3.0 + k as f64 * 0.37;
+                let lag = f64::from(i) * 0.25 / 0.8;
+                assert!((chase(t, i) - chase(t - lag, 0)).abs() < 1e-5, "dot {i} at {t}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_chase_stays_between_faint_and_full() {
+        let vals: Vec<f32> = (0..400).map(|k| chase(f64::from(k) * 0.01, 0)).collect();
+        assert!(vals.iter().all(|v| (0.35..=1.0).contains(v)), "{vals:?}");
+        assert!(vals.iter().any(|v| *v > 0.99), "the wave reaches full brightness");
     }
 
     #[test]
@@ -156,10 +195,10 @@ mod tests {
     }
 
     #[test]
-    fn the_colour_index_runs_on_across_boxes() {
+    fn the_dot_index_restarts_on_each_box() {
         let pts = garland_points(&[(Kind::Window, [0, 0, 0, 4]), (Kind::Window, [0, 9, 0, 13])]);
-        let colours: Vec<u8> = pts.iter().map(|p| p.2).collect();
-        assert_eq!(colours, vec![0, 1], "one point per single-px box, colours still cycle");
+        let idx: Vec<u8> = pts.iter().map(|p| p.3).collect();
+        assert_eq!(idx, vec![0, 0], "one point per single-px box, each its own chase");
     }
 
     #[test]
