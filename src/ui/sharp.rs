@@ -1005,29 +1005,52 @@ const WINDOWS_MAIN: &str = r#"
     vec3 core = mix(vec3(1.0, 0.70, 0.30), vec3(1.0, 0.78, 0.34), hsh);
     vec3 halo = vec3(0.9, 0.45, 0.15);
     vec3 col = mix(halo, core, smoothstep(0.35, 1.0, bm.g));
-    // Razdor's «Новогодний вид» (Garland 1): the glow takes a garland colour (red, green, gold, blue), cycling
-    // smoothly, phased by the cell's hash so neighbouring windows differ; the look off (0) keeps the candle colour.
-    float gp = 4.0 * fract(mod(Clock, 1000.0) * 0.1 + hsh);
-    float gk = floor(gp);
-    float gf = gp - gk;
-    gf = gf * gf * (3.0 - 2.0 * gf);
-    vec3 ga = gk < 0.5 ? vec3(1.0, 0.15, 0.15) : gk < 1.5 ? vec3(0.2, 1.0, 0.3) : gk < 2.5 ? vec3(1.0, 0.8, 0.25) : vec3(0.3, 0.55, 1.0);
-    vec3 gb = gk < 0.5 ? vec3(0.2, 1.0, 0.3) : gk < 1.5 ? vec3(1.0, 0.8, 0.25) : gk < 2.5 ? vec3(0.3, 0.55, 1.0) : vec3(1.0, 0.15, 0.15);
-    col = mix(col, mix(ga, gb, gf), Garland);
-    gl_FragColor = vec4(col * (bm.g * Night * flick * 1.2 * color.a * fog_vis()), 1.0);
+    // Razdor's «Новогодний вид»: the garland controller (`holiday::garland_show`, the same formulas) runs its
+    // modes on the glow, cross-fading from GarMode into GarNext. The look off (Garland 0) keeps the candle colour.
+    float tt = mod(Clock, 1200.0);
+    float ph = floor(hsh * 4.0);
+    float par = mod(floor(hsh * 32.0), 2.0);
+    float lv = mix(gar_level(GarMode, tt, par, hsh, spos.x), gar_level(GarNext, tt, par, hsh, spos.x), GarFade);
+    vec3 gcol = mix(gar_mode_col(GarMode, tt, ph), gar_mode_col(GarNext, tt, ph), GarFade);
+    col = mix(col, gcol, Garland);
+    float lit = mix(1.0, lv, Garland);
+    gl_FragColor = vec4(col * (bm.g * Night * flick * lit * 1.2 * color.a * fog_vis()), 1.0);
+"#;
+
+/// The garland helpers (`holiday.rs`: `gar_level` is `garland_level`, `gar_mode_col` the colour under a mode).
+const GARLAND_GLSL: &str = r#"
+vec3 gar_col(float c) {
+    return c < 0.5 ? vec3(1.0, 0.15, 0.15) : c < 1.5 ? vec3(0.2, 1.0, 0.3) : c < 2.5 ? vec3(1.0, 0.8, 0.25) : vec3(0.3, 0.55, 1.0);
+}
+float gar_level(float m, float tt, float par, float hsh, float x) {
+    if (m < 0.5) return 1.0;
+    if (m < 1.5) return mod(floor(tt * 2.0) + par, 2.0) < 0.5 ? 1.0 : 0.25;
+    if (m < 2.5) return 0.25 + 0.75 * max(sin(6.2831853 * (tt / 1.2 - x / 600.0)), 0.0);
+    if (m < 3.5) return fract(sin(hsh * 12.9898 + floor(tt * 4.0) * 78.233) * 43758.5453) < 0.3 ? 0.25 : 1.0;
+    return 0.4 + 0.6 * (0.5 + 0.5 * sin(6.2831853 * tt / 2.0));
+}
+vec3 gar_mode_col(float m, float tt, float ph) {
+    if (m < 0.5) return gar_col(mod(floor(tt) + ph, 4.0));
+    if (m > 3.5) {
+        float p = mod(ph + tt * 0.25, 4.0);
+        float k = floor(p);
+        return mix(gar_col(k), gar_col(mod(k + 1.0, 4.0)), smoothstep(0.0, 1.0, fract(p)));
+    }
+    return gar_col(ph);
+}
 "#;
 
 /// The additive windows material, made once. `None` when it does not compile (no windows then).
 fn windows_material() -> Option<Material> {
     WINDOWS_MATERIAL.with(|m| {
         m.get_or_init(|| {
-            let extra = "uniform sampler2D BuildingMask;\nuniform float Night;\nuniform float Clock;\nuniform float Garland;\nvarying highp vec2 spos;";
+            let extra = format!("uniform sampler2D BuildingMask;\nuniform float Night;\nuniform float Clock;\nuniform float Garland;\nuniform float GarMode;\nuniform float GarNext;\nuniform float GarFade;\nvarying highp vec2 spos;{GARLAND_GLSL}");
             let pipeline = PipelineParams {
                 color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::One)),
                 ..Default::default()
             };
-            let uniforms = vec![UniformDesc::new("Night", UniformType::Float1), UniformDesc::new("Clock", UniformType::Float1), UniformDesc::new("Garland", UniformType::Float1)];
-            material_in(SHARP_VERTEX_SPOS, &fragment_fog(extra, WINDOWS_MAIN), pipeline, uniforms, vec!["BuildingMask".to_string(), "FogVis".to_string()])
+            let uniforms = ["Night", "Clock", "Garland", "GarMode", "GarNext", "GarFade"].map(|n| UniformDesc::new(n, UniformType::Float1)).to_vec();
+            material_in(SHARP_VERTEX_SPOS, &fragment_fog(&extra, WINDOWS_MAIN), pipeline, uniforms, vec!["BuildingMask".to_string(), "FogVis".to_string()])
                 .map_err(|e| razdor::diag!("windows material: {e}"))
                 .ok()
         })
@@ -1037,16 +1060,20 @@ fn windows_material() -> Option<Material> {
 
 /// Runs `draw` (the building pictures' draws) as the lit windows: an additive pass with the building mask
 /// bound, after the map's tint (the glow must not be darkened by the night's colour). `night` is the frame's
-/// night factor; the sprites' own alpha fades them into the fog as usual. `garland`: the glow takes the
-/// «Новогодний вид» garland colours (`holiday::on`).
-pub fn windows_pass<R>(mask: &Texture2D, night: f32, garland: bool, draw: impl FnOnce() -> R) -> R {
+/// night factor; the sprites' own alpha fades them into the fog as usual. `garland`: the garland controller's
+/// (mode, next mode, fade) when the look is on (`holiday::garland_mode`), None for the candle glow.
+pub fn windows_pass<R>(mask: &Texture2D, night: f32, garland: Option<(u8, u8, f32)>, draw: impl FnOnce() -> R) -> R {
     count_break();
     let Some(m) = windows_material() else { return draw() };
     m.set_texture("BuildingMask", mask.clone());
     bind_fog(&m);
     m.set_uniform("Night", night);
     m.set_uniform("Clock", super::clock::now() as f32);
-    m.set_uniform("Garland", if garland { 1.0f32 } else { 0.0 });
+    let (mode, next, fade) = garland.unwrap_or((0, 0, 0.0));
+    m.set_uniform("Garland", if garland.is_some() { 1.0f32 } else { 0.0 });
+    m.set_uniform("GarMode", f32::from(mode));
+    m.set_uniform("GarNext", f32::from(next));
+    m.set_uniform("GarFade", fade);
     struct End;
     impl Drop for End {
         fn drop(&mut self) {

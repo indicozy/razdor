@@ -8114,7 +8114,8 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
     let shade = |c: &Camera, foot: Vec2| -> f32 { Shade { fog: &game.fog, veil: Veil { shows: veil.shows, now: veil.now } }.at(c, foot) };
     // The living map's rule (`Location::windows_lit`): a garrisoned building's openings are dark unless someone is inside.
     let occupied = game.occupied_locations();
-    super::sharp::windows_pass(&mask, night, holiday::on(), || {
+    let garland = holiday::on().then(|| holiday::garland_mode(super::clock::now()));
+    super::sharp::windows_pass(&mask, night, garland, || {
         in_view_sprites(cam, |c| {
             let zoom = c.scale / PX;
             for (i, l) in game.world.locations.iter().enumerate() {
@@ -8402,9 +8403,9 @@ fn draw_smoke(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(
 }
 
 /// Razdor's «Новогодний вид» garlands (`holiday`, `DtArt::garlands`): small coloured lights framing each visible
-/// building's window, door and gate boxes. A chase runs along each frame (`holiday::chase`): a wave of brightness,
-/// one dot a quarter period behind the last. They are dimmer by day (0.35) and full at night (`lights::Frame::night`),
-/// the same factor as the window glow. The cheap path draws the dots only.
+/// building's window, door and gate boxes. They follow the garland controller (`holiday::garland_show`), the same
+/// pattern as the windows' glow, so the two move together. They are dimmer by day (0.35) and full at night
+/// (`lights::Frame::night`), the same factor as the window glow. The cheap path draws the dots only.
 /// Drawn over the sprites in the screen space; the look off draws nothing.
 fn draw_garlands(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(Vec2) -> f32, seen: &[usize]) {
     if !holiday::on() || cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
@@ -8440,8 +8441,9 @@ fn draw_garlands(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn 
             };
             for &(x, y, c, i) in points {
                 let at = space.point(origin + vec2(x, y) * zoom).truncate();
-                let [red, green, blue] = COLOURS[c as usize & 3];
-                let a = (bright * holiday::chase(now, i) * vis).clamp(0.0, 1.0);
+                let (colour, level) = holiday::garland_show(now, u32::from(c), u32::from(i) & 1, holiday::unit_hash(x, y), at.x);
+                let [red, green, blue] = COLOURS[colour as usize & 3];
+                let a = (bright * level * vis).clamp(0.0, 1.0);
                 draw_circle(at.x, at.y, 2.0, Color::new(red, green, blue, a));
                 if !cheap {
                     let color = Color::new(red, green, blue, 0.5 * a);
