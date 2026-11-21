@@ -476,11 +476,15 @@ mod tests {
     const ORIGINAL_LATIN: &[&str] =
         &["A: {v}", "Pwr: {power}", "D: {blow}/{shot}", "Mnvr: {mn}", "Ini: {ini}", "Hits: {hp}/{max}", "Hits: {max}"];
 
+    /// A language's own name, shown in Latin in its own language (the map-language choice «English»).
+    const LANGUAGE_NAMES: &[&str] = &["English"];
+
     #[test]
     fn the_catalog_is_russian() {
         let latin_only: BTreeSet<String> = ru_entries()
             .into_iter()
             .filter(|e| !(ORIGINAL_LATIN.contains(&e.key.as_str()) && e.value == e.key))
+            .filter(|e| !LANGUAGE_NAMES.contains(&e.value.as_str()))
             .filter(|e| !e.value.chars().any(|c| ('а'..='я').contains(&c.to_lowercase().next().unwrap_or(c))))
             .map(|e| format!("{}:{}: {:?}", e.file, e.line, e.value))
             .collect();
