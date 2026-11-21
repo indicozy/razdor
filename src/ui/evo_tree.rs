@@ -785,12 +785,11 @@ fn point_in(a: Rect, p: Vec2) -> bool {
 const DRAG_DP: f32 = 8.0;
 /// The «выбран» tag's text in sp (the names' floor).
 const TAG_SP: f32 = 12.0;
-/// A phone's top button and «[ ]»: 40 dp tall or square (the minimum touch target), its label 12 sp
-/// (the smallest a label may be). The desktop keeps its own sizes.
-const PHONE_TOP_DP: f32 = 40.0;
+/// A phone's top button («Всё дерево», «К ветке») label: 12 sp (the smallest a label may be). The desktop
+/// keeps its own sizes.
 const PHONE_TOP_SP: f32 = 12.0;
-/// The phone's top button («Всё дерево», «К ветке») is 27 dp tall, not the 40 dp touch target: the owner's
-/// decision (2026-11-21), who ordered its height cut by 30% with its label and width kept. «[ ]» is 40 dp.
+/// The phone's top button is 27 dp tall, not the 40 dp touch target: the owner's decision (2026-11-21),
+/// who ordered its height cut by 30% with its label and width kept. The «[ ]» button is a square as tall.
 const PHONE_TOP_H_DP: f32 = 27.0;
 
 /// Whether a press is a drag, so its release selects nothing: it was one, or the pointer has left its
@@ -976,8 +975,9 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
     let wheel = widgets::wheel();
     let (tx, ty) = input::map_pan();
     input::swipe_area(a, SwipeKind::Pan);
-    // The «[ ]» button: 40 dp square on a phone (the minimum touch target), the desktop's 48 px as before.
-    let fit_btn = fit_button_rect(a, if phone { PHONE_TOP_DP * u } else { 48.0 * u });
+    // The «[ ]» button: on a phone a square exactly as tall as the top button (27 dp), the owner's decision
+    // (2026-11-21); the desktop's 48 px as before.
+    let fit_btn = fit_button_rect(a, if phone { PHONE_TOP_H_DP * u } else { 48.0 * u });
     let on_button = point_in(fit_btn, pointer);
     let mut click = None;
     PAN.with(|p| {
