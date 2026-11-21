@@ -773,8 +773,7 @@ impl Clip {
         // covers it (`pan::cover_bar`).
         let r = super::pan::clipped(super::pan::on_screen(r));
         let dpi = screen_dpi_scale();
-        let gl = unsafe { get_internal_gl() }.quad_gl;
-        gl.scissor(Some(((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
+        super::render_cache::scissor(Some(((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32)));
         Clip
     }
 }

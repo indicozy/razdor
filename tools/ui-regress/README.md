@@ -21,7 +21,8 @@ python3 -I tools/ui-regress/ui_regress.py run --bin /mnt/ai_models/razdor-scratc
 `run` needs `RAZDOR_DT_DIR` (the install): from the environment, or from the repo's `.env`. It
 runs 4 cases at a time, each pinned to CPUs 8-19 at nice 19, with its own X display, `XDG_RUNTIME_DIR`,
 log and save folder, and a 60 s timeout. Options: `--only TEXT` (cases whose name contains the
-text), `--out DIR` (default: a timestamped folder under
+text), `--env K=V` (repeatable: an environment variable for every case, set after the case's own, e.g.
+`--env RAZDOR_CRT=light`), `--out DIR` (default: a timestamped folder under
 `/mnt/ai_models/razdor-scratch/ui-regress/out/`), `--goldens DIR`, `--tolerance N` (largest channel
 difference that still counts as the same, default 12), `--threshold F` (changed fraction of
 pixels that fails a case, default 0.0005).

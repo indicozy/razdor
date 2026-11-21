@@ -55,6 +55,7 @@ pub mod memo;
 pub mod minimap;
 pub mod living;
 pub mod cloud_shadow;
+pub mod crt;
 pub mod mist;
 pub mod new_game;
 pub mod pan;

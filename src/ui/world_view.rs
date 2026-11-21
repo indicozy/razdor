@@ -2489,7 +2489,8 @@ fn photo_pan(game: &Game, view: &mut MapView, slide: (f32, f32)) {
 /// The shutter (`photo_frame`): the screen as drawn so far (the map, no strip, no notice) saved as
 /// a PNG, and a notice of where it went (the folder too on the desktop).
 fn take_shot(view: &mut MapView, now: f64) {
-    let img = get_screen_data();
+    // With the CRT effect on, the picture is read before its pass (`crt::target_image`), so the photo has no effect on it.
+    let img = super::crt::target_image().unwrap_or_else(get_screen_data);
     match photo::save_shot(&img.bytes, img.width as u32, img.height as u32) {
         Ok(path) => {
             let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();

@@ -19,7 +19,7 @@ use std::mem::Discriminant;
 
 use macroquad::camera::{set_camera, Camera2D};
 use macroquad::math::Rect;
-use macroquad::window::{get_internal_gl, screen_dpi_scale, screen_height, screen_width};
+use macroquad::window::{screen_dpi_scale, screen_height, screen_width};
 use razdor::local;
 
 use super::input;
@@ -158,7 +158,11 @@ fn sync() {
         // `from_display_rect` sets a negative `zoom.y` for a render target; drawn to the screen,
         // macroquad's matrix negates it again, so it is put back here (else the frame is flipped).
         let mut camera = Camera2D::from_display_rect(Rect::new(-ox, -oy, sw, sh));
-        camera.zoom.y = -camera.zoom.y;
+        match super::render_cache::screen_target() {
+            // Into the CRT's stand-in: the target's own orientation, so the zoom keeps its sign.
+            Some(rt) => camera.render_target = Some(rt),
+            None => camera.zoom.y = -camera.zoom.y,
+        }
         set_camera(&camera);
     } else if CAMERA.with(|c| c.get()) {
         super::render_cache::back_to_2d();
@@ -258,10 +262,9 @@ fn above_bar() -> Rect {
 /// Cuts the drawing off outside `clip` (screen pixels), or lifts the cut (`None`).
 fn scissor(clip: Option<Rect>) {
     let dpi = screen_dpi_scale();
-    let gl = unsafe { get_internal_gl() }.quad_gl;
     let clip = clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32));
     super::sharp::note_clip(clip);
-    gl.scissor(clip);
+    super::render_cache::scissor(clip);
 }
 
 /// Called once the bottom bar is drawn for a window (or a dialog over the map): when the canvas

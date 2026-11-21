@@ -277,6 +277,7 @@ async fn main() {
     loop {
         // The window's size and DPI for this frame, read once here (`ui::frame_state`).
         ui::frame_state::refresh();
+        ui::crt::begin_frame();
         let started = web_time::Instant::now();
         let before = app.screen_name();
         if ui::snapshot::open_later(&mut app, frames) {
@@ -307,6 +308,8 @@ async fn main() {
         if !ui::trailer::active() {
             ui::cursor::draw();
         }
+        // The CRT effect's pass: the frame in the stand-in goes to the screen (before the captures below read it).
+        ui::crt::end_frame();
         // A performance test's mid-run picture (`RAZDOR_BENCH_MID=<png>`, `RAZDOR_BENCH_MID_CELL=<n>`): one frame of
         // the cell being measured, then the run goes on.
         if ui::bench::take_mid_shot() {

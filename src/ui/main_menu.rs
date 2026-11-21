@@ -1601,6 +1601,7 @@ pub fn apply_options(audio: &super::audio::Settings) {
     super::world_view::set_sprite_size(audio.map_sprite_size);
     super::world_view::set_map_render_scale(audio.map_render_scale);
     super::frame_cap::set_setting(audio.frame_cap);
+    super::crt::set_settings(audio.crt, audio.crt_quality, audio.crt_curve);
     super::frame_cap::set_battery(audio.battery_saver);
     super::gestures::set_twist(audio.map_twist);
     chrome::set_option_override("ScrollSpeed", audio.scroll_speed.map(|v| (v.round() as i32).to_string()));
@@ -3580,10 +3581,9 @@ fn keys_window(audio: &mut super::audio::Settings, over_map: bool) -> bool {
 /// Cuts the drawing off outside `clip` (screen px), or lifts the cut (`None`).
 fn phone_clip(clip: Option<Rect>) {
     let dpi = screen_dpi_scale();
-    let gl = unsafe { get_internal_gl() }.quad_gl;
     let clip = clip.map(|r| ((r.x * dpi) as i32, (r.y * dpi) as i32, (r.w * dpi).ceil() as i32, (r.h * dpi).ceil() as i32));
     super::sharp::note_clip(clip);
-    gl.scissor(clip);
+    super::render_cache::scissor(clip);
 }
 
 /// The words of `label` in lines of at most `max_w` px at `size` (a word never splits).

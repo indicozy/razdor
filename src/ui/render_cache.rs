@@ -14,7 +14,7 @@ use macroquad::math::{vec2, Rect};
 use macroquad::miniquad::{BlendFactor, BlendState, Equation, PipelineParams, ShaderSource};
 use macroquad::prelude::WHITE;
 use macroquad::texture::{draw_texture_ex, render_target, DrawTextureParams, FilterMode, RenderTarget};
-use macroquad::window::{screen_height, screen_width};
+use macroquad::window::{get_internal_gl, screen_height, screen_width};
 
 /// The largest target side in physical pixels; larger pictures are drawn live.
 const MAX_SIDE: f32 = 8192.0;
@@ -41,6 +41,28 @@ razdor::local! {
     /// screen's 2D space drawn into it. [`back_to_2d`] and the end of a fill return to it, not to
     /// the screen, so every camera reset during the world drawing stays in the target.
     static BASE: std::cell::RefCell<Option<(RenderTarget, Rect)>> = const { std::cell::RefCell::new(None) };
+    /// The screen's stand-in while the CRT effect is on (`crt`): the whole frame is drawn into it, and
+    /// [`to_screen`] goes there instead of the real screen. `None` otherwise.
+    static SCREEN: std::cell::RefCell<Option<RenderTarget>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Sets the screen's stand-in (`None`: the real screen again).
+pub fn set_screen_target(rt: Option<RenderTarget>) {
+    SCREEN.with(|s| *s.borrow_mut() = rt);
+}
+
+/// The screen's stand-in, if one is set.
+pub fn screen_target() -> Option<RenderTarget> {
+    SCREEN.with(|s| s.borrow().clone())
+}
+
+/// The 2D space of the real screen: the screen's stand-in when one is set (`set_screen_target`), else
+/// the real screen's default camera.
+pub fn to_screen() {
+    match screen_target() {
+        Some(rt) => set_camera(&target_camera(&rt, Rect::new(0.0, 0.0, screen_width(), screen_height()))),
+        None => set_default_camera(),
+    }
 }
 
 /// The copy material, made once.
@@ -68,10 +90,31 @@ pub fn target() -> Option<RenderTarget> {
     FILLING.with(|f| f.borrow().as_ref().map(|(rt, _)| rt.clone()))
 }
 
-/// The target everything drawn now goes to: the fill in progress, else the map's base target,
-/// else `None` (the screen). The 3D views take their render pass from it.
+/// The target everything drawn now goes to: the fill in progress, else the map's base target, else
+/// the screen's stand-in, else `None` (the screen). The 3D views take their render pass from it.
 pub fn draw_target() -> Option<RenderTarget> {
-    target().or_else(|| BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| rt.clone())))
+    target().or_else(|| BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| rt.clone()))).or_else(screen_target)
+}
+
+/// The height in pixels of the target the 2D space draws into now (the same order as [`back_to_2d`]).
+fn bound_target_height() -> Option<f32> {
+    let filling = FILLING.with(|f| f.borrow().as_ref().map(|(rt, _)| rt.texture.height()));
+    filling
+        .or_else(|| BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| rt.texture.height())))
+        .or_else(|| screen_target().map(|rt| rt.texture.height()))
+}
+
+/// Cuts the drawing off outside `clip` (physical pixels, top-left origin), or lifts the cut (`None`).
+/// macroquad's quad_gl always flips y as `height - (y + h)`, with the height of the bound target. A
+/// target's 2D camera draws upside down, so inside one the clip came out mirrored; here the y is
+/// pre-flipped with the same height, and macroquad's flip then lands the clip where the drawing is.
+pub fn scissor(clip: Option<(i32, i32, i32, i32)>) {
+    let gl = unsafe { get_internal_gl() }.quad_gl;
+    let clip = match (clip, gl.get_active_render_pass(), bound_target_height()) {
+        (Some((x, y, w, h)), Some(_), Some(th)) => Some((x, th as i32 - y - h, w, h)),
+        (clip, _, _) => clip,
+    };
+    gl.scissor(clip);
 }
 
 /// Back to the 2D space: the target of the fill in progress, else the map's base target, else
@@ -85,7 +128,7 @@ pub fn back_to_2d() {
     }
     match BASE.with(|b| b.borrow().clone()) {
         Some((rt, space)) => set_camera(&target_camera(&rt, space)),
-        None => set_default_camera(),
+        None => to_screen(),
     }
 }
 
@@ -96,7 +139,7 @@ pub fn with_base<R>(rt: &RenderTarget, space: Rect, f: impl FnOnce() -> R) -> R 
     impl Drop for Done {
         fn drop(&mut self) {
             BASE.with(|b| b.borrow_mut().take());
-            set_default_camera();
+            to_screen();
         }
     }
     BASE.with(|b| *b.borrow_mut() = Some((rt.clone(), space)));

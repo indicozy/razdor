@@ -23,7 +23,6 @@
 //! map is drawn live under the windows from then on (the gate, [`CopyGate`]), and the log says why.
 
 use super::audio::Settings;
-use macroquad::camera::set_default_camera;
 use macroquad::miniquad::{TextureFormat, TextureParams};
 use macroquad::texture::{FilterMode, Texture2D};
 use macroquad::window::get_internal_gl;
@@ -146,7 +145,9 @@ pub fn usable(w: f32, h: f32) -> bool {
 /// The screen's size in physical pixels, when a copy of it can be kept (`None`: the map is drawn live, the
 /// size is too large or a copy failed before in this run).
 pub fn pixels() -> Option<(u32, u32)> {
-    if !GATE.with(|g| g.borrow().allowed()) {
+    // The CRT effect draws into its own stand-in, so `grab_screen` (which reads the real screen) would copy
+    // nothing of the frame: the map is drawn live under the windows while the effect is on.
+    if super::crt::active() || !GATE.with(|g| g.borrow().allowed()) {
         return None;
     }
     let (w, h) = macroquad::miniquad::window::screen_size();
@@ -204,7 +205,7 @@ pub fn capture(key: u64, size: (u32, u32)) {
     let copy = ScreenCopy(id);
     let tex = copy.texture();
     tex.set_filter(FilterMode::Nearest);
-    set_default_camera();
+    super::render_cache::to_screen();
     tex.grab_screen();
     let error = take_gl_error();
     if error != GL_NO_ERROR {

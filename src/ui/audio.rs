@@ -392,6 +392,18 @@ pub struct Settings {
     /// edge, from the game's own sprites (`world_view::decor`). Look only. Set by «Среднее» (few) and «Высокое» (normal).
     #[serde(default)]
     pub map_decor: super::world_view::decor::DecorLevel,
+    /// Advanced, Razdor's, off by default: «ЭЛТ-эффект». An old monitor's look over the whole screen: scanlines, a soft
+    /// glow and darker edges (`crt`). Look only.
+    #[serde(default)]
+    pub crt: super::crt::Strength,
+    /// Advanced, Razdor's: «Качество ЭЛТ». `None` takes the platform's (`crt::platform_default`). The cost of the look;
+    /// nothing while «ЭЛТ-эффект» is off.
+    #[serde(default)]
+    pub crt_quality: Option<super::crt::Quality>,
+    /// Advanced, Razdor's, off by default: «Скруглённый экран». The picture bends and its corners are rounded (`crt`).
+    /// Look only; nothing while «ЭЛТ-эффект» is off.
+    #[serde(default)]
+    pub crt_curve: bool,
     /// Advanced, Razdor's, off by default: «Погода». Snow over snow and ice, rain over swamps and
     /// lowlands, heat haze over deserts, ash over fire lands, cloud shadows everywhere (`weather`).
     /// Style only.
@@ -481,7 +493,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), crt: super::crt::Strength::Off, crt_quality: None, crt_curve: false, map_weather: false, map_living: false, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
     }
 }
 
@@ -1520,6 +1532,19 @@ mod tests {
         assert_eq!(back.map_natural_ground, NaturalGround::Strong, "«Сильно» survives a save");
         let soft: Settings = serde_json::from_str(r#"{"map_natural_ground": "Soft"}"#).unwrap();
         assert_eq!(soft.map_natural_ground, NaturalGround::Soft);
+    }
+
+    #[test]
+    fn the_crt_fields_default_off_and_survive_serialization() {
+        use super::super::crt::{Quality, Strength};
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!((old.crt, old.crt_quality, old.crt_curve), (Strength::Off, None, false), "an older file: no effect");
+        assert_eq!((Settings::default().crt, Settings::default().crt_quality, Settings::default().crt_curve), (Strength::Off, None, false));
+        let on = Settings { crt: Strength::Strong, crt_quality: Some(Quality::High), crt_curve: true, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
+        assert_eq!((back.crt, back.crt_quality, back.crt_curve), (Strength::Strong, Some(Quality::High), true), "the effect survives a save");
+        let light: Settings = serde_json::from_str(r#"{"crt": "Light"}"#).unwrap();
+        assert_eq!(light.crt, Strength::Light);
     }
 
     #[test]

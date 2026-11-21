@@ -118,6 +118,8 @@ def run_case(case, index, out, dt_dir, binary):
         "RAZDOR_ADS_DIR": str(REPO / "ads"),
     }
     env.update(case["extra"])
+    # `--env K=V` (every case, after the case's own values).
+    env.update(case.get("cli_env", {}))
     # A case's own saved settings: `RAZDOR_CASE_AUDIO` (the JSON of `audio.json`) is this tool's key,
     # not the game's; the case's save folder gets the file, so the game starts with those settings.
     audio = env.pop("RAZDOR_CASE_AUDIO", None)
@@ -186,6 +188,14 @@ def cmd_run(args):
     cases = load_cases(args.only)
     if not cases:
         sys.exit("no case matches")
+    cli_env = {}
+    for item in args.env or []:
+        if "=" not in item:
+            sys.exit(f"--env wants K=V, got {item!r}")
+        k, v = item.split("=", 1)
+        cli_env[k.strip()] = v
+    for c in cases:
+        c["cli_env"] = cli_env
     binary = Path(args.bin)
     if not binary.is_file():
         sys.exit(f"no binary at {binary}: build it first (see tools/ui-regress/README.md)")
@@ -261,6 +271,7 @@ def main():
     r = sub.add_parser("run", help="render the scenes and compare them with the goldens")
     r.add_argument("--bin", default=str(DEFAULT_BIN), help="the release razdor binary")
     r.add_argument("--only", help="only the cases whose name contains this text")
+    r.add_argument("--env", action="append", metavar="K=V", help="an environment variable for every case (repeatable; after the case's own)")
     r.add_argument("--out", help="output folder (default: a timestamped one under scratch)")
     r.add_argument("--goldens", default=str(DEFAULT_GOLDENS))
     r.add_argument("--tolerance", type=int, default=12, help="max channel difference that still counts as the same")

@@ -832,7 +832,7 @@ pub fn draw(pass: &Pass) {
         let d = pass.draw;
         if let Some(c) = cut {
             // The same call the pan and the widgets use for their clips (macroquad's main thread).
-            unsafe { get_internal_gl() }.quad_gl.scissor(Some(c));
+            super::render_cache::scissor(Some(c));
         }
         draw_texture_ex(&one, d[0], d[1], WHITE, DrawTextureParams { dest_size: Some(vec2(d[2], d[3])), ..Default::default() });
         if cut.is_some() {
