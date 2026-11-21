@@ -4,7 +4,7 @@
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
-//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:<group>]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `holiday-ask` (the main menu with the holiday question up: `RAZDOR_HOLIDAY_ASK=1`), `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
+//! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:<group>]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `holiday-welcome` (the main menu with the holiday look's welcome window up), `holiday-letter` (the letter to Ded Moroz up), `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the
 //! hero sets off that many cells away), `building:<map>:<n>`
 //! (the hero in the n-th building; `:barracks`, `:garrison`, `:market`, `:sanctuary` open that tab; `:store` makes it his with loot and opens its store (the store tab shows only with `RAZDOR_SCENE_EXPERIMENTAL=store`, the switch «Склад в своих зданиях»); `:market-pack` the market's pack list), `army:<map>[:<n>[:<unit id>[:<level>]]]` (squad member n selected, made that unit at that level), `journal:<map>` / `hero:<map>[:<tab>]`, `spells:<map>` (`spells-pages:<map>`: 20 spells, page 2 open),
 //! `menu:<map>`, `defeat:<map>` (the lost battle's report), `event:<map>:<n>` (the map's event n's window; `RAZDOR_SCENE_LOST=<id>,…` adds its lost-items row; `RAZDOR_SCENE_JOINED=<id>,…` and `RAZDOR_SCENE_LEFT=<id>,…` its units rows),`learnt:<map>[:<id>,…]` (the event window with new spells, the hero with no mana), `report:<map>[:<gold>]` (the noon report), `settings:<map>[:<group>|keys]` (`<group>`: map, battle, screen, controls, other; `keys`: Razdor's keys window over the controls group), `battle:<map>:<n>` (against the n-th army), `hub[:<tab>[:<id>[:<search>]]]` ("Maps and mods"), `custom` (the custom battle
@@ -661,8 +661,16 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
     let kind = parts.next().unwrap_or_default();
     match kind {
         "title" => return Ok(()),
-        // `holiday-ask`: the main menu, the holiday question up (`RAZDOR_HOLIDAY_ASK=1`, `main_menu::holiday_asking`).
-        "holiday-ask" => return Ok(()),
+        // `holiday-welcome` / `holiday-letter`: the main menu with the season's welcome or the letter window up
+        // (`ui::holiday_windows`).
+        "holiday-welcome" => {
+            super::holiday_windows::open_greeting();
+            return Ok(());
+        }
+        "holiday-letter" => {
+            super::holiday_windows::open_letter();
+            return Ok(());
+        }
         // `fonts`: sample lines in many scripts over the title screen (`draw_overlay`).
         "fonts" => {
             FONTS_SCENE.with(|f| f.set(true));

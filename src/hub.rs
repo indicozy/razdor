@@ -424,6 +424,10 @@ pub struct HolidayRef {
     /// The file's size and SHA-256 (checked before it is kept).
     pub size: u64,
     pub sha256: String,
+    /// The Christmas mod: the id of the mod entry that the season start downloads and plays (see
+    /// `ui::holiday_start`). It must be a mod of this catalog. Absent: no mod, no season start.
+    #[serde(default, rename = "mod", skip_serializing_if = "Option::is_none")]
+    pub mod_id: Option<String>,
 }
 
 /// The largest holiday music file (a few minutes of Ogg Vorbis).
@@ -576,6 +580,14 @@ impl Catalog {
             h.sha256 = h.sha256.to_ascii_lowercase();
             if h.size == 0 || h.size > MAX_HOLIDAY_BYTES {
                 return Err(format!("index.json: holiday: bad size {}", h.size));
+            }
+            if let Some(m) = &h.mod_id {
+                if !safe_id(m) {
+                    return Err(format!("index.json: holiday: bad mod id {m:?}"));
+                }
+                if !c.entries.iter().any(|e| e.id == *m && e.kind == Kind::Mod) {
+                    return Err(format!("index.json: holiday: mod {m:?} is not a mod of the hub"));
+                }
             }
         }
         Ok(c)
@@ -2919,6 +2931,19 @@ mod tests {
         assert!(with(&GOOD_HOLIDAY.replace("\"size\":1234", &format!("\"size\":{}", MAX_HOLIDAY_BYTES + 1))).is_err(), "too big");
         assert!(with(&GOOD_HOLIDAY.replace("3AA411", "3AA41")).is_err(), "a SHA-256 is 64 digits");
         assert!(with(GOOD_HOLIDAY).is_ok());
+    }
+
+    #[test]
+    fn a_holiday_names_its_mod_and_the_mod_must_be_in_the_catalog() {
+        let mod_entry = r#"{"id":"xmas","kind":"mod","title":{"ru":"Новый год","en":"Christmas"},"author":"Razdor team","version":"1","files":[{"path":"x.zip","name":"x","size":1,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA"}]}"#;
+        let with = |entries: &str, h: &str| Catalog::parse(format!(r#"{{"format":1,"entries":[{entries}],"holiday":{h}}}"#).as_bytes());
+        let named = GOOD_HOLIDAY.replace("\"size\":1234,", "\"size\":1234,\"mod\":\"xmas\",");
+        let read = with(mod_entry, &named).expect("a holiday with its mod reads");
+        assert_eq!(read.holiday.unwrap().mod_id.as_deref(), Some("xmas"));
+        assert_eq!(with("", GOOD_HOLIDAY).unwrap().holiday.unwrap().mod_id, None, "no mod named: none");
+        assert!(with("", &named).is_err(), "a mod that is not in the catalog refuses it");
+        assert!(with(&mod_entry.replace("\"kind\":\"mod\"", "\"kind\":\"map\""), &named).is_err(), "a map is not the holiday's mod");
+        assert!(with(mod_entry, &named.replace("\"xmas\"", "\"../xmas\"")).is_err(), "the mod id is a path part");
     }
 
     #[test]

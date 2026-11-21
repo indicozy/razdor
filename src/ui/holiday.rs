@@ -56,23 +56,55 @@ pub fn season(y: i64, m: u32, d: u32) -> Option<i64> {
     }
 }
 
-/// Whether the holiday question is asked today: a date in a season that was not answered yet
-/// (`asked` holds the season year answered last).
-pub fn should_ask(asked: Option<i64>, today: (i64, u32, u32)) -> bool {
+/// Whether the season start is due on a date: the date is in a season that the setting `holiday_asked`
+/// (the season year last done) does not name yet.
+pub fn due(asked: Option<i64>, today: (i64, u32, u32)) -> bool {
     match season(today.0, today.1, today.2) {
         Some(year) => asked != Some(year),
         None => false,
     }
 }
 
-/// Whether the main menu asks the holiday question now: today is in a season the settings do not
-/// have an answer for yet (`holiday_asked`).
-pub fn holiday_question_due(s: &Settings, today: (i64, u32, u32)) -> bool {
-    should_ask(s.holiday_asked, today)
+/// Whether the season start is due now (the settings and today's date, see [`today`]).
+pub fn start_due(s: &Settings, today: (i64, u32, u32)) -> bool {
+    due(s.holiday_asked, today)
 }
 
-/// Today's date (UTC) as (year, month, day).
+/// The steps of the season start still to take: the Christmas mod is not on the disk (`download`),
+/// it is not the one played (`switch`), the look is not on (`look`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Steps {
+    pub download: bool,
+    pub switch: bool,
+    pub look: bool,
+}
+
+/// The steps the season start takes, from what is in place: `installed` (the mod is in the hub folder),
+/// `active` (it is the mod played), `look_on` (the setting is on).
+pub fn steps(installed: bool, active: bool, look_on: bool) -> Steps {
+    Steps { download: !installed, switch: !active, look: !look_on }
+}
+
+/// A date `YYYY-MM-DD` (the test override `RAZDOR_TODAY`), or None when it is not one.
+pub fn parse_date(text: &str) -> Option<(i64, u32, u32)> {
+    let mut parts = text.trim().split('-');
+    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let (y, m, d): (i64, u32, u32) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some((y, m, d))
+}
+
+/// Today's date (UTC) as (year, month, day). `RAZDOR_TODAY=YYYY-MM-DD` replaces it (tests and
+/// screenshots only).
 pub fn today() -> (i64, u32, u32) {
+    if let Some(d) = std::env::var("RAZDOR_TODAY").ok().as_deref().and_then(parse_date) {
+        return d;
+    }
     let secs = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
     civil((secs / 86_400) as i64)
 }
@@ -289,20 +321,30 @@ mod tests {
     }
 
     #[test]
-    fn the_question_is_asked_once_per_season() {
-        assert!(should_ask(None, (2026, 12, 5)), "a new season, never answered");
-        assert!(!should_ask(Some(2026), (2027, 1, 3)), "the same season, answered: not again");
-        assert!(should_ask(Some(2026), (2027, 12, 1)), "the next December: asked again");
-        assert!(!should_ask(None, (2026, 7, 1)), "outside the season: no question");
+    fn the_season_start_is_due_once_per_season() {
+        assert!(due(None, (2026, 12, 1)), "1 December, never done: due");
+        assert!(due(None, (2027, 1, 15)), "15 January: still the season");
+        assert!(!due(None, (2027, 1, 16)), "16 January: no season");
+        assert!(!due(None, (2026, 11, 30)), "30 November: no season");
+        assert!(!due(Some(2026), (2027, 1, 3)), "done for this season: not again");
+        assert!(due(Some(2026), (2027, 12, 1)), "the next December: due again");
+        assert!(!due(None, (2026, 7, 1)), "July: nothing");
     }
 
     #[test]
-    fn the_holiday_question_is_due_once_per_season() {
-        let mut s = Settings::default();
-        assert!(holiday_question_due(&s, (2026, 12, 1)), "the first December visit asks");
-        s.holiday_asked = Some(2026);
-        assert!(!holiday_question_due(&s, (2027, 1, 3)), "answered for this season: not again");
-        assert!(!holiday_question_due(&s, (2026, 7, 1)), "July: no question");
+    fn a_date_override_reads_year_month_day() {
+        assert_eq!(parse_date("2026-12-01"), Some((2026, 12, 1)));
+        assert_eq!(parse_date(" 2027-01-15 "), Some((2027, 1, 15)));
+        assert_eq!(parse_date("2026-13-01"), None, "no month 13");
+        assert_eq!(parse_date("2026-12-32"), None, "no day 32");
+        assert_eq!(parse_date("tomorrow"), None);
+    }
+
+    #[test]
+    fn the_steps_are_what_is_still_missing() {
+        assert_eq!(steps(false, false, false), Steps { download: true, switch: true, look: true }, "a fresh install");
+        assert_eq!(steps(true, true, true), Steps { download: false, switch: false, look: false }, "all in place");
+        assert_eq!(steps(true, false, true), Steps { download: false, switch: true, look: false }, "installed, not played");
     }
 
     #[test]

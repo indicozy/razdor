@@ -14,6 +14,7 @@ pub mod transfer;
 pub mod rules;
 pub mod search;
 pub mod hub;
+pub mod letters;
 pub mod translate;
 pub mod update;
 pub mod depth;
