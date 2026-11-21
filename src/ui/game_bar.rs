@@ -159,6 +159,12 @@ pub fn time_button_rect(b: TimeButton, top: f32, mid: f32, s: f32) -> Rect {
     on_bar(b.original_rect(), top, mid, s)
 }
 
+/// The time panel's centre, the bar's centre: the time buttons follow the safe area like the
+/// panel does (on the desktop the safe area is zero and this is the screen's middle).
+pub fn time_mid(bar: Rect) -> f32 {
+    bar.x + bar.w / 2.0
+}
+
 local! {
     /// The time buttons' art with its alpha mask applied, by name.
     static TIME_ART: std::cell::RefCell<std::collections::HashMap<&'static str, Option<Texture2D>>> = std::cell::RefCell::new(Default::default());
@@ -458,7 +464,7 @@ fn draw_bar(game: &Game, look: &impl Fn(BarButton) -> Look, time_buttons: bool) 
     resources(game, sy, sh, bar, safe_area(), vec2(w, h));
 
     // The time panel.
-    let cx = w / 2.0;
+    let cx = time_mid(bar);
     // The message box hovered on the idle map: the three buttons stand over it, its text
     // hidden (as the original draws it).
     let s = row / PANEL_ROW;
@@ -779,6 +785,34 @@ mod tests {
     /// Whether the button's disc (70 % of its radius) lies on the screen with those corners.
     fn disc_clear(r: &Rect, screen: Vec2, safe: SafeArea) -> bool {
         disc_on_screen(vec2(r.x + r.w / 2.0, r.y + r.h / 2.0), 0.7 * r.w.min(r.h) / 2.0, screen, safe)
+    }
+
+    #[test]
+    fn the_time_buttons_centre_on_the_bar_not_the_screen() {
+        // A 3200x1440 phone with a camera cutout on the left (132 px): the bar and the time
+        // panel sit in the safe area, so the buttons must centre on the bar, not the screen.
+        let screen = vec2(3200.0, 1440.0);
+        let (k, row) = (1.5, 90.0);
+        let safe = SafeArea { left: 132.0, ..Default::default() };
+        let avail = screen.x - safe.left - safe.right;
+        let bw = (BAR_W * k).round().min(avail);
+        let bar = bar_on(screen, k, safe.left + (avail - bw) / 2.0, bw);
+        let lay = layout(bar, screen, k, row, safe);
+        let mid = time_mid(bar);
+        let s = row / PANEL_ROW;
+        let panel_mid = lay.time.x + lay.time.w / 2.0;
+        let show = time_button_rect(TimeButton::ShowHero, bar.y, mid, s);
+        assert!((show.x + show.w / 2.0 - panel_mid).abs() <= 1.0, "ShowHero at {show:?}, panel centre {panel_mid}");
+        let msg = message_box(bar.y, mid, s);
+        assert!((msg.x + msg.w / 2.0 - panel_mid).abs() <= 2.0, "message box {msg:?}, panel centre {panel_mid}");
+        for b in [TimeButton::Wait1, TimeButton::Wait4] {
+            let r = time_button_rect(b, bar.y, mid, s);
+            assert!(lay.time.x <= r.x && r.x + r.w <= lay.time.x + lay.time.w, "{b:?} at {r:?} is off the panel {:?}", lay.time);
+        }
+        // The desktop: no safe area, so the bar's centre is the screen's middle.
+        let desk = vec2(1920.0, 1080.0);
+        let bar = bar_on(desk, 1.0, 480.0, 960.0);
+        assert!((time_mid(bar) - desk.x / 2.0).abs() <= 1.0);
     }
 
     #[test]
