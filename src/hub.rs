@@ -431,6 +431,12 @@ pub fn holiday_music_path(local: &Path) -> PathBuf {
     local.join("holiday").join("menu.ogg")
 }
 
+/// Where the holiday look's sleigh pictures are kept, in the hub folder `local`: `frame-0.png` to `frame-3.png`
+/// (the gallop) and `present.png`. An older client ignores them.
+pub fn holiday_sleigh_dir(local: &Path) -> PathBuf {
+    local.join("holiday").join("sleigh")
+}
+
 /// The hub's `index.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
@@ -2881,5 +2887,6 @@ mod tests {
     #[test]
     fn the_holiday_music_sits_in_the_hub_folder() {
         assert_eq!(holiday_music_path(Path::new("/x/hub")), Path::new("/x/hub").join("holiday").join("menu.ogg"));
+        assert_eq!(holiday_sleigh_dir(Path::new("/x/hub")), Path::new("/x/hub").join("holiday").join("sleigh"));
     }
 }

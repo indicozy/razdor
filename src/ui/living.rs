@@ -398,15 +398,28 @@ pub fn flock_at(now: f64, seed: u64, bounds: [f32; 4]) -> Option<Flock> {
     Some(Flock { start, from, to, arc, birds: birds.min(7), seed: slot_seed })
 }
 
+/// The unit vectors of a flock's course: along it, and across it (the bow's side).
+fn course(f: &Flock) -> ((f32, f32), (f32, f32)) {
+    let (dx, dy) = (f.to.0 - f.from.0, f.to.1 - f.from.1);
+    let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+    ((dx / len, dy / len), (-dy / len, dx / len))
+}
+
+/// The flock's leader at `now` (world units): its place along the course, bowed by `arc`. The sleigh flies
+/// there, and the birds' V is drawn behind it.
+pub fn lead_at(f: &Flock, now: f64) -> (f32, f32) {
+    let u = (((now - f.start) / BIRD_TRIP) as f32).clamp(0.0, 1.0);
+    let (dx, dy) = (f.to.0 - f.from.0, f.to.1 - f.from.1);
+    let (_, perp) = course(f);
+    let bow = f.arc * (std::f32::consts::PI * u).sin();
+    (f.from.0 + dx * u + perp.0 * bow, f.from.1 + dy * u + perp.1 * bow)
+}
+
 /// Each bird of `f` at `now`: its world position (in a V behind the leader, along the flock's
 /// course) and its wing's flap, from -1 (down) to 1 (up).
 pub fn bird_points(f: &Flock, now: f64) -> Vec<((f32, f32), f32)> {
-    let u = (((now - f.start) / BIRD_TRIP) as f32).clamp(0.0, 1.0);
-    let (dx, dy) = (f.to.0 - f.from.0, f.to.1 - f.from.1);
-    let len = (dx * dx + dy * dy).sqrt().max(1e-3);
-    let (dir, perp) = ((dx / len, dy / len), (-dy / len, dx / len));
-    let bow = f.arc * (std::f32::consts::PI * u).sin();
-    let lead = (f.from.0 + dx * u + perp.0 * bow, f.from.1 + dy * u + perp.1 * bow);
+    let (dir, perp) = course(f);
+    let lead = lead_at(f, now);
     (0..f.birds)
         .map(|j| {
             let rank = j.div_ceil(2) as f32;
