@@ -293,10 +293,12 @@ impl Fx {
     /// then every card is as before the action, its HP, wounds and death included. Razdor
     /// keeps the actor's card as it was until the echo's effect on it ends too, so a
     /// counterblow's damage shows as it lands (the original refreshes the cards at the
-    /// first effect's end).
+    /// first effect's end). The rules apply the whole action first, so the units it removed
+    /// on the rest of the field (a side that gives up after the counterblow's kill) also
+    /// stay on their cards until the echo has played: they leave after its kill, not before.
     fn shown(&self, id: usize) -> Option<&Fighter> {
-        let FxKind::Act { echo, .. } = &self.kind else { return None };
-        let pending = self.t < self.marks().0 || (echo.is_some() && id == self.actor && self.t < self.duration());
+        let FxKind::Act { hit, echo, .. } = &self.kind else { return None };
+        let pending = self.t < self.marks().0 || (echo.is_some() && id != hit.target && self.t < self.duration());
         if pending { self.before.get(id) } else { None }
     }
 }
@@ -2458,6 +2460,35 @@ mod tests {
         assert!(!fx.echoing());
         fx.t = 0.36 + 0.35 + 0.01;
         assert!(fx.echoing());
+    }
+
+    /// A counterblow's whole action is applied before its animation, so a side that gives up
+    /// after the counterblow's kill has its other units already at 0 HP. Their cards must stay
+    /// as they were until the echo (the counterblow on the actor) has played, then leave; the
+    /// target's card follows its own effect as before.
+    #[test]
+    fn units_a_counterblow_routs_leave_after_its_kill_plays() {
+        let view = bandit_camp();
+        let before = view.battle.fighters.clone();
+        assert!(before.len() >= 3 && before[2].alive(), "the bandit camp has a third unit alive");
+        let (actor, target, bystander) = (0, 1, 2);
+        let hit = Hit { target, kind: ActionKind::Melee, amount: 10, buff: razdor::rules::battle::Buff::default(), killed: false, counter: Some(10), actor_died: true, splash: Vec::new() };
+        let mut fx = Fx {
+            actor,
+            kind: FxKind::Act { hit, echo: Some(Echo::Counter), slide: 0.36, effect: 0.35, cued: false, echo_cued: false },
+            t: 0.0,
+            before,
+        };
+        let (first, end) = (fx.marks().0, fx.duration());
+        fx.t = first - 0.01;
+        assert!(fx.shown(bystander).is_some(), "the first effect is still playing");
+        fx.t = first + 0.01;
+        assert!(fx.shown(bystander).is_some_and(Fighter::alive), "the bystander waits for the counterblow's kill");
+        assert!(fx.shown(target).is_none(), "the target shows its own effect as it ends");
+        fx.t = end - 0.01;
+        assert!(fx.shown(bystander).is_some(), "still waiting at the echo's end");
+        fx.t = end;
+        assert!(fx.shown(bystander).is_none(), "the bystander leaves once the echo has played");
     }
 
     /// The bandit camp: a damaging blow's target keeps its HP on its card until the blow's
