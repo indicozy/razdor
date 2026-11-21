@@ -22,6 +22,8 @@ use macroquad::texture::{draw_texture_ex, render_target, DrawTextureParams, Filt
 use macroquad::window::{get_internal_gl, screen_dpi_scale, screen_height, screen_width};
 use serde::{Deserialize, Serialize};
 
+use razdor::i18n::tr;
+
 use super::render_cache;
 use super::sharp::SHARP_VERTEX;
 
@@ -48,6 +50,48 @@ pub enum Quality {
     Fast,
     Normal,
     High,
+}
+
+impl Strength {
+    /// The next strength on a click of the «ЭЛТ-эффект» row: Off, Light, Normal, Strong, Off.
+    pub fn next(self) -> Strength {
+        match self {
+            Strength::Off => Strength::Light,
+            Strength::Light => Strength::Normal,
+            Strength::Normal => Strength::Strong,
+            Strength::Strong => Strength::Off,
+        }
+    }
+
+    /// The row's value.
+    pub fn label(self) -> &'static str {
+        match self {
+            Strength::Off => tr("Off"),
+            Strength::Light => tr("Light"),
+            Strength::Normal => tr("Normal"),
+            Strength::Strong => tr("Strong"),
+        }
+    }
+}
+
+impl Quality {
+    /// The next quality on a click of the «Качество ЭЛТ» row: Fast, Normal, High, Fast.
+    pub fn next(self) -> Quality {
+        match self {
+            Quality::Fast => Quality::Normal,
+            Quality::Normal => Quality::High,
+            Quality::High => Quality::Fast,
+        }
+    }
+
+    /// The row's value. «Обычное» is the quality's word; the strength's «Обычный» has its own key.
+    pub fn label(self) -> &'static str {
+        match self {
+            Quality::Fast => tr("Fast"),
+            Quality::Normal => tr("Normal quality"),
+            Quality::High => tr("High"),
+        }
+    }
 }
 
 /// The quality when the setting is «none»: `Fast` on a phone, `Normal` on a desktop.
@@ -574,6 +618,37 @@ mod tests {
         assert_eq!(parse_curve("yes"), None);
         assert!(parse_passthrough("1"));
         assert!(!parse_passthrough("0"));
+    }
+
+    #[test]
+    fn the_strength_row_cycles_off_light_normal_strong() {
+        let mut s = Strength::default();
+        let seen: Vec<Strength> = (0..5).map(|_| { let now = s; s = s.next(); now }).collect();
+        assert_eq!(seen, vec![Strength::Off, Strength::Light, Strength::Normal, Strength::Strong, Strength::Off]);
+    }
+
+    #[test]
+    fn the_quality_row_cycles_fast_normal_high() {
+        assert_eq!(Quality::Fast.next(), Quality::Normal);
+        assert_eq!(Quality::Normal.next(), Quality::High);
+        assert_eq!(Quality::High.next(), Quality::Fast);
+    }
+
+    #[test]
+    fn the_row_values_are_the_catalog_words() {
+        assert_eq!(Strength::Off.label(), tr("Off"));
+        assert_eq!(Strength::Light.label(), tr("Light"));
+        assert_eq!(Strength::Normal.label(), tr("Normal"));
+        assert_eq!(Strength::Strong.label(), tr("Strong"));
+        assert_eq!(Quality::Fast.label(), tr("Fast"));
+        assert_eq!(Quality::Normal.label(), tr("Normal quality"));
+        assert_eq!(Quality::High.label(), tr("High"));
+        // Russian: the strength's «Обычный», the quality's «Обычное», «Высокое» for the quality.
+        if razdor::i18n::lang() == razdor::i18n::Lang::Ru {
+            assert_eq!(Strength::Normal.label(), "Обычный");
+            assert_eq!(Quality::Normal.label(), "Обычное");
+            assert_eq!(Quality::High.label(), "Высокое");
+        }
     }
 
     #[test]

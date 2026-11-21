@@ -452,6 +452,22 @@ window backdrops follow the setting too, as they are the same world drawing.
 - A profiling switch overrides the setting (`map_scale::in_use`, read once): env `RAZDOR_MAP_SCALE=0.75|0.5`
   on the desktop, the file `profile-map-scale-75` / `profile-map-scale-50` in the app folder on Android.
 
+**The CRT effect** (`src/ui/crt.rs`; the rows «ЭЛТ-эффект», «Качество ЭЛТ» and «Скруглённый экран» in group
+Screen, `Settings::crt` (`Strength`: Off, Light, Normal, Strong; off by default), `crt_quality` (`Option<Quality>`,
+`None` = `platform_default`: Normal on desktop, Fast on phones) and `crt_curve`; pushed by `main_menu::apply_options`
+into `crt::set_settings`). `main.rs` brackets each frame: `crt::begin_frame` points the screen target of
+`render_cache` at a screen-sized stand-in (`to_screen` makes it the base camera), and `crt::end_frame` draws the
+stand-in through the CRT material onto the real screen. Off, or a screen above 8192 px, nothing changes. A clip inside
+the stand-in goes through `render_cache::scissor`, which flips its y for the target (the pan's clips too, `pan::sync`),
+so clipped draws land where they did. The quality picks the passes: Fast one tap, Normal the scanlines, mask and
+vignette, High adds a glow pass (`glow_pass`, a quarter-size target that the glow reads). The curve is
+`crt::curve_point`, the same maths as `crt::pointer`, which `input.rs` uses for the mouse and touches, so
+clicks hit the bent picture. `map_freeze` is off while the effect is on (`map_freeze.rs`: the map is drawn live
+under a window), and sprite retain follows it; the photo mode reads the stand-in (`crt::target_image`). Env
+(desktop, read once): `RAZDOR_CRT=off|light|normal|strong`, `RAZDOR_CRT_QUALITY=fast|normal|high`,
+`RAZDOR_CRT_CURVE=0|1`, `RAZDOR_CRT_PASSTHROUGH=1` (the stand-in is copied unchanged: the check that the
+redirection alone moves no pixel). Snapshots: `tools/ui-regress/ui_regress.py run --env RAZDOR_CRT=normal`.
+
 **The 2.5D view** (`src/ui/view25.rs`: the tilted camera's maths, pure and tested). The setting
 «Вид карты» (`audio::Settings::map_tilt`, off by default, pushed by `main_menu::apply_options` into
 `world_view::set_tilt_view`); the env `RAZDOR_VIEW=25d|flat` overrides it for snapshots, with

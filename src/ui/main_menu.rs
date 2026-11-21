@@ -1795,7 +1795,7 @@ impl Group {
         match self {
             Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
-            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::Orientation, Row::Language],
+            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench],
         }
@@ -1859,6 +1859,12 @@ pub enum Row {
     Font,
     TextSize,
     LargeWindows,
+    /// Razdor's «ЭЛТ-эффект» (`audio::Settings::crt`): an old monitor's look over the whole screen. Look only.
+    CrtEffect,
+    /// Razdor's «Качество ЭЛТ» (`audio::Settings::crt_quality`): the cost of the CRT look. Look only.
+    CrtQuality,
+    /// Razdor's «Скруглённый экран» (`audio::Settings::crt_curve`): a curved screen with rounded corners. Look only.
+    CrtCurve,
     Orientation,
     Language,
     Keys,
@@ -1877,7 +1883,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 66] = [
+pub const ALL: [Row; 69] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1932,6 +1938,9 @@ pub const ALL: [Row; 66] = [
         Row::Font,
         Row::TextSize,
         Row::LargeWindows,
+        Row::CrtEffect,
+        Row::CrtQuality,
+        Row::CrtCurve,
         Row::Orientation,
         Row::Language,
         Row::Keys,
@@ -1949,6 +1958,7 @@ pub const ALL: [Row; 66] = [
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
     fn help_text(self) -> Option<&'static str> {
         match self {
+            Row::CrtEffect => Some(tr("An old monitor's look over the whole screen: scanlines, a soft glow and darker edges. Quality: Fast for weak phones, High adds a glow around bright areas.")),
             Row::GraphicsQuality => Some(tr("Original: as the original game, with no new effects. Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
             Row::FarGround => Some(tr("Up: the far ground rolls up to a top-down map. Horizon: the ground curves down like the earth's horizon, with the sky above it. Globe: the ground curves away on every side, like a small planet.")),
@@ -2747,6 +2757,23 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::LargeWindows => {
             if labelled_row(c, geo, tr("Large message windows"), yes_no(audio.large_windows)).0 {
                 audio.large_windows = !audio.large_windows;
+            }
+        }
+        Row::CrtEffect => {
+            // Razdor's (the owner's request, 2026-11-21): an old monitor's look over the whole screen. Look only.
+            if labelled_row_help(c, geo, tr("CRT effect"), audio.crt.label(), Row::CrtEffect.help_text()).0 {
+                audio.crt = audio.crt.next();
+            }
+        }
+        Row::CrtQuality => {
+            let quality = audio.crt_quality.unwrap_or_else(super::crt::platform_default);
+            if labelled_row(c, geo, tr("CRT quality"), quality.label()).0 {
+                audio.crt_quality = Some(quality.next());
+            }
+        }
+        Row::CrtCurve => {
+            if labelled_row(c, geo, tr("Curved screen"), yes_no(audio.crt_curve)).0 {
+                audio.crt_curve = !audio.crt_curve;
             }
         }
         Row::Orientation => {
@@ -4153,7 +4180,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));
