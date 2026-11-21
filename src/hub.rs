@@ -411,6 +411,26 @@ pub const MAX_AD_BYTES: u64 = 2 << 20;
 /// The most a caption may be, in bytes.
 const MAX_CAPTION: usize = 200;
 
+/// The holiday look's menu music (the catalog's `holiday`, optional): a remix of the menu theme
+/// that plays on the main menu while the look is on. Stored as `holiday/menu.ogg` in the hub
+/// folder ([`holiday_music_path`]). An older client ignores it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HolidayRef {
+    /// The holiday's folder name (letters, digits, `-` and `_`).
+    pub id: String,
+    pub version: u32,
+    /// The music: an `https://` address, or a path in the hub (relative to the catalog).
+    pub music: String,
+    /// The file's size and SHA-256 (checked before it is kept).
+    pub size: u64,
+    pub sha256: String,
+}
+
+/// Where the holiday menu music is kept, in the hub folder `local`.
+pub fn holiday_music_path(local: &Path) -> PathBuf {
+    local.join("holiday").join("menu.ogg")
+}
+
 /// The hub's `index.json`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Catalog {
@@ -423,6 +443,9 @@ pub struct Catalog {
     /// The promo ad of the main menu, when the hub has one (see [`AdRef`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ad: Option<AdRef>,
+    /// The holiday look's menu music, when the hub has one (see [`HolidayRef`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub holiday: Option<HolidayRef>,
 }
 
 impl Catalog {
@@ -1860,7 +1883,7 @@ pub mod mock {
         for e in &mut o.entries {
             e.rating = votes.iter().find(|v| v.0 == e.id).map(|&(_, up, down)| Rating { up, down });
         }
-        let catalog = Catalog { format: 1, entries: o.entries, game: None, ad: None };
+        let catalog = Catalog { format: 1, entries: o.entries, game: None, ad: None, holiday: None };
         let json = serde_json::to_vec_pretty(&catalog).expect("json");
         crate::editor::files::write_atomically(&dir.join(INDEX), &json)
     }
@@ -2839,5 +2862,24 @@ mod tests {
         assert!(fs::read_to_string(ads.join("thorny-times").join(AD_INI)).unwrap().contains("caption_en=TEST"));
         assert_eq!(fs::read(ads.join("thorny-times").join("picture.png")).unwrap(), picture);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    const GOOD_HOLIDAY: &str = r#"{"id":"winter","version":2,"music":"https://example.org/menu.ogg","size":1234,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA"}"#;
+
+    #[test]
+    fn a_catalog_with_a_holiday_reads_it_and_one_without_does_not() {
+        assert_eq!(Catalog::parse(br#"{"format":1,"entries":[]}"#).unwrap().holiday, None);
+        let h = Catalog::parse(format!(r#"{{"format":1,"entries":[],"holiday":{GOOD_HOLIDAY}}}"#).as_bytes())
+            .unwrap()
+            .holiday
+            .expect("the holiday is read");
+        assert_eq!((h.id.as_str(), h.version, h.size), ("winter", 2, 1234));
+        assert_eq!(h.music, "https://example.org/menu.ogg");
+        assert_eq!(h.sha256, "3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA");
+    }
+
+    #[test]
+    fn the_holiday_music_sits_in_the_hub_folder() {
+        assert_eq!(holiday_music_path(Path::new("/x/hub")), Path::new("/x/hub").join("holiday").join("menu.ogg"));
     }
 }
