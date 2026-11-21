@@ -2627,6 +2627,25 @@ fn button_label_at(r: Rect, label: &str, enabled: bool, size: f32) {
     });
 }
 
+/// [`marble_button_sized`] with its label in the plain interface face (Body), not the decorative button
+/// face, which draws about a quarter larger at the same size. Razdor's own, for the tree window's phone
+/// buttons; the other buttons keep [`marble_button_sized`].
+pub fn marble_button_plain(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
+    marble_frame(r, enabled, hover, false);
+    let color = if !enabled { Color::new(0.6, 0.6, 0.58, 1.0) } else { Color::new(1.0, 0.98, 0.94, 1.0) };
+    super::typography::Role::Body.with(|| {
+        super::dt_font::legacy_metrics_if(true, || {
+            let label = super::widgets::ellipsize(label, r.w - 10.0, size);
+            let d = measure(&label, size);
+            let x = r.x + (r.w - d.width) / 2.0;
+            let y = r.y + (r.h + d.offset_y) / 2.0 - 1.0;
+            let offset = (size / 22.0).max(1.0);
+            text(&label, x + offset, y + offset, size, Color::new(0.0, 0.0, 0.0, 0.35 * color.a));
+            text(&label, x, y, size, color);
+        })
+    });
+}
+
 /// A button's label, centred, smaller if it must be to fit.
 pub fn button_label(r: Rect, label: &str, enabled: bool, _hover: bool, _quest_red: bool) {
     let color = if !enabled {

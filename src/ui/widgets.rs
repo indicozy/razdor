@@ -1071,6 +1071,19 @@ pub fn button_sized(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool, 
     pressed
 }
 
+/// [`button_sized`] with its label in the plain face ([`chrome::marble_button_plain`]). Razdor's own, for
+/// the tree window's phone buttons.
+#[track_caller]
+pub fn button_plain_sized(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool, size: f32) -> bool {
+    let r = Rect::new(x, y, w, h);
+    let (_, down, pressed) = button_state(r, enabled);
+    super::chrome::marble_button_plain(r, label, enabled, down, size);
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
+}
+
 /// [`button`] in the original's red (its buttons with their channels turned, 0x4dba90): the
 /// army window's Dismiss and its confirmation, the defeat report.
 #[track_caller]

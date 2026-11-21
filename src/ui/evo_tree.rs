@@ -785,6 +785,10 @@ fn point_in(a: Rect, p: Vec2) -> bool {
 const DRAG_DP: f32 = 8.0;
 /// The «выбран» tag's text in sp (the names' floor).
 const TAG_SP: f32 = 12.0;
+/// A phone's top button and «[ ]»: 40 dp tall or square (the minimum touch target), its label 12 sp
+/// (the smallest a label may be). The desktop keeps its own sizes.
+const PHONE_TOP_DP: f32 = 40.0;
+const PHONE_TOP_SP: f32 = 12.0;
 
 /// Whether a press is a drag, so its release selects nothing: it was one, or the pointer has left its
 /// place by more than `slop` px, or the content slid under a touch this frame (`slid`: the touch
@@ -969,8 +973,8 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
     let wheel = widgets::wheel();
     let (tx, ty) = input::map_pan();
     input::swipe_area(a, SwipeKind::Pan);
-    // The «[ ]» button: a phone's standard 44 dp, the desktop's 48 px as before.
-    let fit_btn = fit_button_rect(a, if phone { 44.0 * u } else { 48.0 * u });
+    // The «[ ]» button: 40 dp square on a phone (the minimum touch target), the desktop's 48 px as before.
+    let fit_btn = fit_button_rect(a, if phone { PHONE_TOP_DP * u } else { 48.0 * u });
     let on_button = point_in(fit_btn, pointer);
     let mut click = None;
     PAN.with(|p| {
@@ -1502,16 +1506,25 @@ pub fn overlay(game: &Game, assets: &Assets, win: Rect) {
     draw_rectangle(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, Color::new(0.0, 0.05, 0.02, 0.22));
     draw_rectangle_lines(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, 1.5 * k, Color::new(0.02, 0.06, 0.03, 0.9));
     // The top strip holds the state switch («Всё дерево» in the line, «К ветке» in the web).
-    let bh = if phone { 44.0 * u } else { 28.0 * k };
+    let bh = if phone { PHONE_TOP_DP * u } else { 28.0 * k };
     let strip = Rect::new(tree.x, tree.y, tree.w, (bh + 4.0 * u).min(tree.h));
     let a = Rect::new(tree.x, tree.y + strip.h, tree.w, (tree.h - strip.h).max(1.0));
     let mode = MODE.with(|m| m.get());
     let label = if mode == Mode::Line { tr("Whole tree") } else { tr("Back to the line") };
-    let size = if phone { sp_text(PHONE_TEXT_SP) } else { 14.0 * k };
+    let size = if phone { sp_text(PHONE_TOP_SP) } else { 14.0 * k };
     // The label is measured in the button's own role and metrics (as the button draws it), so it is not cut.
-    let text_w = super::typography::Role::Button.with(|| dt_font::legacy_metrics_if(true, || widgets::measure(label, size).width));
-    let bw = text_w + 24.0 * u;
-    if widgets::button_sized(strip.x + 4.0 * u, strip.y + 2.0 * u, bw, bh, label, true, size) {
+    // A phone's label is in the plain face: the decorative button face draws larger at the same size.
+    let role = if phone { super::typography::Role::Body } else { super::typography::Role::Button };
+    let text_w = role.with(|| dt_font::legacy_metrics_if(true, || widgets::measure(label, size).width));
+    // A phone's box keeps 8 dp of room each side of the label; the desktop's 12 px as before.
+    let bw = text_w + if phone { 16.0 * u } else { 24.0 * u };
+    let top = (strip.x + 4.0 * u, strip.y + 2.0 * u, bw, bh);
+    let top_pressed = if phone {
+        widgets::button_plain_sized(top.0, top.1, top.2, top.3, label, true, size)
+    } else {
+        widgets::button_sized(top.0, top.1, top.2, top.3, label, true, size)
+    };
+    if top_pressed {
         match mode {
             Mode::Line => {
                 MODE.with(|m| m.set(Mode::Web));
