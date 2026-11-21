@@ -721,7 +721,7 @@ const GREEN: Color = Color::new(0.35, 1.0, 0.35, 1.0);
 const CREAM: Color = Color::new(0.95, 0.92, 0.8, 1.0);
 const GREY: Color = Color::new(0.72, 0.72, 0.72, 0.85);
 const CRUMB_CREAM: Color = Color::new(0.78, 0.75, 0.66, 1.0);
-/// The phone's legend and button text, in sp.
+/// The phone's button text, in sp.
 const PHONE_TEXT_SP: f32 = 14.0;
 /// Phone names are 12 sp at least (the mobile check's floor).
 const LINE_NAME_SP: f32 = 12.0;
@@ -781,45 +781,63 @@ fn point_in(a: Rect, p: Vec2) -> bool {
     p.x >= a.x && p.x <= a.x + a.w && p.y >= a.y && p.y <= a.y + a.h
 }
 
+/// A press's drag threshold in dp (px on the desktop): the same as the canvas's.
+const DRAG_DP: f32 = 8.0;
+/// The «выбран» tag's text in sp (the names' floor).
+const TAG_SP: f32 = 12.0;
+
+/// Whether a press is a drag, so its release selects nothing: it was one, or the pointer has left its
+/// place by more than `slop` px, or the content slid under a touch this frame (`slid`: the touch
+/// slide scrolled it while the pointer stayed where the swipe began).
+fn press_drags(was: bool, travelled: f32, slop: f32, slid: bool) -> bool {
+    was || travelled > slop || slid
+}
+
+/// The line view's scroll (px, the content's top moved up) when it opens or re-roots: the content's
+/// bottom, where the root row is, and then the least that keeps the selected card and its name in view.
+/// `focus` is the card's top and bottom in content px, None when it is not in this line. Content no
+/// taller than the view does not scroll.
+fn opening_scroll(height: f32, view: f32, focus: Option<(f32, f32)>) -> f32 {
+    let range = (height - view).max(0.0);
+    let mut s = range;
+    if let Some((top, bottom)) = focus {
+        if bottom > s + view {
+            s = bottom - view;
+        }
+        // The card's top wins when the card is taller than the view.
+        if top < s {
+            s = top;
+        }
+    }
+    s.clamp(0.0, range)
+}
+
+/// The «выбран» tag of the selected unit: a small dark rounded box with light text, centred above its
+/// card `card`, kept inside `area` (so on a card at the top edge it may sit over the card's top).
+fn selected_tag(area: Rect, card: Rect) {
+    let u = unit_px();
+    let phone = display::dp_px().is_some();
+    let size = sp_text(TAG_SP);
+    let txt = tr("selected");
+    let tw = dt_font::legacy_metrics_if(phone, || widgets::measure(txt, size).width);
+    let (padx, pady) = (4.0 * u, 2.0 * u);
+    let (w, h) = (tw + 2.0 * padx, size * 1.25 + 2.0 * pady);
+    let x = (card.x + card.w / 2.0 - w / 2.0).min(area.x + area.w - w).max(area.x);
+    let y = (card.y - h - 3.0 * u).min(area.y + area.h - h).max(area.y);
+    let r = h * 0.35;
+    let bg = Color::new(0.05, 0.04, 0.03, 0.96);
+    draw_rectangle(x + r, y, w - 2.0 * r, h, bg);
+    draw_rectangle(x, y + r, w, h - 2.0 * r, bg);
+    for (cx, cy) in [(x + r, y + r), (x + w - r, y + r), (x + r, y + h - r), (x + w - r, y + h - r)] {
+        draw_circle(cx, cy, r, bg);
+    }
+    dt_font::legacy_metrics_if(phone, || {
+        chrome::shadow_centered(txt, x + w / 2.0, y + pady + size * 0.9, size, CREAM);
+    });
+}
+
 fn overlaps(a: &Rect, b: &Rect) -> bool {
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
-}
-
-/// The legend's rows: gold = the focus, green = a next step.
-fn legend_rows() -> [(Color, &'static str); 2] {
-    [(GOLD, tr("selected")), (GREEN, tr("can promote now"))]
-}
-
-/// The legend's text size, padding and swatch side (px).
-fn legend_metrics(phone: bool) -> (f32, f32, f32) {
-    let k = chrome::k();
-    let size = if phone { sp_text(PHONE_TEXT_SP) } else { 14.0 * k };
-    let pad = 6.0 * k;
-    (size, pad, size * 0.7)
-}
-
-/// The legend's box size (w, h) in px.
-fn legend_size(phone: bool) -> (f32, f32) {
-    let (size, pad, sw) = legend_metrics(phone);
-    let rows = legend_rows();
-    dt_font::legacy_metrics_if(phone, || {
-        let text_w = rows.iter().map(|(_, t)| widgets::measure(t, size).width).fold(0.0, f32::max);
-        (text_w + sw + pad * 3.0, rows.len() as f32 * size * 1.5 + pad * 2.0)
-    })
-}
-
-/// The legend with its top-left corner at (x0, y0).
-fn legend_at(x0: f32, y0: f32, phone: bool) {
-    let (size, pad, sw) = legend_metrics(phone);
-    let (w, h) = legend_size(phone);
-    dt_font::legacy_metrics_if(phone, || {
-        draw_rectangle(x0, y0, w, h, Color::new(0.05, 0.04, 0.03, 0.96));
-        for (i, (col, t)) in legend_rows().iter().enumerate() {
-            let y = y0 + pad + i as f32 * size * 1.5;
-            draw_rectangle(x0 + pad, y + size * 0.15, sw, sw, *col);
-            chrome::shadow_text(t, x0 + pad * 2.0 + sw, y + size * 0.9, size, CREAM);
-        }
-    });
 }
 
 /// One zoom button (0 +, 1 −, 2 fit): a normal button with a drawn glyph. True when pressed.
@@ -942,7 +960,7 @@ fn open_view(w: &Radial, g: &Graph, focus: u32) -> Option<(Vec2, f32)> {
 }
 
 /// The web in `a`: the hub, the rings, the tree edges (the focus's path gold), the extra lines, the
-/// portraits (the unit's own next steps green), the names, the legend and the zoom buttons; pan (drag,
+/// portraits (the unit's own next steps green), the names, the selected unit's «выбран» and the zoom buttons; pan (drag,
 /// touch slide) and zoom (wheel, buttons). Returns the class tapped.
 fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, ready: &[u32]) -> Option<u32> {
     let k = chrome::k();
@@ -1156,8 +1174,12 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
             }
         }
     });
-    // The legend and the zoom buttons: fixed on the canvas, not zoomed.
-    legend_at(a.x + 6.0 * k, a.y + 6.0 * k, phone);
+    // The selected unit's «выбран» over its portrait (the same tag as the line view's).
+    let focus_rect = rect_of(focus);
+    if w.pos.contains_key(&focus) && on_canvas(focus_rect) {
+        selected_tag(a, focus_rect);
+    }
+    // The zoom buttons: fixed on the canvas, not zoomed.
     let mut pressed = [false; 3];
     for (i, r) in buttons.iter().enumerate() {
         pressed[i] = zoom_button(*r, i);
@@ -1240,7 +1262,7 @@ fn stack(nodes: &mut [Node], lh: f32, u: f32) -> f32 {
 }
 
 /// The line view in `a`: the line of the view's top (the focus, or the class a tap re-rooted to) with its
-/// crumbs, or the trunk rows; arrows, cards, names, the «+N» badges, the legend in a free corner, vertical
+/// crumbs, or the trunk rows; arrows, cards, names, the «+N» badges, the selected unit's «выбран», vertical
 /// scroll. Returns the card tapped to select (a «+N» or a crumb re-roots the view instead).
 fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, ready: &[u32]) -> Option<u32> {
     let u = unit_px();
@@ -1291,10 +1313,10 @@ fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, r
     let pointer = Vec2::from(widgets::pointer());
     let inside = point_in(a, pointer);
     if !SCROLL_INIT.with(|s| s.get()) {
-        // Open at the top (no scroll) and scroll only as far as the focus's card and name need to show:
-        // a tree that fits shows unscrolled, a taller one keeps the selected unit in view.
-        let focus_bottom = nodes.iter().find(|n| n.id == focus && !n.crumb).map(|n| n.top + n.hit_h);
-        SCROLL.with(|s| s.set(focus_bottom.map_or(0.0, |b| (b - vp.h).max(0.0)).clamp(0.0, range)));
+        // Open at the bottom, where the root row is (the root grows up), and move only as far as the
+        // selected card and its name need to show. A tree that fits shows unscrolled.
+        let focus_span = nodes.iter().find(|n| n.id == focus && !n.crumb).map(|n| (n.top, n.top + n.hit_h));
+        SCROLL.with(|s| s.set(opening_scroll(height, vp.h, focus_span)));
         SCROLL_INIT.with(|s| s.set(true));
     }
     let mut scroll = SCROLL.with(|s| s.get()).clamp(0.0, range);
@@ -1318,9 +1340,8 @@ fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, r
             }
             press = None;
         } else {
-            if !pr.dragging && (pointer - pr.start).length() > 6.0 {
-                pr.dragging = true;
-            }
+            // A touch slide that moved the content is a drag too, though the pointer stays where it began.
+            pr.dragging = press_drags(pr.dragging, (pointer - pr.start).length(), DRAG_DP * u, ty != 0.0);
             if pr.dragging {
                 scroll -= pointer.y - pr.last.y;
             }
@@ -1369,10 +1390,9 @@ fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, r
         };
         portrait_box(assets, n.id, r, lit);
     }
-    // Names, the «+N» badges, and the boxes the legend must keep clear of.
+    // Names and the «+N» badges.
     let gap_name = LINE_NAME_GAP * u;
-    let inks: Vec<Rect> = dt_font::legacy_metrics_if(phone, || {
-        let mut inks = Vec::with_capacity(nodes.len());
+    dt_font::legacy_metrics_if(phone, || {
         for n in &nodes {
             let cx = sx(n.cx);
             let top = sy(n.top);
@@ -1384,12 +1404,9 @@ fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, r
             } else {
                 CREAM
             };
-            let mut tw = n.size;
             for (i, line) in n.lines.iter().enumerate() {
-                tw = tw.max(widgets::measure(line, nsz).width);
                 chrome::shadow_centered(line, cx, text_top + i as f32 * lh + nsz * 0.9, nsz, col);
             }
-            inks.push(Rect::new(cx - tw / 2.0, top, tw, n.size + gap_name + lh * n.lines.len() as f32));
             if n.badge > 0 {
                 let txt = format!("+{}", n.badge);
                 let bw = widgets::measure(&txt, nsz).width + 8.0 * u;
@@ -1401,55 +1418,11 @@ fn line_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, r
                 chrome::shadow_centered(&txt, bx + bw / 2.0, by + nsz * 0.9, nsz, GOLD);
             }
         }
-        inks
     });
-    // The legend: the first corner of the tree area that no name or card covers; when all four corners
-    // are covered, the first free spot of a sweep over the area.
-    let (lw, lhh) = legend_size(phone);
-    let m = 6.0 * u;
-    let clear = 4.0 * u;
-    // The area a legend at (x, y) would cover over the names and cards (grown by `clear`).
-    let covered = |x: f32, y: f32| {
-        let r = Rect::new(x, y, lw, lhh);
-        inks.iter()
-            .map(|ink| {
-                let grown = Rect::new(ink.x - clear, ink.y - clear, ink.w + 2.0 * clear, ink.h + 2.0 * clear);
-                let w = (r.x + r.w).min(grown.x + grown.w) - r.x.max(grown.x);
-                let h = (r.y + r.h).min(grown.y + grown.h) - r.y.max(grown.y);
-                if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
-            })
-            .sum::<f32>()
-    };
-    // The first corner that covers nothing; else the spot of a sweep over the area that covers least (a
-    // wide legend, as in English, may leave no free place on a sideways phone).
-    let mut candidates = vec![
-        (a.x + m, a.y + m),
-        (a.x + a.w - lw - m, a.y + m),
-        (a.x + m, a.y + a.h - lhh - m),
-        (a.x + a.w - lw - m, a.y + a.h - lhh - m),
-    ];
-    let step_x = (lw / 2.0).max(1.0);
-    let step_y = (lhh / 2.0).max(1.0);
-    let mut y = a.y + m;
-    while y + lhh <= a.y + a.h - m {
-        let mut x = a.x + m;
-        while x + lw <= a.x + a.w - m {
-            candidates.push((x, y));
-            x += step_x;
-        }
-        y += step_y;
+    // The selected card's «выбран», above it.
+    if let Some(n) = nodes.iter().find(|n| n.id == focus && !n.crumb) {
+        selected_tag(a, Rect::new(sx(n.cx) - n.size / 2.0, sy(n.top), n.size, n.size));
     }
-    let mut best = (a.x + m, a.y + m, f32::MAX);
-    for (x, y) in candidates {
-        let cov = covered(x, y);
-        if cov < best.2 {
-            best = (x, y, cov);
-        }
-        if cov == 0.0 {
-            break;
-        }
-    }
-    legend_at(best.0, best.1, phone);
     picked
 }
 
@@ -1807,5 +1780,29 @@ mod tests {
         assert_eq!(cols, 2);
         let p = lay.iter().find(|p| p.id == 1).expect("top");
         assert!((p.col - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_press_is_a_drag_past_its_slop_or_once_the_content_slides() {
+        assert!(!press_drags(false, 3.0, 8.0, false), "a tap that stays still is no drag");
+        assert!(press_drags(false, 9.0, 8.0, false), "past the slop it is a drag");
+        assert!(press_drags(false, 0.0, 8.0, true), "a touch slide that moved the content is a drag, the pointer staying put");
+        assert!(press_drags(true, 0.0, 8.0, false), "a drag stays a drag");
+    }
+
+    #[test]
+    fn a_tall_line_opens_at_its_root_and_scrolls_only_as_far_as_the_selected_card_needs() {
+        // 1000 px of content in a 300 px view: the bottom (the root row) shows at the range, 700.
+        assert_eq!(opening_scroll(1000.0, 300.0, None), 700.0, "no selected card in the line: the bottom");
+        assert_eq!(opening_scroll(1000.0, 300.0, Some((900.0, 1000.0))), 700.0, "the root selected: still the bottom");
+        assert_eq!(opening_scroll(1000.0, 300.0, Some((600.0, 660.0))), 600.0, "a card above the bottom: its top at the top");
+        assert_eq!(opening_scroll(1000.0, 300.0, Some((0.0, 40.0))), 0.0, "the leaf at the very top: scrolled to the top");
+        assert_eq!(opening_scroll(1000.0, 300.0, Some((100.0, 500.0))), 100.0, "a card taller than the view shows its top");
+    }
+
+    #[test]
+    fn a_line_that_fits_the_view_does_not_scroll() {
+        assert_eq!(opening_scroll(200.0, 300.0, Some((0.0, 50.0))), 0.0);
+        assert_eq!(opening_scroll(200.0, 300.0, None), 0.0);
     }
 }

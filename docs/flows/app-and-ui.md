@@ -828,9 +828,11 @@ last; the window's own Escape is swallowed); leaving the army screen closes it (
 install's `NextUnitN` links (`evo_tree::graph`, built once at open in `Model`); the layout is pure (`leaves`,
 `chain_to`, `line_start`, `line_layout`, `trunk_rows`, `line_model`, `radial`) and unit-tested on made-up graphs.
 The line starts at the highest ancestor-or-self with at most `LINE_COLS` (7) leaves; ancestors above it are
-crumbs; a trunk class (more) shows its options as rows, collapsed options as «+N» cards. It opens unscrolled and
-scrolls only as far as the selected unit needs. «Всё дерево» opens the radial web at fit (zoom, pan, the focus's
-path gold); a tap there opens that class's line. Green «можно сейчас» is the army pane's own rule:
+crumbs; a trunk class (more) shows its options as rows, collapsed options as «+N» cards. It opens at its bottom,
+where the root row is (`opening_scroll`), and scrolls only as far as the selected card and its name need. A touch
+slide scrolls it; a press that moved past 8 dp (`press_drags`) or whose content slid is a drag, and its release
+selects nothing. The selected card has a «выбран» tag above it (`selected_tag`, both views); there is no legend.
+«Всё дерево» opens the radial web at fit (zoom, pan, the focus's path gold); a tap there opens that class's line. Green «можно сейчас» is the army pane's own rule:
 `Unit::upgrade_tree`'s `ok` (level 2 or more, not the hero). The window never promotes.
 
 ### Maps and mods (the hub; a Razdor extra)
