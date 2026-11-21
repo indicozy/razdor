@@ -553,6 +553,10 @@ map or is destroyed during the ticks (0x4ae536).
   §6.4 scan) without opening its window.
 - Leaving onto a cell outside any building (or onto a bridge) clears it; a bridge counts as
   "the building the hero is on" for events but never as entered.
+- **An obelisk (types 13–15) is entered like any other building** (0x497c68 sets it, a walk
+  that ends on it enters it): its local events are scanned on entering (0x4abfbc, §6.4), and
+  Building_Enter (0x4bbc84) skips only its window. So an obelisk opens no window, but its local
+  events fire.
 - **A won garrison battle enters nothing**: the garrison is engaged before the step onto the
   building (§4.2), so the hero stays outside; the building is captured but the entered
   building stays none, no window opens. A click on it plans a route like any other (it is

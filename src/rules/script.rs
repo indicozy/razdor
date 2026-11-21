@@ -3614,6 +3614,64 @@ mod real_maps {
         }
     }
 
+    /// Coven Time(2) (the Evolution mod, a community map: the install and the map come from
+    /// `RAZDOR_COMMUNITY_DIR`, skipped without it), the obelisk «Монумент Безумия» at (43, 1)
+    /// (backlog 1674). An obelisk opens no window, but its local events are scanned when the
+    /// hero walks into it: the original sets the hero's building for every non-bridge building
+    /// (0x497c68), the scan after the step checks the local events of that building (0x4abfbc),
+    /// and Building_Enter (0x4bbc84) skips only the window for types 13–15. The walk here ends on
+    /// the one-cell obelisk from outside, which only the arrival (0x4ae5d8) enters.
+    #[test]
+    fn an_obelisks_local_events_run_when_the_hero_walks_in() {
+        let Some(root) = std::env::var_os("RAZDOR_COMMUNITY_DIR") else { return };
+        let root = std::path::PathBuf::from(root);
+        let dt = DtInstall::load(&root.join("evolution/install")).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = crate::dt::dtm::Scenario::load(&root.join("evolution/maps/Coven Time(2).DTm")).expect("map loads");
+        let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+        let _ = g.drain_events();
+        let obelisk = (0..g.world.locations.len()).find(|&l| g.world.locations[l].kind == crate::rules::world::LocationKind::Obelisk).expect("an obelisk");
+        let anchor = g.world.locations[obelisk].anchor;
+        let local: Vec<EventId> = s.buildings[g.world.locations[obelisk].id as usize - 1].events().collect();
+        assert!(!local.is_empty(), "the obelisk has local events");
+        let beside = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            .map(|(dx, dy)| (anchor.0 + dx, anchor.1 + dy))
+            .into_iter()
+            .find(|&t| g.world.map.passable(t) && g.world.location_covering(t).is_none())
+            .expect("a passable cell beside the obelisk");
+        // Event 405 asks that the monument's guard, army 1 beside it (43, 2), was beaten by the
+        // player (its defeated check): that battle is recorded here.
+        g.beaten_armies.insert(1);
+        g.teleport_player(beside.0, beside.1);
+        let _ = g.drain_events();
+        assert!(g.set_destination(anchor), "a route into the obelisk");
+        let mut events = Vec::new();
+        for _ in 0..400_000 {
+            if !g.moving() {
+                break;
+            }
+            events.extend(g.tick(0.05));
+        }
+        assert_eq!(g.tile(), anchor);
+        assert_eq!(g.location, Some(obelisk), "he stands in the obelisk");
+        assert!(g.window_at(obelisk).is_none(), "an obelisk opens no window (0x4bbc84, types 13–15)");
+        events.extend(g.drain_events());
+        for _ in 0..20 {
+            if !g.script().unwrap().holds_window() {
+                break;
+            }
+            events.extend(g.event_window_closed());
+        }
+        let fired_ids: Vec<EventId> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Script(EventOutcome::Fired { event, .. }) => Some(*event),
+                _ => None,
+            })
+            .collect();
+        assert!(local.iter().any(|id| fired_ids.contains(id)), "one of its local events {local:?} fires on entering; fired {fired_ids:?}");
+    }
+
     /// Reads every message window that holds the scan (OK), as the player does.
     fn close_windows(g: &mut Game) {
         for _ in 0..20 {

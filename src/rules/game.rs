@@ -2256,9 +2256,8 @@ impl Game {
         self.move_to_cell(here, here);
         self.stand_on_bridge(here);
         let Some(l) = self.location else { return };
-        if self.world.locations[l].kind == LocationKind::Obelisk {
-            return;
-        }
+        // An obelisk is entered like any other building (0x4ae5d8 → 0x4bbc84): its local
+        // events are scanned on entering, and only its window is skipped for types 13–15.
         if events.iter().any(Event::needs_reading) {
             if self.click_buildings.0 == Some(l) {
                 self.waiting_entry = Some(l);

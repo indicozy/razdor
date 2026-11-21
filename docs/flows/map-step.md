@@ -200,6 +200,10 @@ split of the budget give the same state at every day's end (`every_frame_schedul
   `a_building_does_not_open_while_its_question_at_noon_is_still_held`.
 - *No clicks while a step's events are held.* A village entered twice gave "already taken"
   (5d10303).
+- *Obelisks.* An obelisk (types 13–15) is entered like any building: a walk that ends on it runs
+  `arrive_at_end` → `enter_building`, so its local events are scanned on entering (0x4bbc84 →
+  0x4abfbc), and only its window is skipped (no tab, `window_at` is none). Its early return was the
+  bug of backlog 1674 (test `an_obelisks_local_events_run_when_the_hero_walks_in`).
 - *Bridges.* A building on a bridge is never entered (no window, `location` stays none). A bridge
   is the building he is on for events on every step of a walk, not only the last: `begin_walk` sets
   `Game::bridge_stood_on` (`stand_on_bridge`) before the step's time and scan (0x497c68, 0x4abfbc;
