@@ -53,6 +53,8 @@ scenario end:
 battle defeat:  ui/battle_view.rs close_lost(): the screen closes at once → Dialog::defeat()
                   250 ms later on the map; its exit button drops the game → the main menu
 army lost to a spell: Game::army_fallen() → the same Dialog::defeat() (ui/mod.rs)
+no map event after an army loss: run_script and the meet path return at once while
+army_fallen() (events.md §11; a battle's end settles the army, then would scan: backlog 1681)
 ```
 
 Scenario names use yellow for campaigns and blue (`55, 180, 255`) for single scenarios;

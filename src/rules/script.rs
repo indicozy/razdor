@@ -90,6 +90,12 @@ impl Game {
     /// Runs the event engine once. Returns its outcomes, then what its effects caused (noon
     /// reports during a delay, a battle).
     pub(crate) fn run_script(&mut self) -> Vec<Event> {
+        // The army has fallen: the game is lost, and the original runs no map event after it
+        // (events.md §11, 0x4c527d after a battle, 0x4906eb after other damage). A battle's end
+        // settles the army before its scan, so this is the scan that would run after a defeat.
+        if self.army_fallen() {
+            return Vec::new();
+        }
         let _engine = crate::rules::recording::hook::engine_scope();
         let Some(mut engine) = self.script.take() else { return Vec::new() };
         let out = engine.tick(self);
@@ -254,7 +260,8 @@ impl Game {
             return false;
         };
         let id = self.world.armies[i].id;
-        if id == 0 || self.script.is_none() {
+        // No scan once the army has fallen (events.md §11, as in `run_script`).
+        if id == 0 || self.script.is_none() || self.army_fallen() {
             events.push(e);
             return false;
         }
@@ -3670,6 +3677,54 @@ mod real_maps {
             })
             .collect();
         assert!(local.iter().any(|id| fired_ids.contains(id)), "one of its local events {local:?} fires on entering; fired {fired_ids:?}");
+    }
+
+    /// Устье Трейна (the base install): the merchant joins the hero (event 150, its question
+    /// yes), then the hero's whole army falls in a battle (events.md §11: a lost battle plays
+    /// no map event). Event 157 «Купец погиб» (the merchant is not in the living army) must not
+    /// fire after it (backlog 1681). The battle's end (0x4c527d) runs no scan; the defeat report
+    /// follows 250 ms later, and its OK ends the game.
+    #[test]
+    fn a_lost_battle_runs_no_map_event() {
+        let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
+        let dt = DtInstall::load(std::path::Path::new(&dir)).expect("install loads");
+        let c = Arc::new(Content::from_dt(&dt));
+        let s = dt.maps.iter().find(|m| m.name == "Устье Трейна").unwrap().load().unwrap();
+        let mut g = Game::from_scenario(c.clone(), &s, HeroClass::Knight);
+        let _ = g.drain_events();
+        for _ in 0..20 {
+            if !g.script().unwrap().holds_window() {
+                break;
+            }
+            let _ = g.event_window_closed();
+        }
+        let joined = g.force_event(150);
+        assert!(joined.iter().any(|e| matches!(e, Event::Script(EventOutcome::Question(150)))), "the merchant asks to join: {joined:?}");
+        let _ = g.answer_question(true);
+        for _ in 0..20 {
+            if !g.script().unwrap().holds_window() {
+                break;
+            }
+            let _ = g.event_window_closed();
+        }
+        let _ = g.drain_events();
+        g.foe = Some(crate::rules::game::Foe::Army(0));
+        let mut b = g.start_battle();
+        b.begin();
+        for f in b.fighters.iter_mut().filter(|f| f.team == crate::rules::battle::Team::Player) {
+            f.hp = 0;
+        }
+        assert_eq!(g.resolve_battle(&b), crate::rules::game::BattleResult::Defeat);
+        let after = g.drain_events();
+        let fired: Vec<EventId> = after
+            .iter()
+            .filter_map(|e| match e {
+                Event::Script(EventOutcome::Fired { event, .. }) => Some(*event),
+                Event::Script(EventOutcome::Question(id)) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        assert!(fired.is_empty(), "no map event runs after a lost battle (events.md §11): {fired:?}");
     }
 
     /// Reads every message window that holds the scan (OK), as the player does.
