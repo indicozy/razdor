@@ -15,6 +15,7 @@ use razdor::local;
 use razdor::rules::marks::civil;
 
 use super::audio::Settings;
+use razdor::dt::lights::Kind;
 
 local! {
     /// The setting, taken in every frame (`set_pref`).
@@ -73,6 +74,31 @@ pub fn today() -> (i64, u32, u32) {
     civil((secs / 86_400) as i64)
 }
 
+/// The garlands' points on a building's light boxes (`garland_points`): sprite pixels and the colour index (0 red,
+/// 1 green, 2 gold, 3 blue), one point every 6 px along the top edge of each window, door and gate box.
+pub type Garland = (f32, f32, u8);
+
+/// Spacing of the garland points along a box's top edge, in sprite pixels.
+pub const GARLAND_STEP: i32 = 6;
+
+/// The garland points of a building's light boxes: along the top edge `y0` of each window, door and gate box
+/// (`[x0, y0, x1, y1]`), one point every [`GARLAND_STEP`] px from `x0` to `x1` (both ends included). Colours
+/// cycle 0 to 3 across all the points in order. Chimneys, flags, sails and the other kinds give none.
+pub fn garland_points(boxes: &[(Kind, [i32; 4])]) -> Vec<Garland> {
+    let mut out = Vec::new();
+    for (kind, [x0, y0, x1, _]) in boxes {
+        if !matches!(kind, Kind::Window | Kind::Door | Kind::Gate) {
+            continue;
+        }
+        let mut x = *x0;
+        while x <= *x1 {
+            out.push((x as f32, *y0 as f32, (out.len() % 4) as u8));
+            x += GARLAND_STEP;
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +126,40 @@ mod tests {
         s.holiday_asked = Some(2026);
         assert!(!holiday_question_due(&s, (2027, 1, 3)), "answered for this season: not again");
         assert!(!holiday_question_due(&s, (2026, 7, 1)), "July: no question");
+    }
+
+    #[test]
+    fn a_window_top_edge_gets_a_point_every_6_px_with_cycling_colours() {
+        let pts = garland_points(&[(Kind::Window, [10, 20, 34, 30])]);
+        assert!((4..=5).contains(&pts.len()), "a 24-px box: {pts:?}");
+        assert_eq!(pts[0], (10.0, 20.0, 0), "from the left end, on the top edge");
+        assert_eq!(pts[1], (16.0, 20.0, 1));
+        assert_eq!(pts[2], (22.0, 20.0, 2));
+        assert_eq!(pts[3], (28.0, 20.0, 3));
+        assert_eq!(pts[4].2, 0, "the colours cycle");
+    }
+
+    #[test]
+    fn doors_and_gates_get_points_too() {
+        assert!(!garland_points(&[(Kind::Door, [0, 5, 12, 9])]).is_empty());
+        assert!(!garland_points(&[(Kind::Gate, [0, 5, 12, 9])]).is_empty());
+    }
+
+    #[test]
+    fn chimneys_flags_and_sails_give_no_garlands() {
+        assert!(garland_points(&[(Kind::Chimney, [0, 0, 24, 4]), (Kind::Flag, [0, 0, 24, 4]), (Kind::Sails, [0, 0, 24, 4])]).is_empty());
+    }
+
+    #[test]
+    fn no_boxes_give_no_garlands() {
+        assert!(garland_points(&[]).is_empty());
+    }
+
+    #[test]
+    fn the_colour_index_runs_on_across_boxes() {
+        let pts = garland_points(&[(Kind::Window, [0, 0, 0, 4]), (Kind::Window, [0, 9, 0, 13])]);
+        let colours: Vec<u8> = pts.iter().map(|p| p.2).collect();
+        assert_eq!(colours, vec![0, 1], "one point per single-px box, colours still cycle");
     }
 
     #[test]

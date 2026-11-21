@@ -36,6 +36,7 @@ use super::dt_art::{Atlas, DtArt, FigureShadow, Frame, Living, Slot};
 use super::static_draw;
 use super::living::{self, Batch};
 use super::daylight;
+use super::holiday;
 use super::lights;
 use super::game_bar::{self, BarButton, Look, TimeButton};
 use super::keymap::{self, Action};
@@ -6051,6 +6052,7 @@ fn draw_world_in(game: &Game, assets: &Assets, cam: &Camera, preview: Option<&[T
             smoke.draw(&living::puff_texture());
         }
     }
+    draw_garlands(game, art, cam, &shade_of, &seen_locs);
     NEAR_LIMIT.with(|l| l.set(f32::INFINITY));
     HERO_ON_WINDOW.with(|h| h.set(None));
     if waits {
@@ -8397,6 +8399,57 @@ fn draw_smoke(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(
             living::push_chimney(batch, &space, top, base ^ living::mix(k as u64 + 1), alpha, &smoke);
         }
     }
+}
+
+/// Razdor's «Новогодний вид» garlands (`holiday`, `DtArt::garlands`): small coloured lights on the top edges of each
+/// visible building's window, door and gate boxes. Each colour blinks on its own 2-second cycle, a quarter period
+/// apart; they are dimmer by day (0.35) and full at night (`lights::Frame::night`). The cheap path draws the dots only.
+/// Drawn over the sprites in the screen space; the look off draws nothing.
+fn draw_garlands(game: &Game, art: Option<&DtArt>, cam: &Camera, shade_of: &dyn Fn(Vec2) -> f32, seen: &[usize]) {
+    if !holiday::on() || cam.tilt.is_some_and(|t| t.cam.bend.is_some()) {
+        return;
+    }
+    let Some(atlas) = art.and_then(|a| a.map_atlas()) else { return };
+    let night = lights::with_frame(|f| f.map_or(0.0, |f| f.night)).clamp(0.0, 1.0);
+    let bright = 0.35 + 0.65 * night;
+    let cheap = holiday::cheap();
+    let now = super::map_anim::now();
+    let zoom = cam.scale / PX;
+    let tex = glow_tex();
+    const COLOURS: [[f32; 3]; 4] = [[1.0, 0.15, 0.15], [0.2, 1.0, 0.3], [1.0, 0.8, 0.25], [0.3, 0.55, 1.0]];
+    let blink: [f32; 4] = std::array::from_fn(|k| (0.5 + 0.5 * (std::f64::consts::TAU * (now / 2.0 - k as f64 / 4.0)).sin()) as f32);
+    super::chrome::additive(|| {
+        for l in seen.iter().map(|&i| &game.world.locations[i]) {
+            if l.kind.is_bridge() {
+                continue;
+            }
+            let points = atlas.garlands(l.picture.0, l.picture.1);
+            if points.is_empty() {
+                continue;
+            }
+            let Some(r) = atlas.building(l.picture.0, l.picture.1) else { continue };
+            let origin = building_sprite_origin(l, r.full.x, r.full.y, cam);
+            let foot = building_foot(l, cam);
+            let vis = shade_of(foot);
+            if vis < 0.01 {
+                continue;
+            }
+            let space = match cam.tilt {
+                Some(t) => living::Space::standing(view25::billboard_model_about(cam.origin, foot, foot, cam.scale, t.cam.pitch_deg, t.cam.yaw_deg, sprite_size())),
+                None => living::Space::flat(),
+            };
+            for &(x, y, c) in points {
+                let at = space.point(origin + vec2(x, y) * zoom).truncate();
+                let [red, green, blue] = COLOURS[c as usize & 3];
+                let a = (bright * blink[c as usize & 3] * vis).clamp(0.0, 1.0);
+                draw_circle(at.x, at.y, 2.0, Color::new(red, green, blue, a));
+                if !cheap {
+                    let color = Color::new(red, green, blue, 0.5 * a);
+                    draw_texture_ex(&tex, at.x - 4.0, at.y - 4.0, color, DrawTextureParams { dest_size: Some(vec2(8.0, 8.0)), ..Default::default() });
+                }
+            }
+        }
+    });
 }
 
 /// The seed of the flocks (`living::flock_at`).
