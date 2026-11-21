@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use razdor::dt::data::ArtefactType;
 use razdor::dt::install::DtInstall;
 use razdor::dt::DtError;
-use razdor::dt::sound::{self, SoundTable};
+use razdor::dt::sound::{self, Pcm, SoundTable};
 
 pub use super::jukebox::Mood;
 use super::jukebox::{self, Change, Fade, Jukebox};
@@ -791,6 +791,8 @@ struct Track {
     secs: f64,
     /// The volume last applied.
     volume: f32,
+    /// The holiday look's setting when it started: a change of the setting restarts the menu's music.
+    holiday: bool,
 }
 
 impl Track {
@@ -821,6 +823,8 @@ struct Backend {
     /// original's.
     played: bool,
     jukebox: Jukebox,
+    /// A holiday music file that could not be read was logged (once per run).
+    holiday_warned: bool,
 }
 
 pub struct Audio {
@@ -983,7 +987,11 @@ impl Audio {
                 b.play_effect(c, &self.settings, self.log);
             }
         }
-        let change = b.jukebox.update(mood, crate::ui::clock::now());
+        let mut change = b.jukebox.update(mood, crate::ui::clock::now());
+        // The holiday look switched on or off while the menu's music plays: it starts again from the other file.
+        if change.is_none() && b.music.as_ref().is_some_and(|t| t.track == jukebox::MENU && t.holiday != super::holiday::on()) {
+            change = Some(Change::Play(jukebox::MENU));
+        }
         b.apply(change, &self.settings, self.log);
         // A long frame (a track decoded) moves the fades at most a tenth of a second.
         b.fade(crate::ui::clock::frame_dt().min(0.1), self.settings.music_gain());
@@ -1033,7 +1041,7 @@ impl Backend {
             }
         }
         let jukebox = Jukebox::new(|t| table.background(t).is_some());
-        Ok(Backend { dir: dir.to_path_buf(), table, raw_rate, sfx, music: None, fading: Vec::new(), next_fade: jukebox::SCREEN_FADE, played: false, jukebox })
+        Ok(Backend { dir: dir.to_path_buf(), table, raw_rate, sfx, music: None, fading: Vec::new(), next_fade: jukebox::SCREEN_FADE, played: false, jukebox, holiday_warned: false })
     }
 
     fn play_effect(&mut self, c: Cue, settings: &Settings, log: bool) {
@@ -1053,6 +1061,24 @@ impl Backend {
             None if log => razdor::diag!("audio: sfx {key} has no sound"),
             _ => {}
         }
+    }
+
+    /// The music of `track` as decoded PCM: the holiday look's file when `holiday_menu_file` gives
+    /// one, else the install's own. A holiday file that cannot be read is logged once and the
+    /// install's track plays.
+    fn read_track(&mut self, track: &str, file: &str) -> Result<Pcm, DtError> {
+        if let Some(path) = holiday_menu_file(track) {
+            match read_ogg_pcm(&path) {
+                Ok(pcm) => return Ok(pcm),
+                Err(e) => {
+                    if !self.holiday_warned {
+                        self.holiday_warned = true;
+                        razdor::diag!("holiday menu music {}: {e}; the install's track", path.display());
+                    }
+                }
+            }
+        }
+        sound::read_sound(&self.dir, file, self.raw_rate)
     }
 
     /// Stops every track at once (the app is quitting).
@@ -1090,7 +1116,7 @@ impl Backend {
         let now = crate::ui::clock::now();
         // A looping track that came to its end starts again where its fade is.
         if let (Change::Play(track), Some(t)) = (change, self.music.as_mut()) {
-            if t.track == track {
+            if t.track == track && t.holiday == super::holiday::on() {
                 stop_sound(&t.sound);
                 play_sound(&t.sound, PlaySoundParams { looped: false, volume: t.volume });
                 t.start = now;
@@ -1110,8 +1136,8 @@ impl Backend {
                 }
             }
             // A track still fading out comes back from the level it has reached.
-            Change::Play(track) if self.fading.iter().any(|t| t.track == track) => {
-                let k = self.fading.iter().position(|t| t.track == track).unwrap_or_default();
+            Change::Play(track) if self.fading.iter().any(|t| t.track == track && t.holiday == super::holiday::on()) => {
+                let k = self.fading.iter().position(|t| t.track == track && t.holiday == super::holiday::on()).unwrap_or_default();
                 let mut t = self.fading.remove(k);
                 t.fade = t.fade.toward(1.0, secs);
                 self.jukebox.started(track, t.start, t.secs);
@@ -1125,7 +1151,8 @@ impl Backend {
                 let t0 = web_time::Instant::now();
                 // Razdor's own: a read that fails for now is retried after a wait (`transient`),
                 // a file that cannot be played stays failed for the run.
-                let loaded: Result<(Sound, f64), (String, bool)> = match sound::read_sound(&self.dir, &file, self.raw_rate) {
+                let holiday = super::holiday::on();
+                let loaded: Result<(Sound, f64), (String, bool)> = match self.read_track(track, &file) {
                     Ok(pcm) => {
                         let len = pcm.duration();
                         load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).map(|s| (s, len)).ok_or_else(|| ("cannot be played".to_string(), false))
@@ -1139,7 +1166,7 @@ impl Backend {
                         let volume = fade.level() * gain;
                         play_sound(&sound, PlaySoundParams { looped: false, volume });
                         self.played = true;
-                        self.music = Some(Track { track, sound, fade, start: now, secs: len, volume });
+                        self.music = Some(Track { track, sound, fade, start: now, secs: len, volume, holiday });
                         self.jukebox.started(track, now, len);
                         if log {
                             razdor::diag!("audio: music {track} ({file}, {len:.1} s, decoded in {} ms) at {gain:.1}, fading in over {secs:.1} s", t0.elapsed().as_millis());
@@ -1170,10 +1197,36 @@ fn transient(e: &DtError) -> bool {
 
 /// The file that plays instead of a track's own, if any: the holiday look's menu music on the
 /// main menu theme, when the look is on and its file is there. Pure: the caller checks the file.
-// Not called yet: playback wiring comes in the next step; until then only the tests use it.
-#[allow(dead_code)]
 pub fn menu_override(track: &str, holiday_on: bool, file_ok: bool, path: &Path) -> Option<PathBuf> {
     (track == jukebox::MENU && holiday_on && file_ok).then(|| path.to_path_buf())
+}
+
+/// The holiday file to play: the env override's path (`RAZDOR_HOLIDAY_MUSIC`, `RAZDOR_HOLIDAY_HOVER`)
+/// when it is set, else the hub's `hub` path; `None` unless that file is there (`is_file`). Pure: the
+/// caller reads the env and the hub folder.
+pub fn holiday_source(env: Option<&str>, hub: Option<PathBuf>, is_file: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let path = match env.filter(|p| !p.is_empty()) {
+        Some(p) => Some(PathBuf::from(p)),
+        None => hub,
+    };
+    path.filter(|p| is_file(p))
+}
+
+/// The holiday look's menu music for `track`, when the look is on and its file is there.
+fn holiday_menu_file(track: &str) -> Option<PathBuf> {
+    if !super::holiday::on() {
+        return None;
+    }
+    let env = std::env::var("RAZDOR_HOLIDAY_MUSIC").ok();
+    let hub = razdor::hub::local_dir().map(|local| razdor::hub::holiday_music_path(&local));
+    let src = holiday_source(env.as_deref(), hub, |p| p.is_file())?;
+    menu_override(track, true, true, &src)
+}
+
+/// An Ogg Vorbis file as PCM (the holiday look's files; the install's own are `Sounds/*.ogg` the same way).
+fn read_ogg_pcm(path: &Path) -> Result<Pcm, DtError> {
+    let bytes = std::fs::read(path).map_err(|source| DtError::Io { path: path.to_path_buf(), source })?;
+    sound::parse_ogg(&bytes)
 }
 
 #[cfg(test)]
@@ -1187,6 +1240,18 @@ mod tests {
         assert_eq!(menu_override(jukebox::MENU, false, true, p), None, "the look is off");
         assert_eq!(menu_override(jukebox::MENU, true, false, p), None, "the file is missing");
         assert_eq!(menu_override(jukebox::MAP[0], true, true, p), None, "a map track keeps its own music");
+    }
+
+    #[test]
+    fn the_holiday_file_is_the_env_override_else_the_hub_one_and_only_when_it_is_there() {
+        let hub = Some(PathBuf::from("/hub/holiday/menu.ogg"));
+        let there = |_: &Path| true;
+        assert_eq!(holiday_source(Some("/t/x.ogg"), hub.clone(), there), Some(PathBuf::from("/t/x.ogg")), "the override wins");
+        assert_eq!(holiday_source(Some(""), hub.clone(), there), hub, "an empty override is no override");
+        assert_eq!(holiday_source(None, hub.clone(), there), hub, "the hub's file");
+        assert_eq!(holiday_source(None, None, there), None, "no hub folder");
+        assert_eq!(holiday_source(None, hub.clone(), |_| false), None, "the hub's file is missing");
+        assert_eq!(holiday_source(Some("/t/gone.ogg"), hub, |p| p != Path::new("/t/gone.ogg")), None, "a missing override is not replaced by the hub's file");
     }
 
     /// A saved file's settings after `clamped` and `migrated`, as `load` reads them.

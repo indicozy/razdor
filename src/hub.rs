@@ -418,10 +418,14 @@ pub struct HolidayRef {
     pub sha256: String,
 }
 
+/// The largest holiday music file (a few minutes of Ogg Vorbis).
+pub const MAX_HOLIDAY_BYTES: u64 = 16 << 20;
+
 /// Where the holiday menu music is kept, in the hub folder `local`.
 pub fn holiday_music_path(local: &Path) -> PathBuf {
     local.join("holiday").join("menu.ogg")
 }
+
 
 /// Where the holiday look's sleigh pictures are kept, in the hub folder `local`: `frame-0.png` to `frame-3.png`
 /// (the gallop) and `present.png`. An older client ignores them.
@@ -542,6 +546,23 @@ impl Catalog {
                 if text.len() > MAX_CAPTION || text.chars().any(|c| c == '\n' || c == '\r' || c.is_control()) {
                     return Err(format!("index.json: ad: bad {what}"));
                 }
+            }
+        }
+        if let Some(h) = &mut c.holiday {
+            // The holiday's folder name, its music (an `https://` address or a path in the hub) and its
+            // size and SHA-256: the same checks as the ad's.
+            if !safe_id(&h.id) {
+                return Err(format!("index.json: holiday: bad id {:?}", h.id));
+            }
+            if !safe_location(&h.music) || h.music.starts_with("http://") {
+                return Err(format!("index.json: holiday: bad music address {:?}", h.music));
+            }
+            if !safe_sha256(&h.sha256) {
+                return Err("index.json: holiday: the SHA-256 is not 64 hex digits".into());
+            }
+            h.sha256 = h.sha256.to_ascii_lowercase();
+            if h.size == 0 || h.size > MAX_HOLIDAY_BYTES {
+                return Err(format!("index.json: holiday: bad size {}", h.size));
             }
         }
         Ok(c)
@@ -2735,7 +2756,19 @@ mod tests {
             .expect("the holiday is read");
         assert_eq!((h.id.as_str(), h.version, h.size), ("winter", 2, 1234));
         assert_eq!(h.music, "https://example.org/menu.ogg");
-        assert_eq!(h.sha256, "3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA");
+        assert_eq!(h.sha256, "3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA".to_ascii_lowercase());
+    }
+
+    #[test]
+    fn a_holiday_with_a_bad_id_address_or_size_refuses_the_catalog() {
+        let with = |h: &str| Catalog::parse(format!(r#"{{"format":1,"entries":[],"holiday":{h}}}"#).as_bytes());
+        assert!(with(&GOOD_HOLIDAY.replace("winter", "../winter")).is_err(), "the id is a path part");
+        assert!(with(&GOOD_HOLIDAY.replace("https://example.org/menu.ogg", "http://example.org/menu.ogg")).is_err(), "no plain http");
+        assert!(with(&GOOD_HOLIDAY.replace("https://example.org/menu.ogg", "../menu.ogg")).is_err(), "no escaping path");
+        assert!(with(&GOOD_HOLIDAY.replace("\"size\":1234", "\"size\":0")).is_err(), "an empty file");
+        assert!(with(&GOOD_HOLIDAY.replace("\"size\":1234", &format!("\"size\":{}", MAX_HOLIDAY_BYTES + 1))).is_err(), "too big");
+        assert!(with(&GOOD_HOLIDAY.replace("3AA411", "3AA41")).is_err(), "a SHA-256 is 64 digits");
+        assert!(with(GOOD_HOLIDAY).is_ok());
     }
 
     #[test]
