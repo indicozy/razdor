@@ -125,11 +125,16 @@ pub fn missing_files(dir: &Path, m: &Manifest) -> Vec<String> {
 /// Whether Razdor reads the archive's file `path` when it plays. Razdor's own filter: the
 /// original checks no files at all, so a file it never reads must not stop the game (a folder
 /// without the modder's notepads or the exe still plays). Not needed: the notepads folder, the
-/// help folder, the root's programs and libraries (`.exe`, `.dll`, `.ico`), `License.txt`, and the
-/// ini files of the map editor and the DirectDraw shim. Everything else (the data, maps, pictures,
-/// sounds, logo) is needed. The exe is optional for the game: `dt::install::drain_rule` falls back
-/// to `_Global.ini`. Case-insensitive.
+/// help folder, icons anywhere (`.ico`), the root's programs and libraries (`.exe`, `.dll`),
+/// `License.txt`, and the ini files of the map editor and the DirectDraw shim. Everything else
+/// (the data, maps, pictures, sounds, logo) is needed. The exe is optional for the game:
+/// `dt::install::drain_rule` falls back to `_Global.ini`. Case-insensitive.
 pub fn needed_to_play(path: &str) -> bool {
+    // Razdor's own filter (the original checks no files): the game never reads an icon, and a
+    // download can lose one (a player's report: `Sounds/help.ico`), so it must not stop the game.
+    if path.rsplit('/').next().is_some_and(|name| name.to_lowercase().ends_with(".ico")) {
+        return false;
+    }
     match path.split_once('/') {
         Some((folder, _)) => !(folder.to_lowercase() == NOTEPADS_FOLDER.to_lowercase() || folder.eq_ignore_ascii_case("Help")),
         None => !unused_root_file(path),
@@ -340,6 +345,8 @@ mod tests {
             "vorbisfile.dll",
             "help.ico",
             "Help.ICO",
+            "Sounds/help.ico",
+            "Sounds/Help.ICO",
             "License.txt",
             "license.txt",
             "DTMapEdit.Ini",

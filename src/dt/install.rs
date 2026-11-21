@@ -807,6 +807,7 @@ mod tests {
         ("Дополнительные файлы/Блокноты с ID/Армия.txt", b"unit ids"),
         ("Help/Документация.doc", b"help"),
         ("License.txt", b"license"),
+        ("Sounds/help.ico", b"icon copy"),
     ];
 
     fn guard_folder(name: &str, omit: &[&str]) -> (PathBuf, integrity::Manifest) {
@@ -837,6 +838,14 @@ mod tests {
         let report = integrity::check(&dir, &m, false);
         assert!(report.community, "still the community's folder by its sizes: {report:?}");
         assert!(check_game_files(&dir, &m).is_ok(), "nothing Razdor reads is missing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_community_folder_without_a_nested_icon_still_plays() {
+        let (dir, m) = guard_folder("no-nested-icon", &["Sounds/help.ico"]);
+        assert!(integrity::check(&dir, &m, false).community, "still the community's folder by its sizes");
+        assert!(check_game_files(&dir, &m).is_ok(), "a nested icon is never read by the game");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
