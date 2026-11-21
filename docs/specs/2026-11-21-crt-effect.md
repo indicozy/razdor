@@ -64,11 +64,10 @@ returns "no freeze"; the map is drawn live under windows); the photo shutter
 `get_internal_gl().flush()` (as `map_freeze` does), then `get_texture_data`, rows flipped, alpha forced
 opaque (`opaque_rgba`), so a photo has no CRT on it.
 
-Scissor (settled from macroquad's `quad_gl`, fork rev 5466461 line ~1007): it always applies
-`height - (y + h)`, but a render target's 2D camera draws upside down, so inside a target the clip is
-mirrored. One helper `render_cache::scissor(clip_px)` flips y to `target_h - y - h` when
-`quad_gl.get_active_render_pass()` is set, then calls `quad_gl.scissor`; `widgets::Clip::new`,
-`pan::scissor` and `weather.rs:~835` use it. `sharp::note_clip` keeps the unflipped clip.
+Scissor: macroquad applies `height - (y + h)` with the bound target's height, and the target's 2D camera
+keeps the screen's orientation, so a clip needs no correction in the stand-in. (A pre-flip was tried first
+and mirrored the clips: the scenario list's panes came out cut; measured, 2026-11-21.) The clips go through
+one helper, `render_cache::scissor`, used by `widgets::Clip::new`, `pan::scissor` and `weather.rs`.
 
 Sprite retain (`sharp/retain.rs`) already turns itself off while a render pass is active, so it never
 escapes the target (its `begin_default_pass` is only in the replay path); the cost is that the retain's

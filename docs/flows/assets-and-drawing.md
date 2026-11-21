@@ -458,8 +458,8 @@ Screen, `Settings::crt` (`Strength`: Off, Light, Normal, Strong; off by default)
 into `crt::set_settings`). `main.rs` brackets each frame: `crt::begin_frame` points the screen target of
 `render_cache` at a screen-sized stand-in (`to_screen` makes it the base camera), and `crt::end_frame` draws the
 stand-in through the CRT material onto the real screen. Off, or a screen above 8192 px, nothing changes. A clip inside
-the stand-in goes through `render_cache::scissor`, which flips its y for the target (the pan's clips too, `pan::sync`),
-so clipped draws land where they did. The quality picks the passes: Fast one tap, Normal the scanlines, mask and
+the stand-in needs no correction (macroquad flips it with the bound target's height, and the target's camera keeps
+the screen's orientation); the clips go through one helper, `render_cache::scissor`. The quality picks the passes: Fast one tap, Normal the scanlines, mask and
 vignette, High adds a glow pass (`glow_pass`, a quarter-size target that the glow reads). The curve is
 `crt::curve_point`, the same maths as `crt::pointer`, which `input.rs` uses for the mouse and touches, so
 clicks hit the bent picture. `map_freeze` is off while the effect is on (`map_freeze.rs`: the map is drawn live

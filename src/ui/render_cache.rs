@@ -96,25 +96,12 @@ pub fn draw_target() -> Option<RenderTarget> {
     target().or_else(|| BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| rt.clone()))).or_else(screen_target)
 }
 
-/// The height in pixels of the target the 2D space draws into now (the same order as [`back_to_2d`]).
-fn bound_target_height() -> Option<f32> {
-    let filling = FILLING.with(|f| f.borrow().as_ref().map(|(rt, _)| rt.texture.height()));
-    filling
-        .or_else(|| BASE.with(|b| b.borrow().as_ref().map(|(rt, _)| rt.texture.height())))
-        .or_else(|| screen_target().map(|rt| rt.texture.height()))
-}
-
 /// Cuts the drawing off outside `clip` (physical pixels, top-left origin), or lifts the cut (`None`).
-/// macroquad's quad_gl always flips y as `height - (y + h)`, with the height of the bound target. A
-/// target's 2D camera draws upside down, so inside one the clip came out mirrored; here the y is
-/// pre-flipped with the same height, and macroquad's flip then lands the clip where the drawing is.
+/// The same in the screen's stand-in as on the screen: macroquad flips the clip with the bound target's
+/// own height, and a target's 2D camera keeps the screen's orientation, so no correction is needed here
+/// (checked against the scenario list's clipped panes with `RAZDOR_CRT_PASSTHROUGH`).
 pub fn scissor(clip: Option<(i32, i32, i32, i32)>) {
-    let gl = unsafe { get_internal_gl() }.quad_gl;
-    let clip = match (clip, gl.get_active_render_pass(), bound_target_height()) {
-        (Some((x, y, w, h)), Some(_), Some(th)) => Some((x, th as i32 - y - h, w, h)),
-        (clip, _, _) => clip,
-    };
-    gl.scissor(clip);
+    unsafe { get_internal_gl() }.quad_gl.scissor(clip);
 }
 
 /// Back to the 2D space: the target of the fill in progress, else the map's base target, else
