@@ -434,6 +434,10 @@ pub fn holiday_music_path(local: &Path) -> PathBuf {
     local.join("holiday").join("menu.ogg")
 }
 
+/// Where the holiday look's bell for the main menu's buttons is kept, in the hub folder `local`.
+pub fn holiday_hover_path(local: &Path) -> PathBuf {
+    local.join("holiday").join("hover.ogg")
+}
 
 /// Where the holiday look's sleigh pictures are kept, in the hub folder `local`: `frame-0.png` to `frame-3.png`
 /// (the gallop) and `present.png`. An older client ignores them.
@@ -2921,5 +2925,6 @@ mod tests {
     fn the_holiday_music_sits_in_the_hub_folder() {
         assert_eq!(holiday_music_path(Path::new("/x/hub")), Path::new("/x/hub").join("holiday").join("menu.ogg"));
         assert_eq!(holiday_sleigh_dir(Path::new("/x/hub")), Path::new("/x/hub").join("holiday").join("sleigh"));
+        assert_eq!(holiday_hover_path(Path::new("/x/hub")), Path::new("/x/hub").join("holiday").join("hover.ogg"));
     }
 }

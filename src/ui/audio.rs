@@ -823,6 +823,10 @@ struct Backend {
     /// original's.
     played: bool,
     jukebox: Jukebox,
+    /// The holiday look's bell for the main menu's buttons, read on the first hover (`holiday_bell`).
+    bell: Option<Sound>,
+    /// The bell's file could not be read: the normal sound plays for the rest of the run.
+    bell_failed: bool,
     /// A holiday music file that could not be read was logged (once per run).
     holiday_warned: bool,
 }
@@ -1041,12 +1045,26 @@ impl Backend {
             }
         }
         let jukebox = Jukebox::new(|t| table.background(t).is_some());
-        Ok(Backend { dir: dir.to_path_buf(), table, raw_rate, sfx, music: None, fading: Vec::new(), next_fade: jukebox::SCREEN_FADE, played: false, jukebox, holiday_warned: false })
+        Ok(Backend { dir: dir.to_path_buf(), table, raw_rate, sfx, music: None, fading: Vec::new(), next_fade: jukebox::SCREEN_FADE, played: false, jukebox, bell: None, bell_failed: false, holiday_warned: false })
     }
 
     fn play_effect(&mut self, c: Cue, settings: &Settings, log: bool) {
         let key = c.key();
         let gain = settings.sfx_gain();
+        // The main menu's hover sound (`Cue::MenuSelect` is only asked for there) is the holiday bell
+        // while the look is on and its file is there; otherwise the install's sound.
+        if c == Cue::MenuSelect && super::holiday::on() {
+            if let Some(bell) = self.holiday_bell() {
+                if gain > 0.0 {
+                    stop_sound(bell);
+                    play_sound(bell, PlaySoundParams { looped: false, volume: gain });
+                }
+                if log {
+                    razdor::diag!("audio: holiday bell at {gain:.1}");
+                }
+                return;
+            }
+        }
         match self.sfx.get(&key.to_ascii_lowercase()) {
             Some(s) if gain > 0.0 => {
                 // One buffer per sound, as the original's (engine.md §8): playing a sound that
@@ -1061,6 +1079,23 @@ impl Backend {
             None if log => razdor::diag!("audio: sfx {key} has no sound"),
             _ => {}
         }
+    }
+
+    /// The holiday bell, read on the first call that finds its file (`holiday_hover_file`); `None`
+    /// when there is no file or it cannot be played (logged once).
+    fn holiday_bell(&mut self) -> Option<&Sound> {
+        if self.bell.is_none() && !self.bell_failed {
+            let path = holiday_hover_file()?;
+            let loaded = read_ogg_pcm(&path).map_err(|e| e.to_string()).and_then(|pcm| load_now(&pcm.resampled(OUTPUT_RATE).to_wav()).ok_or_else(|| "cannot be played".to_string()));
+            match loaded {
+                Ok(sound) => self.bell = Some(sound),
+                Err(e) => {
+                    self.bell_failed = true;
+                    razdor::diag!("holiday hover {}: {e}; the normal sound", path.display());
+                }
+            }
+        }
+        self.bell.as_ref()
     }
 
     /// The music of `track` as decoded PCM: the holiday look's file when `holiday_menu_file` gives
@@ -1221,6 +1256,13 @@ fn holiday_menu_file(track: &str) -> Option<PathBuf> {
     let hub = razdor::hub::local_dir().map(|local| razdor::hub::holiday_music_path(&local));
     let src = holiday_source(env.as_deref(), hub, |p| p.is_file())?;
     menu_override(track, true, true, &src)
+}
+
+/// The holiday look's bell file, when there is one (`RAZDOR_HOLIDAY_HOVER`, else the hub's).
+fn holiday_hover_file() -> Option<PathBuf> {
+    let env = std::env::var("RAZDOR_HOLIDAY_HOVER").ok();
+    let hub = razdor::hub::local_dir().map(|local| razdor::hub::holiday_hover_path(&local));
+    holiday_source(env.as_deref(), hub, |p| p.is_file())
 }
 
 /// An Ogg Vorbis file as PCM (the holiday look's files; the install's own are `Sounds/*.ogg` the same way).
