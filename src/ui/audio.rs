@@ -1168,9 +1168,26 @@ fn transient(e: &DtError) -> bool {
     matches!(e, DtError::Io { .. })
 }
 
+/// The file that plays instead of a track's own, if any: the holiday look's menu music on the
+/// main menu theme, when the look is on and its file is there. Pure: the caller checks the file.
+// Not called yet: playback wiring comes in the next step; until then only the tests use it.
+#[allow(dead_code)]
+pub fn menu_override(track: &str, holiday_on: bool, file_ok: bool, path: &Path) -> Option<PathBuf> {
+    (track == jukebox::MENU && holiday_on && file_ok).then(|| path.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_holiday_menu_track_replaces_only_the_menu_and_only_when_on_and_present() {
+        let p = Path::new("/x/hub/holiday/menu.ogg");
+        assert_eq!(menu_override(jukebox::MENU, true, true, p), Some(p.to_path_buf()));
+        assert_eq!(menu_override(jukebox::MENU, false, true, p), None, "the look is off");
+        assert_eq!(menu_override(jukebox::MENU, true, false, p), None, "the file is missing");
+        assert_eq!(menu_override(jukebox::MAP[0], true, true, p), None, "a map track keeps its own music");
+    }
 
     /// A saved file's settings after `clamped` and `migrated`, as `load` reads them.
     fn read_back(json: &str) -> (Settings, bool) {
