@@ -763,9 +763,11 @@ impl Game {
     /// Brings the run's mark up to what the run uses now, as the interface reads the settings
     /// every frame and on every load: a cheat used (red), an experimental rule on (yellow: the
     /// playthrough's rules, fixed for it), and the gameplay setting that differs from the
-    /// original (`gameplay`, from `ui::audio::Settings::gameplay_differs_from_original`; grey).
+    /// original (`gameplay`: each setting's catalog name and its value's catalog key, from
+    /// `ui::audio::Settings::gameplay_differs_from_original`; grey, the first one the reason and
+    /// every one listed in `RunMark::settings`).
     /// It only rises: a setting that was non-original stays counted for the rest of the run.
-    pub fn note_settings(&mut self, gameplay: Option<&str>) {
+    pub fn note_settings(&mut self, gameplay: &[(&str, &str)]) {
         use super::marks::{Level, Reason};
         let mark = self.run_mark.get_or_insert_with(super::marks::RunMark::unknown_history);
         if self.cheats.used {
@@ -774,8 +776,9 @@ impl Game {
         if let Some(rule) = self.experimental.first_on() {
             mark.worsen(Level::Yellow, Reason::Rule(rule.to_string()));
         }
-        if let Some(setting) = gameplay {
+        for (setting, value) in gameplay {
             mark.worsen(Level::Grey, Reason::Setting(setting.to_string()));
+            mark.note_setting(setting, value);
         }
     }
 
@@ -4018,7 +4021,7 @@ mod tests {
         let (mut g, _from) = caught_by_army();
         g.hire(unit(&g, "spearman")).unwrap();
         let index = g.squad.len() - 1;
-        g.note_settings(None);
+        g.note_settings(&[]);
         assert_eq!(g.run_mark().level, Level::Green);
         let mut b = g.start_battle();
         // Arranging: the spearman moves to a free cell of the formation.

@@ -651,12 +651,12 @@ mod tests {
         assert!(cheat(&mut g, "gold nope").is_err());
         assert_eq!(g.run_mark(), RunMark::start(), "help and a refused line are no cheat");
         cheat(&mut g, "gold 5").unwrap();
-        assert_eq!(g.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("gold".into()) });
+        assert_eq!(g.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("gold".into()), settings: Vec::new() });
         cheat(&mut g, "god").unwrap();
         assert_eq!(g.run_mark().reason, Reason::Cheat("gold".into()), "the first cheat names the mark");
         let mut god = game();
         cheat(&mut god, "god").unwrap();
-        assert_eq!(god.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
+        assert_eq!(god.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("god".into()), settings: Vec::new() });
     }
 
     #[test]

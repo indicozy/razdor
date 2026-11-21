@@ -1581,17 +1581,18 @@ pub(crate) mod tests {
     /// the worse of what the run used and what the save says (`Game::keep_run_mark`).
     #[test]
     fn the_run_mark_survives_a_save_and_a_load() {
-        use crate::rules::marks::{Level, Reason, RunMark};
+        use crate::rules::marks::{Level, Reason};
         let c = demo();
         let mut g = Game::new(c.clone(), HeroClass::Knight);
-        g.note_settings(Some("Unit battle participation"));
+        g.note_settings(&[("Unit battle participation", "Off")]);
         g.note_cheat("god");
         let loaded = roundtrip(&g, c.clone(), None);
-        assert_eq!(loaded.run_mark(), RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
+        assert_eq!((loaded.run_mark().level, loaded.run_mark().reason), (Level::Red, Reason::Cheat("god".into())));
+        assert_eq!(loaded.run_mark().settings, vec![("Unit battle participation".to_string(), "Off".to_string())], "the settings list survives the save too");
         let mut grey = Game::new(c.clone(), HeroClass::Knight);
-        grey.note_settings(Some("Unit battle participation"));
+        grey.note_settings(&[("Unit battle participation", "Off")]);
         let mut back = roundtrip(&grey, c, None);
-        back.note_settings(None);
+        back.note_settings(&[]);
         assert_eq!(back.run_mark().level, Level::Grey, "a setting changed back is still counted after a load");
     }
 

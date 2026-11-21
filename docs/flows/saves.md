@@ -280,6 +280,12 @@ experimental rule (yellow) or a changed setting (grey). Its tooltip still says t
 (`new_game::mark_text_in`). Records written grey for an unknown history are read as green (`Records::from_json`). A parity switch
 that the save lacks (inherited, `ExperimentalRules::inherited`) is on but does not make the run yellow.
 
+The grey mark lists every setting the run used that differs from the original, with its value (backlog 1678):
+`gameplay_differs_from_original` returns (name, value) pairs, `Game::note_settings` takes them, and
+`RunMark::settings` keeps one entry per setting, its latest non-original value (`RunMark::note_setting`;
+`absorb` merges an earlier mark's list). The tooltip reads the list; an old mark without it falls back to
+`Reason::Setting`, the first setting's name.
+
 The player's best mark per map (and its date) is `marks.json` beside `settings.json`
 (`marks::Records`, keyed by the map's file name without the extension, as the favourites are). A
 victory writes it (`ui/mod.rs` at the scenario's end, next to the list's tick); a loss writes nothing.

@@ -1516,7 +1516,7 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.leader_caption = audio.leader_caption;
     // The run's mark follows what it uses now: a gameplay setting that is not the original's
     // (`Game::note_settings`; the rules and the cheats are read from the game itself).
-    g.note_settings(audio.gameplay_differs_from_original(&install_originals()));
+    g.note_settings(&audio.gameplay_differs_from_original(&install_originals()));
 }
 
 /// The improved AI's checkbox clicked: on gives the improved level, off the original's (and

@@ -831,24 +831,32 @@ const MARK_GREY: Color = Color::new(0.72, 0.72, 0.74, 1.0);
 const MARK_YELLOW: Color = Color::new(1.0, 0.93, 0.28, 1.0);
 const MARK_RED: Color = Color::new(1.0, 0.38, 0.34, 1.0);
 
-/// The tooltip of a run mark: what it means and what set it, from `t` (the catalog's
-/// translation). Russian: «Пройдено с читами (god)», «Пройдено с экспериментальными правилами:
-/// Шесть ячеек снаряжения», «Пройдено с настройками не как в оригинале: Отключение бойцов»,
-/// «Пройдено честно».
-fn mark_text_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> String {
+/// The tooltip of a run mark, one entry per line, from `t` (the catalog's translation). Russian:
+/// «Пройдено с читами (god)», «Пройдено с экспериментальными правилами: Шесть ячеек снаряжения»,
+/// «Пройдено честно». A grey mark with its settings list (backlog 1678) is a header line and one line
+/// per setting: «Пройдено с настройками не как в оригинале:» then «Сила ИИ в бою — Максимум (Раздор)».
+/// An old mark without the list names only its first setting on one line.
+fn mark_lines_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> Vec<String> {
+    let one = |s: String| vec![s];
     match &mark.reason {
-        marks::Reason::Honest => t(n_("Completed honestly")).to_string(),
-        marks::Reason::Cheat(command) if command.is_empty() => t(n_("Completed with cheats")).to_string(),
-        marks::Reason::Cheat(command) => format!("{} ({command})", t(n_("Completed with cheats"))),
-        marks::Reason::Rule(rule) => format!("{}: {}", t(n_("Completed with experimental rules")), t(rule)),
-        marks::Reason::Setting(setting) => format!("{}: {}", t(n_("Completed with settings not as in the original")), t(setting)),
-        marks::Reason::Unknown => t(n_("Completed; the game's history is unknown (an old save)")).to_string(),
+        marks::Reason::Honest => one(t(n_("Completed honestly")).to_string()),
+        marks::Reason::Cheat(command) if command.is_empty() => one(t(n_("Completed with cheats")).to_string()),
+        marks::Reason::Cheat(command) => one(format!("{} ({command})", t(n_("Completed with cheats")))),
+        marks::Reason::Rule(rule) => one(format!("{}: {}", t(n_("Completed with experimental rules")), t(rule))),
+        // An old mark: its one setting name, which may be a name an older Razdor saved (see the tests).
+        marks::Reason::Setting(setting) if mark.settings.is_empty() => one(format!("{}: {}", t(n_("Completed with settings not as in the original")), t(setting))),
+        marks::Reason::Setting(_) => {
+            let mut lines = vec![format!("{}:", t(n_("Completed with settings not as in the original")))];
+            lines.extend(mark.settings.iter().map(|(name, value)| format!("{} — {}", t(name), t(value))));
+            lines
+        }
+        marks::Reason::Unknown => one(t(n_("Completed; the game's history is unknown (an old save)")).to_string()),
     }
 }
 
-/// The tooltip of a run mark in the current language.
-fn mark_text(mark: &marks::RunMark) -> String {
-    mark_text_in(mark, tr)
+/// The tooltip lines of a run mark in the current language (one `info_later` line each).
+fn mark_lines(mark: &marks::RunMark) -> Vec<String> {
+    mark_lines_in(mark, tr)
 }
 
 /// A tick (the completed mark) in a box of side `s` at `(x, y)`.
@@ -1217,7 +1225,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
                 // Queued: drawn over the whole window once its frame is up (`draw_later`), not cut at the rows.
                 // Razdor's own information: it shows whatever the hints option says (`info_later`).
-                info_later(&[(mark_text(mark), INK)]);
+                info_later(&mark_lines(mark).into_iter().map(|line| (line, INK)).collect::<Vec<_>>());
             }
         } else if f.completed {
             tick(mark_r.x, mark_r.y, mark_r.w, TICK_GREEN);
@@ -1279,7 +1287,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
                 let margin = Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k);
                 let hit = tick_hit(margin, super::display::dp_px(), r, r.right());
                 if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
-                    info_later(&[(mark_text(mark), INK)]);
+                    info_later(&mark_lines(mark).into_iter().map(|line| (line, INK)).collect::<Vec<_>>());
                 }
             } else if won {
                 tick(tick_r.x, tick_r.y, tick_r.w, TICK_GREEN);
@@ -2513,9 +2521,9 @@ mod tests {
     #[test]
     fn a_mark_s_tooltip_says_what_it_is_and_what_set_it() {
         use marks::{Level, Reason, RunMark};
-        let mark = |level, reason| RunMark { level, reason };
-        let ru = |m: &RunMark| mark_text_in(m, |s| i18n::tr_in(Lang::Ru, s));
-        let en = |m: &RunMark| mark_text_in(m, |s| i18n::tr_in(Lang::En, s));
+        let mark = |level, reason| RunMark { level, reason, settings: Vec::new() };
+        let ru = |m: &RunMark| mark_lines_in(m, |s| i18n::tr_in(Lang::Ru, s)).join("\n");
+        let en = |m: &RunMark| mark_lines_in(m, |s| i18n::tr_in(Lang::En, s)).join("\n");
         let cheat = mark(Level::Red, Reason::Cheat("god".into()));
         assert_eq!(ru(&cheat), "Пройдено с читами (god)");
         assert_eq!(en(&cheat), "Completed with cheats (god)");
@@ -2526,6 +2534,29 @@ mod tests {
         let setting = mark(Level::Grey, Reason::Setting(razdor::i18n::n_("Unit battle participation").into()));
         assert_eq!(ru(&setting), "Пройдено с настройками не как в оригинале: Отключение бойцов");
         assert_eq!(en(&setting), "Completed with settings not as in the original: Unit battle participation");
+        // Backlog 1678: every setting the run used, with its value (the window's labels).
+        let two = RunMark {
+            level: Level::Grey,
+            reason: Reason::Setting(razdor::i18n::n_("Battle AI strength").into()),
+            settings: vec![
+                ("Battle AI strength".into(), "Maximum (Razdor)".into()),
+                ("Experience on promotion".into(), "Kept (Razdor)".into()),
+            ],
+        };
+        assert_eq!(ru(&two), "Пройдено с настройками не как в оригинале:\nСила ИИ в бою — Максимум (Раздор)\nОпыт при повышении — Сохраняется (Раздор)");
+        assert_eq!(en(&two), "Completed with settings not as in the original:\nBattle AI strength — Maximum (Razdor)\nExperience on promotion — Kept (Razdor)");
+        let lines = mark_lines_in(&two, |s| i18n::tr_in(Lang::Ru, s));
+        assert_eq!(lines.len(), 3, "a header line and one line per setting");
+        let boolean = RunMark {
+            level: Level::Grey,
+            reason: Reason::Setting(razdor::i18n::n_("Automatically pursue the chosen army").into()),
+            settings: vec![("Automatically pursue the chosen army".into(), razdor::i18n::n_("off (setting value)").into())],
+        };
+        assert_eq!(ru(&boolean), "Пройдено с настройками не как в оригинале:\nАвтоматически преследовать выбранную армию — выключено");
+        // Old marks: a save from before the list names its setting on one line, and the names an older
+        // Razdor saved still read in Russian (the catalog keeps them; this is the list of them).
+        let old = mark(Level::Grey, Reason::Setting(razdor::i18n::n_("Experience on promotion: kept").into()));
+        assert_eq!(ru(&old), "Пройдено с настройками не как в оригинале: Опыт при повышении: сохраняется", "the legacy name reads in Russian");
         assert_eq!(ru(&RunMark::start()), "Пройдено честно");
         assert_eq!(en(&RunMark::start()), "Completed honestly");
         assert_eq!(ru(&mark(Level::Red, Reason::Cheat(String::new()))), "Пройдено с читами", "an old save: no cheat named");

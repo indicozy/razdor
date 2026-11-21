@@ -49,19 +49,25 @@ pub enum Reason {
 pub struct RunMark {
     pub level: Level,
     pub reason: Reason,
+    /// Every gameplay setting that is not the original's, as the run used it (backlog 1678): the
+    /// setting's catalog name and its value's catalog key, one entry per setting, its most recent
+    /// non-original value. Empty in a save or a record from before it; the tooltip then names only
+    /// `reason`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<(String, String)>,
 }
 
 impl RunMark {
     /// A run at its start: nothing used yet.
     pub fn start() -> RunMark {
-        RunMark { level: Level::Green, reason: Reason::Honest }
+        RunMark { level: Level::Green, reason: Reason::Honest, settings: Vec::new() }
     }
 
     /// A save from before the mark: its history is unknown. The owner's decision (2026-11-13): it
     /// is green, as a fair run; only what the run uses after that, or what its save shows (a cheat,
     /// an experimental rule, a changed setting), lowers it.
     pub fn unknown_history() -> RunMark {
-        RunMark { level: Level::Green, reason: Reason::Unknown }
+        RunMark { level: Level::Green, reason: Reason::Unknown, settings: Vec::new() }
     }
 
     /// Raises the mark to `level` for `reason` when that is worse than it is now. Sticky: a
@@ -80,6 +86,21 @@ impl RunMark {
     /// earlier, or a battle's restart, must not clear what the run has used).
     pub fn absorb(&mut self, earlier: &RunMark) {
         self.worsen(earlier.level, earlier.reason.clone());
+        for (name, value) in &earlier.settings {
+            if !self.settings.iter().any(|(n, _)| n == name) {
+                self.settings.push((name.clone(), value.clone()));
+            }
+        }
+    }
+
+    /// Notes a gameplay setting that is not the original's, with its value now (`value`, a catalog
+    /// key): one entry per setting, the most recent value (`settings`). The run's own list wins over
+    /// an earlier one in [`RunMark::absorb`], since the run's values are read again every frame.
+    pub fn note_setting(&mut self, name: &str, value: &str) {
+        match self.settings.iter_mut().find(|(n, _)| n == name) {
+            Some(entry) => entry.1 = value.to_string(),
+            None => self.settings.push((name.to_string(), value.to_string())),
+        }
     }
 }
 
@@ -206,7 +227,16 @@ mod tests {
     use std::sync::Arc;
 
     fn mark(level: Level, reason: Reason) -> RunMark {
-        RunMark { level, reason }
+        RunMark { level, reason, settings: Vec::new() }
+    }
+
+    /// A grey mark of the run that noted «Unit battle participation» off (as the tests note it).
+    fn unit_battle_off(level: Level) -> RunMark {
+        RunMark {
+            level,
+            reason: Reason::Setting("Unit battle participation".into()),
+            settings: vec![("Unit battle participation".into(), "Off".into())],
+        }
     }
 
     #[test]
@@ -237,6 +267,51 @@ mod tests {
         let mut later = mark(Level::Yellow, Reason::Rule("Faster AI".into()));
         later.absorb(&RunMark::start());
         assert_eq!(later.level, Level::Yellow);
+    }
+
+    #[test]
+    fn absorbing_merges_the_settings_lists_and_keeps_the_run_s_own_values() {
+        let mut now = mark(Level::Grey, Reason::Setting("Battle AI strength".into()));
+        now.note_setting("Battle AI strength", "Maximum (Razdor)");
+        let mut earlier = mark(Level::Grey, Reason::Setting("Automatically pursue the chosen army".into()));
+        earlier.note_setting("Battle AI strength", "Improved");
+        earlier.note_setting("Automatically pursue the chosen army", "Off");
+        now.absorb(&earlier);
+        assert_eq!(
+            now.settings,
+            vec![
+                ("Battle AI strength".to_string(), "Maximum (Razdor)".to_string()),
+                ("Automatically pursue the chosen army".to_string(), "Off".to_string()),
+            ],
+            "one entry per setting: the run's value, plus the earlier setting it did not have"
+        );
+        assert_eq!(now.reason, Reason::Setting("Battle AI strength".into()), "the first cause stays");
+    }
+
+    #[test]
+    fn a_setting_is_listed_once_with_its_latest_value() {
+        let mut m = RunMark::start();
+        m.note_setting("Battle AI strength", "Improved");
+        m.note_setting("Experience on promotion", "Kept (Razdor)");
+        m.note_setting("Battle AI strength", "Maximum (Razdor)");
+        assert_eq!(
+            m.settings,
+            vec![
+                ("Battle AI strength".to_string(), "Maximum (Razdor)".to_string()),
+                ("Experience on promotion".to_string(), "Kept (Razdor)".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_mark_from_before_the_settings_list_loads_with_none() {
+        let old = r#"{"level":"grey","reason":{"Setting":"Unit battle participation"}}"#;
+        let m: RunMark = serde_json::from_str(old).expect("an old mark loads");
+        assert_eq!(m, mark(Level::Grey, Reason::Setting("Unit battle participation".into())));
+        assert!(m.settings.is_empty());
+        assert!(!serde_json::to_string(&RunMark::start()).unwrap().contains("settings"), "an empty list is not written");
+        let back: RunMark = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
+        assert_eq!(back, m);
     }
 
     #[test]
@@ -301,15 +376,15 @@ mod tests {
     fn a_game_s_mark_rises_with_what_it_uses_and_never_falls() {
         let mut g = game(ExperimentalRules::default());
         assert_eq!(g.run_mark(), RunMark::start(), "a run starts green");
-        g.note_settings(None);
+        g.note_settings(&[]);
         assert_eq!(g.run_mark().level, Level::Green, "the original's settings: still green");
-        g.note_settings(Some("Unit battle participation"));
-        assert_eq!(g.run_mark(), mark(Level::Grey, Reason::Setting("Unit battle participation".into())));
-        g.note_settings(None);
+        g.note_settings(&[("Unit battle participation", "Off")]);
+        assert_eq!(g.run_mark(), unit_battle_off(Level::Grey));
+        g.note_settings(&[]);
         assert_eq!(g.run_mark().level, Level::Grey, "a setting changed back does not clean the run");
         g.note_cheat("god");
-        assert_eq!(g.run_mark(), mark(Level::Red, Reason::Cheat("god".into())));
-        g.note_settings(Some("Keep formation after battle"));
+        assert_eq!(g.run_mark(), RunMark { settings: unit_battle_off(Level::Grey).settings, ..mark(Level::Red, Reason::Cheat("god".into())) });
+        g.note_settings(&[("Keep formation after battle", "Off")]);
         assert_eq!(g.run_mark().level, Level::Red, "red stays red");
     }
 
@@ -317,13 +392,13 @@ mod tests {
     fn the_experimental_rules_of_the_playthrough_make_it_yellow() {
         let g = {
             let mut g = game(ExperimentalRules { six_cells: true, ..Default::default() });
-            g.note_settings(None);
+            g.note_settings(&[]);
             g
         };
         assert_eq!(g.run_mark(), mark(Level::Yellow, Reason::Rule("Six equipment cells".into())));
         let mut g2 = game(ExperimentalRules { free_units: true, two_potions: true, ..Default::default() });
-        g2.note_settings(Some("Unit battle participation"));
-        assert_eq!(g2.run_mark(), mark(Level::Yellow, Reason::Rule("At most two potions per character".into())), "the first rule on in the panel's order names it; yellow beats grey");
+        g2.note_settings(&[("Unit battle participation", "Off")]);
+        assert_eq!(g2.run_mark(), RunMark { settings: unit_battle_off(Level::Grey).settings, ..mark(Level::Yellow, Reason::Rule("At most two potions per character".into())) }, "the first rule on in the panel's order names it; yellow beats grey");
     }
 
     #[test]
@@ -334,21 +409,21 @@ mod tests {
         let mut loaded: Game = serde_json::from_value(old.clone()).unwrap();
         assert!(loaded.run_mark.is_none());
         assert_eq!(loaded.run_mark(), RunMark::unknown_history());
-        loaded.note_settings(None);
+        loaded.note_settings(&[]);
         assert_eq!(loaded.run_mark().level, Level::Green, "unknown history alone is green");
         let mut changed: Game = serde_json::from_value(old.clone()).unwrap();
-        changed.note_settings(Some("Unit battle participation"));
-        assert_eq!(changed.run_mark(), mark(Level::Grey, Reason::Setting("Unit battle participation".into())), "a changed setting still makes it grey");
+        changed.note_settings(&[("Unit battle participation", "Off")]);
+        assert_eq!(changed.run_mark(), unit_battle_off(Level::Grey), "a changed setting still makes it grey");
         // A save that records a cheat or a rule keeps that, as its history is known.
         let mut cheated = old.clone();
         cheated["cheats"]["used"] = serde_json::json!(true);
         let mut cheated: Game = serde_json::from_value(cheated).unwrap();
-        cheated.note_settings(None);
+        cheated.note_settings(&[]);
         assert_eq!(cheated.run_mark(), mark(Level::Red, Reason::Cheat(String::new())));
         let mut ruled = old.clone();
         ruled["experimental"]["six_cells"] = serde_json::json!(true);
         let mut ruled: Game = serde_json::from_value(ruled).unwrap();
-        ruled.note_settings(None);
+        ruled.note_settings(&[]);
         assert_eq!(ruled.run_mark(), mark(Level::Yellow, Reason::Rule("Six equipment cells".into())));
     }
 
@@ -360,13 +435,13 @@ mod tests {
         let mut old = serde_json::to_value(&plain).unwrap();
         old.as_object_mut().unwrap().remove("run_mark");
         let mut clean: Game = serde_json::from_value(old.clone()).unwrap();
-        clean.note_settings(None);
+        clean.note_settings(&[]);
         assert_eq!(clean.run_mark(), RunMark::unknown_history());
         assert_eq!(clean.run_mark().level, Level::Green);
         let mut cheated = old;
         cheated["cheats"]["used"] = serde_json::json!(true);
         let mut cheated: Game = serde_json::from_value(cheated).unwrap();
-        cheated.note_settings(None);
+        cheated.note_settings(&[]);
         assert_eq!(cheated.run_mark().level, Level::Red);
     }
 
@@ -383,12 +458,12 @@ mod tests {
         }
         let mut loaded: Game = serde_json::from_value(old.clone()).unwrap();
         assert!(loaded.experimental.bless_once, "the old rule still plays");
-        loaded.note_settings(None);
+        loaded.note_settings(&[]);
         assert_eq!(loaded.run_mark(), RunMark::unknown_history(), "an inherited switch is not the player's choice");
         let mut chosen = old;
         chosen["experimental"]["bless_once"] = serde_json::json!(true);
         let mut chosen: Game = serde_json::from_value(chosen).unwrap();
-        chosen.note_settings(None);
+        chosen.note_settings(&[]);
         assert_eq!(chosen.run_mark(), mark(Level::Yellow, Reason::Rule("Bless once a turn".into())));
     }
 

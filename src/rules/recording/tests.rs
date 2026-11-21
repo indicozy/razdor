@@ -1596,7 +1596,7 @@ fn the_state_hash_leaves_out_the_screens_fields_and_a_snapshot_keeps_them() {
     let install = crate::rules::save::Install { dir: &dt.dir, content: c.clone() };
     let mut g = start(&c, &map, Some(5));
     let before = state_hash(&g);
-    g.run_mark = Some(RunMark { level: Level::Red, reason: Reason::Cheat("god".into()) });
+    g.run_mark = Some(RunMark { level: Level::Red, reason: Reason::Cheat("god".into()), settings: Vec::new() });
     g.music_wait = Some(12_345);
     g.world.armies.first_mut().expect("the map has an army").mind.idle_offset = 777;
     assert_eq!(state_hash(&g), before, "the screen's fields are not in the hash");
