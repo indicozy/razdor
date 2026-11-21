@@ -1443,8 +1443,9 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     // The filter's button is as wide as its longest label at the row's own text size (never smaller
     // text than «Добавить карту…» beside it), with 140 as the least.
     let lang_w = LangFilter::ALL.iter().map(|l| chrome::marble_label_width(extras_h * win.k, l.label()) / win.k + 14.0).fold(140.0, f32::max);
-    let rest_x = 12.0 + lang_w + 6.0;
-    let rest_w = 570.0 - lang_w - 6.0;
+    // The gap to the filter is 8 px (about 4 dp on a phone, the least that is not crowded).
+    let rest_x = 12.0 + lang_w + 8.0;
+    let rest_w = 570.0 - lang_w - 8.0;
     let both = map_import::available() && !mods.is_empty();
     let (x_add, w_add) = if both { (rest_x, (rest_w - 6.0) / 2.0) } else { (rest_x, rest_w) };
     let (x_mod, w_mod) = if both { (rest_x + w_add + 6.0, w_add) } else { (rest_x, rest_w) };
