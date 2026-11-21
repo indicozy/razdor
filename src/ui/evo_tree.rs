@@ -789,6 +789,9 @@ const TAG_SP: f32 = 12.0;
 /// (the smallest a label may be). The desktop keeps its own sizes.
 const PHONE_TOP_DP: f32 = 40.0;
 const PHONE_TOP_SP: f32 = 12.0;
+/// The phone's top button («Всё дерево», «К ветке») is 27 dp tall, not the 40 dp touch target: the owner's
+/// decision (2026-11-21), who ordered its height cut by 30% with its label and width kept. «[ ]» is 40 dp.
+const PHONE_TOP_H_DP: f32 = 27.0;
 
 /// Whether a press is a drag, so its release selects nothing: it was one, or the pointer has left its
 /// place by more than `slop` px, or the content slid under a touch this frame (`slid`: the touch
@@ -1506,7 +1509,7 @@ pub fn overlay(game: &Game, assets: &Assets, win: Rect) {
     draw_rectangle(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, Color::new(0.0, 0.05, 0.02, 0.22));
     draw_rectangle_lines(tree.x - 2.0, tree.y - 2.0, tree.w + 4.0, tree.h + 4.0, 1.5 * k, Color::new(0.02, 0.06, 0.03, 0.9));
     // The top strip holds the state switch («Всё дерево» in the line, «К ветке» in the web).
-    let bh = if phone { PHONE_TOP_DP * u } else { 28.0 * k };
+    let bh = if phone { PHONE_TOP_H_DP * u } else { 28.0 * k };
     let strip = Rect::new(tree.x, tree.y, tree.w, (bh + 4.0 * u).min(tree.h));
     let a = Rect::new(tree.x, tree.y + strip.h, tree.w, (tree.h - strip.h).max(1.0));
     let mode = MODE.with(|m| m.get());
