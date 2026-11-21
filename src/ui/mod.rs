@@ -178,9 +178,15 @@ pub enum Screen {
     Hub(Box<hub_view::HubView>),
 }
 
-fn load_entry(m: &razdor::dt::install::MapEntry) -> Option<ScenarioEntry> {
+/// A map's list entry. `catalog_lang`: the hub's language tag of the file, if its catalog gives one
+/// (`hub::cached_file_langs`). The language is read here, once per entry (`dt::map_lang`).
+fn load_entry(m: &razdor::dt::install::MapEntry, catalog_lang: Option<&str>) -> Option<ScenarioEntry> {
     match m.load() {
-        Ok(scenario) => Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false }),
+        Ok(scenario) => {
+            let file_name = m.path.file_name().and_then(|f| f.to_str()).unwrap_or(&m.name);
+            let lang = razdor::dt::map_lang::language_of(catalog_lang, razdor::dt::map_lang::of_scenario(&scenario), file_name);
+            Some(ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario, base_game: false, lang })
+        }
         Err(e) => {
             razdor::diag!("{}: {e}", m.name);
             None
@@ -196,6 +202,7 @@ fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<Scenario
     let gate = razdor::hub::MapGate::read(&dir);
     let install_maps: Vec<PathBuf> = install.iter().flat_map(|d| d.maps.iter()).map(|m| m.path.clone()).collect();
     let install = razdor::hub::InstallMaps::new(&install_maps);
+    let langs = razdor::hub::cached_file_langs(&dir);
     // A map whose file is missing, changed or unreadable is not listed until it is fetched again
     // (`hub::Hub::repair_maps`, started at launch and after each change): it is never played damaged.
     let damaged = razdor::hub::damaged_map_files(&dir);
@@ -206,7 +213,8 @@ fn hub_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<Scenario
                 return None;
             }
             let group = gate.group(&m.name, install.has_same(&m.path));
-            (group != razdor::hub::MapGroup::Hidden).then(|| load_entry(m).map(|e| ScenarioEntry { base_game: group == razdor::hub::MapGroup::Base, ..e })).flatten()
+            let catalog_lang = m.path.file_name().and_then(|f| f.to_str()).and_then(|f| langs.get(&f.to_ascii_lowercase()));
+            (group != razdor::hub::MapGroup::Hidden).then(|| load_entry(m, catalog_lang.map(String::as_str)).map(|e| ScenarioEntry { base_game: group == razdor::hub::MapGroup::Base, ..e })).flatten()
         })
         .collect()
 }
@@ -330,6 +338,8 @@ pub struct ScenarioEntry {
     /// A hub map made for the base game, listed while a mod is played (1445b): under the new-game
     /// list's «Карты обычной игры» group. False for every other map.
     pub base_game: bool,
+    /// The map's language (`dt::map_lang`): the new-game list's language filter.
+    pub lang: razdor::dt::map_lang::MapLang,
 }
 
 /// The map music's rotation as the original runs it (interface.md §13): the last pick, when
@@ -455,7 +465,7 @@ fn install_entries(install: Option<&razdor::dt::install::DtInstall>) -> Vec<Scen
         .filter_map(|m| {
             let origin = base.as_ref().map_or(razdor::hub::MapOrigin::Mod, |b| b.origin(&m.path));
             let base_game = gate.as_ref().is_some_and(|g| g.install_group(origin) == razdor::hub::MapGroup::Base);
-            load_entry(m).map(|e| ScenarioEntry { base_game, ..e })
+            load_entry(m, None).map(|e| ScenarioEntry { base_game, ..e })
         })
         .collect()
 }

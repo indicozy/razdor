@@ -49,6 +49,9 @@ pub struct Settings {
     /// The scenario list's filter and order (`ui::new_game`; 0, 0: all, as the original).
     pub scenario_show: i64,
     pub scenario_order: i64,
+    /// The scenario list's map-language filter (`ui::new_game`, 1675): 0 all, 1 Russian, 2 English.
+    /// None (never chosen, or a file without it): the interface's language.
+    pub scenario_lang: Option<i64>,
     /// The experimental scenario rules last set in the rules window (`ui::new_game`), kept between
     /// games (Razdor's, a players' wish); all off on a file without them, and a key a file lacks
     /// is off too (see [`remembered_rules`]).
@@ -118,6 +121,7 @@ impl Settings {
         json["favourite_scenarios"] = serde_json::json!(self.favourite_scenarios);
         json["scenario_show"] = serde_json::json!(self.scenario_show);
         json["scenario_order"] = serde_json::json!(self.scenario_order);
+        json["scenario_lang"] = serde_json::json!(self.scenario_lang);
         // Written, or the rules window's choice is lost at the next new game (a player's report).
         json["experimental_rules"] = serde_json::json!(self.experimental_rules);
         json

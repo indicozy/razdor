@@ -25,6 +25,8 @@ rules/content.rs Content::from_dt(...)                  units, items, spells, gl
 ui/new_game.rs   scenario list (groups, scenario_groups, listed_chapters) → hero window
                  arrange()           Razdor's filter and order under the list (Show, Order;
                                      all / as the original by default), facts_of() per row;
+                                     the map-language filter (LangFilter, 1675) keeps the rows
+                                     of its language, unknown ones under every choice;
                                      favourites and maps won kept in settings.json
                                      (ui/language.rs Settings), ORIGINAL_MAPS for "the game's own"
                  fill_name_field()   the field opens holding [NewHero] PrivateHeroName as text
@@ -125,6 +127,15 @@ named by the scenario or chosen by an opcode-15 branch (`EventEngine::campaign_b
 carries over is set by the next map's header bytes (`EventEngine::carry_over`): gold and mana, level
 and XP (else level 1 and the map's book), worn items, the pack, the army (paid as of now, its dead
 dropped); flags always carry over. Named characters travel with the army (`set_named_units`).
+
+**Map language** (1675; `dt/map_lang.rs`). Each map's `ScenarioEntry.lang` is read once, in `ui/mod.rs`
+`load_entry`, from three sources in order: the hub catalog's `lang` tag of the file
+(`hub::cached_file_langs`), else the text (the title, campaign name, description, and each event's title,
+question and message: Cyrillic against Latin letters, 70% of the letters decide, fewer than 20 letters are
+unknown), else the file name (`_EN`, `ENG_`, `Eng_`, `_RU`: a tiebreak only for a text too short to tell).
+A campaign's language is its first map's known one. The new-game list's «Все языки» / «Русский» / «English»
+(the extras row's left, or the phone's second row) keeps the rows of its language and the unknown ones; the
+choice is `settings.json` `scenario_lang` (absent: the interface's language, `LangFilter::effective`).
 
 **Run marks** (1532; `rules/marks.rs`, the flow in `saves.md`). Each map's victory writes the run's mark
 into the player's `marks.json` (`ui/mod.rs`, where the list's tick is set; not in the editor's test play).

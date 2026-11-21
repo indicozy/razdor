@@ -15,7 +15,7 @@
 //! (army screen, market); `RAZDOR_SCENE_QUIET=1` drops
 //! the scenario's messages every frame, to see the screen under them; `RAZDOR_MOUSE=x,y`
 //! puts the pointer there (`RAZDOR_MOUSE_RIGHT=1` also holds the right button there: the map's tooltips); `RAZDOR_SCENE_SPELLS=<id>,…` puts those spells on every unit; `RAZDOR_SCENE_TARGET=<id>` starts the targeting of that enemy spell on the map; `RAZDOR_SCENE_MANA=<n>` sets the hero's mana in the `spells` scene; `RAZDOR_SCENE_PREVIEW=1` shows the first spell's card at the pointer in the `learnt` scene; `RAZDOR_SCENE_POTION=1` gives every unit of the army a
-//! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`options:<group>`, `settings:<map>:<group>`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
+//! drunk potion. `RAZDOR_SCENE_LANGUAGE=1` opens the language list (`options:<group>`, `settings:<map>:<group>`). `RAZDOR_SCENE_LANG_LIST=1` opens the new-game list's map-language drop-down (`scenarios`). `replay:<step>` with `RAZDOR_REPLAY=<actions.jsonl>`: the diff
 //! `RAZDOR_SCENE_EXPERIMENTAL=bonuses,items,potions,cells,free,auto,undying,fast,bless,poison,spells,merchant,rear,store,counter,corpse` enables selected playthrough rules;
 //! `RAZDOR_SCENE_RULES=1` opens their menu over `scenarios`. `RAZDOR_SCENE_CARD=1` opens the picked map's card
 //! in the `scenarios:<map>` scene on a phone held upright (its list view otherwise). `RAZDOR_SCENE_BONUS_ITEMS=1`
@@ -166,6 +166,8 @@ local! {
     static LANGUAGE_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `RAZDOR_SCENE_MOD_LIST` has opened the «Мод» list of the new-game window.
     static MOD_LIST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The same for the language filter (1675).
+    static LANG_LIST_OPENED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `RAZDOR_SCENE_BASE_MAPS` has scrolled the new-game list to the base game's group.
     static BASE_MAPS_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -177,6 +179,15 @@ pub fn open_mod_list() -> bool {
         return false;
     }
     MOD_LIST_OPENED.with(|o| o.set(true));
+    true
+}
+
+/// `RAZDOR_SCENE_LANG_LIST=1`: the new-game window's map-language drop-down opens, once (1675).
+pub fn open_lang_list() -> bool {
+    if LANG_LIST_OPENED.with(|o| o.get()) || !std::env::var("RAZDOR_SCENE_LANG_LIST").is_ok_and(|v| v == "1") {
+        return false;
+    }
+    LANG_LIST_OPENED.with(|o| o.set(true));
     true
 }
 

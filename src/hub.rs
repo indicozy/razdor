@@ -1001,6 +1001,20 @@ pub fn read_index(get: &mut dyn FnMut(&str) -> Result<Vec<u8>, String>) -> Resul
     }
 }
 
+/// The hub's language tag of each installed file, by its lower-cased file name, from the cached
+/// catalog (`FileRef.lang`, the hub's own; a file the hub tags with no language is not in it).
+/// Empty without a cache.
+pub fn cached_file_langs(local: &Path) -> BTreeMap<String, String> {
+    let hub = Hub { source: Source::from_env(), local: local.to_path_buf() };
+    let Some(catalog) = hub.cached_catalog() else { return BTreeMap::new() };
+    catalog
+        .entries
+        .iter()
+        .flat_map(|e| e.files.iter())
+        .filter_map(|f| f.lang.as_ref().map(|l| (f.name.to_ascii_lowercase(), l.clone())))
+        .collect()
+}
+
 /// The local hub folder: `RAZDOR_HUB_DIR`, else `hub` in the app's folder ([`crate::platform::app_dir`]:
 /// the data folder on the desktop, the storage Razdor keeps across an uninstall on Android,
 /// `Documents/Razdor` on iOS).

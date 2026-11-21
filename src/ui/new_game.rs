@@ -15,6 +15,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{self, n_, tr, Lang};
 use razdor::rules::content::{Content, ExperimentalRules, HeroClass};
 use razdor::rules::game::Game;
+use razdor::dt::map_lang::MapLang;
 use razdor::rules::marks;
 
 
@@ -210,6 +211,8 @@ struct Portrait {
     filter: Rect,
     order: Rect,
     add: Rect,
+    /// The map-language filter's row under the top row (1675), full width.
+    lang: Rect,
     mod_row: Option<Rect>,
     /// The list, under the top rows down to the bottom row.
     rows: Rect,
@@ -238,6 +241,8 @@ impl Portrait {
         let bw = (w - 2.0 * gap) / 3.0;
         let (filter, order, add) = (Rect::new(x0, top, bw, btn_h), Rect::new(x0 + bw + gap, top, bw, btn_h), Rect::new(x0 + 2.0 * (bw + gap), top, bw, btn_h));
         let mut y = top + btn_h + m;
+        let lang = Rect::new(x0, y, w, btn_h);
+        y += btn_h + m;
         let mod_row = mods.then(|| {
             let rr = Rect::new(x0, y, w, btn_h);
             y += btn_h + m;
@@ -257,6 +262,7 @@ impl Portrait {
             filter,
             order,
             add,
+            lang,
             mod_row,
             rows,
             dots,
@@ -528,6 +534,52 @@ impl Order {
     }
 }
 
+/// The map-language filter («Все языки», «Русский», «English», 1675). A map of unknown language
+/// is shown under every choice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LangFilter {
+    All,
+    Russian,
+    English,
+}
+
+impl LangFilter {
+    const ALL: [LangFilter; 3] = [LangFilter::All, LangFilter::Russian, LangFilter::English];
+
+    /// The choice the settings hold: None (never chosen) is the interface's language.
+    fn of(v: Option<i64>) -> Option<LangFilter> {
+        v.and_then(|v| usize::try_from(v).ok()).and_then(|i| LangFilter::ALL.get(i)).copied()
+    }
+
+    /// The choice in effect: the saved one, else the interface's language (Russian or English).
+    fn effective(saved: Option<i64>) -> LangFilter {
+        LangFilter::of(saved).unwrap_or(match i18n::lang() {
+            i18n::Lang::Ru => LangFilter::Russian,
+            i18n::Lang::En => LangFilter::English,
+        })
+    }
+
+    fn index(self) -> i64 {
+        LangFilter::ALL.iter().position(|&l| l == self).unwrap_or(0) as i64
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            LangFilter::All => tr("All map languages"),
+            LangFilter::Russian => tr("Maps in Russian"),
+            LangFilter::English => tr("Maps in English"),
+        }
+    }
+
+    fn keeps(self, lang: MapLang) -> bool {
+        match (self, lang) {
+            (_, MapLang::Unknown) | (LangFilter::All, _) => true,
+            (LangFilter::Russian, l) => l == MapLang::Ru,
+            (LangFilter::English, l) => l == MapLang::En,
+        }
+    }
+}
+
 /// What the filter and the order read of a row.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Facts {
@@ -535,19 +587,21 @@ struct Facts {
     original: bool,
     completed: bool,
     favourite: bool,
+    /// The row's language: a campaign's first map of a known one (1675).
+    lang: MapLang,
     width: u32,
     name: String,
     /// The row's mark: the map's record, or a campaign's worst once every map is won.
     mark: Option<marks::RunMark>,
 }
 
-/// The rows `list` (in the original's order) as `show` and `order` want them, with each
+/// The rows `list` (in the original's order) as `show`, `lang` and `order` want them, with each
 /// row's facts from `facts`.
-fn arrange(list: Vec<Group>, facts: impl Fn(&Group) -> Facts, show: Show, order: Order) -> Vec<Group> {
+fn arrange(list: Vec<Group>, facts: impl Fn(&Group) -> Facts, show: Show, lang: LangFilter, order: Order) -> Vec<Group> {
     let mut rows: Vec<(Group, Facts)> = list.into_iter().map(|g| {
         let f = facts(&g);
         (g, f)
-    }).filter(|(_, f)| show.keeps(f)).collect();
+    }).filter(|(_, f)| show.keeps(f) && lang.keeps(f.lang)).collect();
     match order {
         Order::Original => {}
         Order::SmallFirst => rows.sort_by_key(|(_, f)| (f.campaign, if f.campaign { 0 } else { f.width })),
@@ -565,6 +619,8 @@ struct Marks {
     favourites: Vec<String>,
     show: i64,
     order: i64,
+    /// The map-language filter (`LangFilter`; None: the interface's language).
+    lang: Option<i64>,
     /// The best run mark of each map won (`rules::marks`, Razdor's, 1532): the checkmarks.
     records: marks::Records,
 }
@@ -578,7 +634,7 @@ fn marks() -> Marks {
         m.borrow_mut()
             .get_or_insert_with(|| {
                 let s = super::language::Settings::load();
-                Marks { completed: s.completed_by_mod, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order, records: marks::Records::load() }
+                Marks { completed: s.completed_by_mod, favourites: s.favourite_scenarios, show: s.scenario_show, order: s.scenario_order, lang: s.scenario_lang, records: marks::Records::load() }
             })
             .clone()
     })
@@ -587,7 +643,7 @@ fn marks() -> Marks {
 /// Keeps `m` and writes it into the settings.
 fn keep_marks(m: Marks) {
     let s = super::language::Settings::load();
-    super::language::Settings { favourite_scenarios: m.favourites.clone(), scenario_show: m.show, scenario_order: m.order, ..s }.save();
+    super::language::Settings { favourite_scenarios: m.favourites.clone(), scenario_show: m.show, scenario_order: m.order, scenario_lang: m.lang, ..s }.save();
     MARKS.with(|c| *c.borrow_mut() = Some(m));
 }
 
@@ -664,6 +720,15 @@ fn listed(names: &[String], file: &str) -> bool {
     names.iter().any(|n| n.to_lowercase() == file.to_lowercase())
 }
 
+/// A row's language: its first map's, else the first known one of its chapters (1675).
+fn group_lang(scenarios: &[ScenarioEntry], g: &Group) -> MapLang {
+    std::iter::once(g.first)
+        .chain(g.chapters.iter().copied())
+        .map(|i| scenarios[i].lang)
+        .find(|l| *l != MapLang::Unknown)
+        .unwrap_or(MapLang::Unknown)
+}
+
 /// A row's facts: a campaign counts as completed once its last map is won.
 fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&str>) -> Facts {
     let e = &scenarios[g.first];
@@ -676,6 +741,7 @@ fn facts_of(scenarios: &[ScenarioEntry], g: &Group, m: &Marks, active: Option<&s
         original: is_original_map(&e.file),
         completed: listed(language::won_under(&m.completed, active), &scenarios[last].file),
         favourite: listed(&m.favourites, &e.file),
+        lang: group_lang(scenarios, g),
         width: e.scenario.width(),
         name: group_name(scenarios, g).to_string(),
         mark: mark.map(|r| r.mark.clone()),
@@ -1005,18 +1071,20 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     let grow = super::display::button_grow();
     // Razdor's «Добавить карту…» and «Мод» take the extras row under the buttons (Razdor's own, the
     // owner's request of 2026-10-31): the window takes that row only where one of them is shown.
-    let extras = map_import::available() || !mods.is_empty();
+    // Always on (1675): the map-language filter sits in this row, at its left.
+    let extras = true;
     let _scale = super::window_layout::title_scale((594.0, window_video_h(grow, extras, true)));
     let (win, closed) = Win::open(&own("NewGame", "Title", n_("Scenario for a new game")), extras, true);
     let k = win.k;
     let pl = upright_dp().map(|dp| Portrait::new(&win, dp, grow, !mods.is_empty()));
     let mut m = marks();
     let (show, order) = (Show::of(m.show), Order::of(m.order));
+    let lang = LangFilter::effective(m.lang);
     // The maps made for the base game under a played mod (1445b) are a group of their own, after
     // the rest, shut unless its header row is opened (`BASE_OPEN`); the snapshot scene opens it once.
     let (main, base): (Vec<Group>, Vec<Group>) = scenario_groups(scenarios).into_iter().partition(|g| !is_base_group(scenarios, g));
-    let main = arrange(main, |g| facts_of(scenarios, g, &m, active), show, order);
-    let base = arrange(base, |g| facts_of(scenarios, g, &m, active), show, order);
+    let main = arrange(main, |g| facts_of(scenarios, g, &m, active), show, lang, order);
+    let base = arrange(base, |g| facts_of(scenarios, g, &m, active), show, lang, order);
     let base_count = base.len();
     let main_len = main.len();
     if base_count > 0 {
@@ -1359,16 +1427,29 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     }
     // The extras row under the buttons (Razdor's own, the owner's request of 2026-10-31): «Добавить
     // карту…» and «Мод» side by side, each half of the window's width; alone, the whole width.
+    // The map-language filter takes the row's left (1675); the other two share what is left of it.
+    let lang_w = 140.0;
+    let rest_x = 12.0 + lang_w + 6.0;
+    let rest_w = 570.0 - lang_w - 6.0;
     let both = map_import::available() && !mods.is_empty();
-    let (x_mod, w_mod) = if both { (306.0, 276.0) } else { (12.0, 570.0) };
+    let (x_add, w_add) = if both { (rest_x, (rest_w - 6.0) / 2.0) } else { (rest_x, rest_w) };
+    let (x_mod, w_mod) = if both { (rest_x + w_add + 6.0, w_add) } else { (rest_x, rest_w) };
     let extras_y = extra_top(win.foot_y, grow);
     let extras_h = EXTRA_ROW_H * grow;
     let add_r = match &pl {
         Some(p) => p.add,
-        None if both => win.rect(12.0, extras_y, 276.0, extras_h),
-        None => win.rect(12.0, extras_y, 570.0, extras_h),
+        None => win.rect(x_add, extras_y, w_add, extras_h),
     };
     add_map_button(has_install && !busy, add_r);
+    let lang_r = match &pl {
+        Some(p) => p.lang,
+        None => win.rect(12.0, extras_y, lang_w, extras_h),
+    };
+    let pick_lang = view_choice_at(&win, lang_r, "razdor:scenario-lang", lang.index(), &LangFilter::ALL.map(|l| l.label()));
+    if super::snapshot::open_lang_list() {
+        let options: Vec<(i64, String)> = LangFilter::ALL.iter().enumerate().map(|(i, l)| (i as i64, l.label().to_string())).collect();
+        super::widgets::open_list("razdor:scenario-lang", lang_r, lang.index(), &options, win.k);
+    }
     // Razdor's filter and order (a players' wish), under the list where the original's window
     // has nothing: each opens a drop-down list; the choice is kept in the settings.
     // The footer (Razdor's own, see `foot_block`): at Normal the original's row, unchanged; at
@@ -1382,9 +1463,10 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     };
     let pick_show = view_choice_at(&win, show_r, "razdor:scenario-show", show as i64, &Show::ALL.map(|s| s.label()));
     let pick_order = view_choice_at(&win, order_r, "razdor:scenario-order", order as i64, &Order::ALL.map(|o| o.label()));
-    if pick_show.is_some() || pick_order.is_some() {
+    if pick_show.is_some() || pick_order.is_some() || pick_lang.is_some() {
         m.show = pick_show.unwrap_or(m.show);
         m.order = pick_order.unwrap_or(m.order);
+        m.lang = pick_lang.or(m.lang);
         keep_marks(m);
         PICKED.with(|p| p.set(0));
         PICKED_MAP.with(|p| p.set(None));
@@ -2516,7 +2598,7 @@ mod tests {
             _ => Facts { original: true, width: 100, name: "Другой берег".into(), ..Facts::default() },
         };
         let list = || vec![g(0, false), g(1, true), g(2, false), g(3, false)];
-        let firsts = |show: Show, order: Order| arrange(list(), facts, show, order).iter().map(|g| g.first).collect::<Vec<_>>();
+        let firsts = |show: Show, order: Order| arrange(list(), facts, show, LangFilter::All, order).iter().map(|g| g.first).collect::<Vec<_>>();
         assert_eq!(firsts(Show::All, Order::Original), [0, 1, 2, 3], "the original's list as it is");
         assert_eq!(firsts(Show::Campaigns, Order::Original), [1]);
         assert_eq!(firsts(Show::Singles, Order::Original), [0, 2, 3]);
@@ -2583,7 +2665,7 @@ mod tests {
         let Some(dir) = std::env::var_os(razdor::dt::install::ENV_VAR) else { return };
         let dt = razdor::dt::install::DtInstall::load(std::path::Path::new(&dir)).unwrap();
         let sc: Vec<ScenarioEntry> =
-            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false }).collect();
+            dt.maps.iter().filter(|m| !razdor::translate::job::is_translated_file(&m.name)).map(|m| ScenarioEntry { file: m.name.clone(), path: m.path.clone(), scenario: m.load().unwrap(), base_game: false, lang: MapLang::Unknown }).collect();
         let maps: Vec<(&str, u8, &str)> = sc.iter().map(|e| (e.file.as_str(), e.scenario.header.scenario_kind, e.scenario.next_map.as_str())).collect();
         let list = groups(&maps);
         let rk: Vec<&Group> = list.iter().filter(|g| g.chapters.iter().any(|&c| sc[c].file.starts_with("РК6"))).collect();
@@ -2592,5 +2674,31 @@ mod tests {
         let files: Vec<String> = rk[0].chapters.iter().map(|&c| sc[c].file.chars().take(3).collect()).collect();
         assert_eq!(files, ["РК1", "РК2", "РК3", "РК4", "РК5", "РК6", "РК7"]);
         assert!(list.iter().all(|g| sc[g.first].scenario.header.scenario_kind != 2), "no later campaign map is an item");
+    }
+
+    /// The saved choice is an index into `LangFilter::ALL`; never chosen (None) is the interface's
+    /// language, which `effective` reads, and a bad index is no choice.
+    #[test]
+    fn the_saved_language_choice_reads_as_an_index() {
+        assert_eq!(LangFilter::of(None), None, "never chosen: the interface's language");
+        assert_eq!(LangFilter::of(Some(0)), Some(LangFilter::All));
+        assert_eq!(LangFilter::of(Some(1)), Some(LangFilter::Russian));
+        assert_eq!(LangFilter::of(Some(2)), Some(LangFilter::English));
+        assert_eq!(LangFilter::of(Some(7)), None, "a bad index is no choice");
+        assert_eq!(LangFilter::of(Some(-1)), None);
+        for (i, l) in LangFilter::ALL.iter().enumerate() {
+            assert_eq!(l.index(), i as i64, "{l:?} is saved at its place");
+        }
+    }
+
+    /// Unknown-language maps are shown under every choice; a known one only under its own.
+    #[test]
+    fn the_language_choice_keeps_its_maps_and_the_unknown_ones() {
+        assert!(LangFilter::All.keeps(MapLang::Ru) && LangFilter::All.keeps(MapLang::En) && LangFilter::All.keeps(MapLang::Unknown));
+        assert!(LangFilter::Russian.keeps(MapLang::Ru) && !LangFilter::Russian.keeps(MapLang::En));
+        assert!(LangFilter::English.keeps(MapLang::En) && !LangFilter::English.keeps(MapLang::Ru));
+        for f in [LangFilter::Russian, LangFilter::English] {
+            assert!(f.keeps(MapLang::Unknown), "{f:?} keeps an unknown map");
+        }
     }
 }
