@@ -840,38 +840,28 @@ fn overlaps(a: &Rect, b: &Rect) -> bool {
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
-/// One zoom button (0 +, 1 −, 2 fit): a normal button with a drawn glyph. True when pressed.
-fn zoom_button(r: Rect, kind: usize) -> bool {
+/// The «[ ]» button of the web: fit the whole tree (the start view). The «+» and «−» buttons are gone
+/// (the owner's decision, 2026-11-21: pinch and wheel zoom stay). True when pressed.
+fn fit_button(r: Rect) -> bool {
     let k = chrome::k();
     let pressed = widgets::button_sized(r.x, r.y, r.w, r.h, "", true, r.h * 0.5);
     let col = Color::new(0.95, 0.9, 0.75, 1.0);
     let cx = r.x + r.w / 2.0;
     let cy = r.y + r.h / 2.0;
     let m = r.w * 0.26;
-    match kind {
-        0 => {
-            draw_line(cx, cy - m, cx, cy + m, 2.0 * k, col);
-            draw_line(cx - m, cy, cx + m, cy, 2.0 * k, col);
-        }
-        1 => draw_line(cx - m, cy, cx + m, cy, 2.0 * k, col),
-        _ => {
-            let arm = m * 0.6;
-            for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-                let (x, y) = (cx + sx * m, cy + sy * m);
-                draw_line(x, y, x - sx * arm, y, 2.0 * k, col);
-                draw_line(x, y, x, y - sy * arm, 2.0 * k, col);
-            }
-        }
+    let arm = m * 0.6;
+    for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let (x, y) = (cx + sx * m, cy + sy * m);
+        draw_line(x, y, x - sx * arm, y, 2.0 * k, col);
+        draw_line(x, y, x, y - sy * arm, 2.0 * k, col);
     }
     pressed
 }
 
-/// The zoom buttons (+, −, fit) in the canvas's bottom-right corner, `s` px square.
-fn zoom_buttons(a: Rect, s: f32) -> [Rect; 3] {
+/// The fit button's place: bottom right of the web's area `a`, `s` px square.
+fn fit_button_rect(a: Rect, s: f32) -> Rect {
     let k = chrome::k();
-    let x = a.x + a.w - s - 6.0 * k;
-    let y0 = a.y + a.h - 3.0 * s - 8.0 * k;
-    [0, 1, 2].map(|i| Rect::new(x, y0 + i as f32 * s, s, s))
+    Rect::new(a.x + a.w - s - 6.0 * k, a.y + a.h - s - 8.0 * k, s, s)
 }
 
 /// The class whose centre is nearest `at`, within 22 dp (22 px on the desktop).
@@ -979,8 +969,9 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
     let wheel = widgets::wheel();
     let (tx, ty) = input::map_pan();
     input::swipe_area(a, SwipeKind::Pan);
-    let buttons = zoom_buttons(a, 48.0 * u);
-    let on_button = buttons.iter().any(|r| point_in(*r, pointer));
+    // The «[ ]» button: a phone's standard 44 dp, the desktop's 48 px as before.
+    let fit_btn = fit_button_rect(a, if phone { 44.0 * u } else { 48.0 * u });
+    let on_button = point_in(fit_btn, pointer);
     let mut click = None;
     PAN.with(|p| {
         let mut p = p.borrow_mut();
@@ -1180,25 +1171,13 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
         selected_tag(a, focus_rect);
     }
     // The zoom buttons: fixed on the canvas, not zoomed.
-    let mut pressed = [false; 3];
-    for (i, r) in buttons.iter().enumerate() {
-        pressed[i] = zoom_button(*r, i);
-    }
     // A press changes the view from the next frame on.
-    if pressed.iter().any(|&p| p) {
+    if fit_button(fit_btn) {
         PAN.with(|p| {
             let mut p = p.borrow_mut();
-            if pressed[0] {
-                p.zoom = (p.zoom * 1.25).clamp(zmin, zmax);
-            }
-            if pressed[1] {
-                p.zoom = (p.zoom / 1.25).clamp(zmin, zmax);
-            }
-            if pressed[2] {
-                p.zoom = fit;
-                p.center = Vec2::ZERO;
-                p.target = None;
-            }
+            p.zoom = fit;
+            p.center = Vec2::ZERO;
+            p.target = None;
         });
     }
     picked
