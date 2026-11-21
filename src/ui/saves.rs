@@ -1770,9 +1770,9 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bo
     // One row: «Выйти в меню», «Рестарт», «Отступить» (when the game allows it), on phones «Клавиши», «Отмена».
     // «Выйти из игры» is the map's game menu's only.
     let phone = super::display::dp_px().is_some();
-    let row = battle_exit_row(phone, (b3.0, b2.0, b1.0), retreat, true);
     let by = 460.0 + (H - 460.0 - b1.1) / 2.0;
-    // (art, height, label, choice) of each button, in the row's order.
+    // (art, height, label, choice) of each button, in the row's order. «Код боя» is as tall as «Рестарт»
+    // (the same text size as its neighbours).
     let mut items: Vec<(&'static str, f32, String, Option<ExitChoice>)> = vec![
         ("Btn3", b3.1, own("ExitGame", "ExitToMenu", n_("To the menu")), Some(ExitChoice::MainMenu)),
         ("Btn2", b2.1, own("ExitGame", "Restart", n_("Restart")), Some(ExitChoice::Restart)),
@@ -1780,11 +1780,14 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bo
     if retreat {
         items.push(("Btn2", b2.1, tr(n_("Retreat")).to_string(), Some(ExitChoice::Retreat)));
     }
-    items.push(("Btn1", b1.1, tr(n_("Battle code")).to_string(), Some(ExitChoice::BattleCode)));
+    items.push(("Btn2", b2.1, tr(n_("Battle code")).to_string(), Some(ExitChoice::BattleCode)));
     if phone {
         items.push(("Btn2", b2.1, tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
     }
     items.push(("Btn1", b1.1, own("Buttons", "Cancel", n_("Cancel")), None));
+    // Each label's width on its button, as drawn (`defeat_button_art` at the window's scale), plus a margin.
+    let needs: Vec<f32> = items.iter().map(|(_, h, label, _)| chrome::marble_label_width(h * o, label) / o + 12.0).collect();
+    let row = battle_exit_row(phone, (b3.0, b2.0, b1.0), retreat, true, &needs);
     let mut choice = None;
     let mut cancel = closed;
     let was_asking = *asking;
@@ -1827,7 +1830,7 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bo
 /// slot of the original's «Выйти из игры» gives room to «Отступить». «Код боя» takes the `Btn1` width.
 /// When the row would not fit (with «Отступить» and «Код боя»), all its buttons shrink together. A phone's
 /// row takes the window less 10 px at each side, 4 px between the buttons; it shrinks the same way.
-fn battle_exit_row(phone: bool, art: (f32, f32, f32), retreat: bool, code: bool) -> Vec<(f32, f32)> {
+fn battle_exit_row(phone: bool, art: (f32, f32, f32), retreat: bool, code: bool, needs: &[f32]) -> Vec<(f32, f32)> {
     const W: f32 = 634.0;
     let (b3, b2, b1) = art;
     // (width, gap before it) of each button, the last one «Отмена» on the right when it is the desktop's.
@@ -1852,10 +1855,38 @@ fn battle_exit_row(phone: bool, art: (f32, f32, f32), retreat: bool, code: bool)
         w.push(b1);
         (w, 8.0, 10.0)
     };
-    let n = widths.len() as f32;
-    let fit = ((W - 2.0 * edge - gap * (n - 1.0)) / widths.iter().sum::<f32>()).min(1.0);
-    for w in widths.iter_mut() {
-        *w *= fit;
+    // A label's width is the least its button takes, so no text shrinks to fit the row (`needs`, the
+    // label's width plus its margin, in the window's pixels). When the row is too wide the gaps shrink
+    // first, then the edges, then the buttons' spare width; a label is only cut when nothing else is left.
+    let n = widths.len();
+    let need = |i: usize| needs.get(i).copied().unwrap_or(0.0);
+    for (i, w) in widths.iter_mut().enumerate() {
+        *w = w.max(need(i));
+    }
+    let (gap_min, edge_min): (f32, f32) = if phone { (2.0, 4.0) } else { (4.0, 4.0) };
+    let (mut gap, mut edge) = (gap, edge);
+    let sum: f32 = widths.iter().sum();
+    let total = |g: f32, e: f32| sum + g * (n as f32 - 1.0) + 2.0 * e;
+    if total(gap, edge) > W {
+        gap = gap_min.max((W - sum - 2.0 * edge) / (n as f32 - 1.0)).min(gap);
+    }
+    if total(gap, edge) > W {
+        edge = edge_min.max((W - sum - gap * (n as f32 - 1.0)) / 2.0).min(edge);
+    }
+    let over = total(gap, edge) - W;
+    if over > 0.0 {
+        let spare: Vec<f32> = widths.iter().enumerate().map(|(i, &w)| (w - need(i)).max(0.0)).collect();
+        let spare_sum: f32 = spare.iter().sum();
+        if spare_sum >= over {
+            for (w, s) in widths.iter_mut().zip(&spare) {
+                *w -= s * over / spare_sum;
+            }
+        } else {
+            let fit = (W - 2.0 * edge - gap * (n as f32 - 1.0)) / sum;
+            for w in widths.iter_mut() {
+                *w *= fit;
+            }
+        }
     }
     let mut x = edge;
     let mut row: Vec<(f32, f32)> = widths
@@ -2406,13 +2437,13 @@ mod tests {
     fn the_battle_code_button_sits_before_cancel_and_the_others_keep_their_size_when_there_is_room() {
         for phone in [false, true] {
             for retreat in [false, true] {
-                let row = battle_exit_row(phone, (160.0, 128.0, 96.0), retreat, true);
+                let row = battle_exit_row(phone, (160.0, 128.0, 96.0), retreat, true, &[]);
                 let (code, cancel) = (row[row.len() - 2], row[row.len() - 1]);
                 assert!(code.0 + code.1 <= cancel.0 + 0.01, "«Код боя» before «Отмена»: {row:?}");
                 for pair in row.windows(2) {
                     assert!(pair[0].0 + pair[0].1 <= pair[1].0 + 0.01, "buttons do not overlap: {row:?}");
                 }
-                assert!(cancel.0 + cancel.1 <= 634.0 - 10.0 + 0.01, "«Отмена» within the window: {row:?}");
+                assert!(cancel.0 + cancel.1 <= 634.0 - 4.0 + 0.01, "«Отмена» within the window: {row:?}");
                 if !phone && !retreat {
                     // The desktop row has room without «Отступить»: its buttons keep their art's widths.
                     assert_eq!(row.iter().map(|r| r.1).collect::<Vec<_>>(), vec![160.0, 128.0, 96.0, 96.0]);
@@ -2422,11 +2453,32 @@ mod tests {
     }
 
     #[test]
+    fn the_row_keeps_every_label_its_width_and_takes_the_gaps_first() {
+        for phone in [false, true] {
+            for retreat in [false, true] {
+                // Every label needs its own width (here 80 px, «Код боя» 90 px), the widest one «Код боя» among them.
+                let count = battle_exit_row(phone, (160.0, 128.0, 96.0), retreat, true, &[]).len();
+                let needs: Vec<f32> = (0..count).map(|i| if i == count - 2 { 90.0 } else { 80.0 }).collect();
+                let row = battle_exit_row(phone, (160.0, 128.0, 96.0), retreat, true, &needs);
+                for ((x, w), need) in row.iter().zip(&needs) {
+                    assert!(w + 0.01 >= *need, "a label keeps its width: {row:?} {needs:?}");
+                    assert!(*x >= 0.0);
+                }
+                let last = row.last().unwrap();
+                assert!(last.0 + last.1 <= 634.0 - 4.0 + 0.01, "the row stays in the window: {row:?}");
+                for pair in row.windows(2) {
+                    assert!(pair[0].0 + pair[0].1 <= pair[1].0 + 0.01, "buttons do not overlap: {row:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn the_leave_battle_window_is_one_row_without_the_map_s_quit_and_with_retreat_after_restart() {
         // Before the first action «Отступить» sits right after «Рестарт»; after it the row closes up.
         for phone in [false, true] {
-            let without = battle_exit_row(phone, (160.0, 128.0, 96.0), false, false);
-            let with = battle_exit_row(phone, (160.0, 128.0, 96.0), true, false);
+            let without = battle_exit_row(phone, (160.0, 128.0, 96.0), false, false, &[]);
+            let with = battle_exit_row(phone, (160.0, 128.0, 96.0), true, false, &[]);
             assert_eq!(with.len(), without.len() + 1, "one more button before the first action");
             let (restart, retreat) = (with[1], with[2]);
             assert!((retreat.0 - (restart.0 + restart.1 + 8.0)).abs() < 0.01 || phone, "«Отступить» right after «Рестарт» on the desktop: {with:?}");

@@ -563,11 +563,13 @@ impl LangFilter {
         LangFilter::ALL.iter().position(|&l| l == self).unwrap_or(0) as i64
     }
 
+    /// The button's and the list's text: the two languages' own names (the catalog has «English» and
+    /// «русский» under the language list's keys, so they are not looked up here), «Все языки» in Russian.
     fn label(self) -> &'static str {
         match self {
-            LangFilter::All => tr("All map languages"),
-            LangFilter::Russian => tr("Maps in Russian"),
-            LangFilter::English => tr("Maps in English"),
+            LangFilter::All => tr("All languages"),
+            LangFilter::Russian => "Русский",
+            LangFilter::English => "English",
         }
     }
 
@@ -1436,14 +1438,16 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
     // The extras row under the buttons (Razdor's own, the owner's request of 2026-10-31): «Добавить
     // карту…» and «Мод» side by side, each half of the window's width; alone, the whole width.
     // The map-language filter takes the row's left (1675); the other two share what is left of it.
-    let lang_w = 140.0;
+    let extras_y = extra_top(win.foot_y, grow);
+    let extras_h = EXTRA_ROW_H * grow;
+    // The filter's button is as wide as its longest label at the row's own text size (never smaller
+    // text than «Добавить карту…» beside it), with 140 as the least.
+    let lang_w = LangFilter::ALL.iter().map(|l| chrome::marble_label_width(extras_h * win.k, l.label()) / win.k + 14.0).fold(140.0, f32::max);
     let rest_x = 12.0 + lang_w + 6.0;
     let rest_w = 570.0 - lang_w - 6.0;
     let both = map_import::available() && !mods.is_empty();
     let (x_add, w_add) = if both { (rest_x, (rest_w - 6.0) / 2.0) } else { (rest_x, rest_w) };
     let (x_mod, w_mod) = if both { (rest_x + w_add + 6.0, w_add) } else { (rest_x, rest_w) };
-    let extras_y = extra_top(win.foot_y, grow);
-    let extras_h = EXTRA_ROW_H * grow;
     let add_r = match &pl {
         Some(p) => p.add,
         None => win.rect(x_add, extras_y, w_add, extras_h),
