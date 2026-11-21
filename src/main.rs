@@ -118,38 +118,64 @@ fn opaque_rgba(rgba: &mut [u8]) {
     }
 }
 
+/// Writes an exit picture (`export_png`) and syncs it to disk, with `exit:` lines before and after: the
+/// picture's size on disk, and whether the file was synced. The kernel keeps a written file when the process
+/// dies later, so a crash after this still leaves the picture; the lines say whether it was written.
+fn export_exit_png(shot: &Image, path: &str, what: &str) {
+    razdor::diag::log(&format!("exit: writing the {what} to {path} ({} bytes of RGBA)", shot.bytes.len()));
+    shot.export_png(path);
+    let synced = std::fs::File::open(path).and_then(|f| f.sync_all()).is_ok();
+    let size = std::fs::metadata(path).map(|m| m.len()).ok();
+    razdor::diag::log(&format!("exit: {what} written: {size:?} bytes on disk, synced: {synced}"));
+}
+
 /// Ends the process without running the C `atexit` handlers.
 ///
 /// A normal return from `main` crashed with SIGSEGV every time: `exit` runs the exit handlers
 /// of the native libraries (GL / X11 / ALSA under miniquad), and one of them calls into code
 /// that is no longer mapped. Everything Razdor writes (saves, `audio.json`) is written and
 /// closed synchronously before this, so skipping the handlers loses nothing.
-fn exit_now(app: &mut App) -> ! {
+fn exit_now(app: &mut App, how: &str) -> ! {
     razdor::diag::step("quitting");
+    razdor::diag::log(&format!("exit: path: {how}"));
     // Android: the app leaves the screen first, so the slow writes below happen off the screen
     // (on a phone the window would stay frozen on it until the process is gone). The activity's
     // onPause then flushes the session slot on its UI thread (`ui::android`, `razdorOnPause`),
     // which is harmless: `session::flush_now` writes nothing that is already written.
     #[cfg(target_os = "android")]
-    ui::display::hide_for_exit();
+    {
+        razdor::diag::log("exit: hiding the app (Android, before the saves)");
+        ui::display::hide_for_exit();
+    }
     let timed = razdor::diag::profiling();
     let t0 = web_time::Instant::now();
+    razdor::diag::log("exit: frame probe summary");
     razdor::frame_probe::flush();
+    razdor::diag::log("exit: frame probe done, waiting for the autosave writer");
     let t1 = web_time::Instant::now();
     // The noon autosave still being written on its thread is finished first (the file is whole).
     razdor::rules::save::finish_pending_writes();
+    razdor::diag::log("exit: autosave writer done, app shutdown (replay, session slot, music, settings)");
     let t2 = web_time::Instant::now();
     app.shutdown();
+    razdor::diag::log("exit: app shutdown done");
     let t3 = web_time::Instant::now();
     // The saves are written: the window goes now, so the memory the process frees below is
     // freed off the screen (the kernel frees it before the X connection closes, and the window
     // would stay up meanwhile). Android hid the app before the saves (above).
     #[cfg(not(target_os = "android"))]
-    ui::display::hide_for_exit();
+    {
+        razdor::diag::log("exit: hiding the window");
+        ui::display::hide_for_exit();
+        razdor::diag::log("exit: window hidden");
+    }
     let t4 = web_time::Instant::now();
     // "Restart now" after an update: the new program, once the lock is free.
+    razdor::diag::log("exit: releasing razdor.lock");
     release_instance();
+    razdor::diag::log("exit: razdor.lock released, update restart check");
     razdor::update::restart();
+    razdor::diag::log("exit: flushing the standard output and error");
     use std::io::Write;
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
@@ -164,6 +190,7 @@ fn exit_now(app: &mut App) -> ! {
             ms(t4, web_time::Instant::now())
         );
     }
+    razdor::diag::log("exit: ending the process now (the last line of a clean exit)");
     // SAFETY: `_exit` only ends the process; no Rust state is used after it.
     #[cfg(unix)]
     unsafe {
@@ -324,13 +351,13 @@ async fn main() {
             if let Ok(path) = std::env::var("RAZDOR_BENCH_END") {
                 let mut shot = get_screen_data();
                 opaque_rgba(&mut shot.bytes);
-                shot.export_png(&path);
+                export_exit_png(&shot, &path, "performance test end picture");
             }
-            exit_now(&mut app);
+            exit_now(&mut app, "performance test: end picture (RAZDOR_BENCH_END)");
         }
         // The frame is drawn: a trailer run records it, and ends when its last frame is written.
         if ui::trailer::after_frame(&mut app) {
-            exit_now(&mut app);
+            exit_now(&mut app, "trailer: last frame written");
         }
         if quiet {
             app.dialogs.clear();
@@ -356,26 +383,35 @@ async fn main() {
                 None => frames >= *n,
                 Some((_, every)) => frames >= *n && at % every == 0,
             };
+            let last = match series {
+                None => *n,
+                Some((count, every)) => *n + (count - 1) * every,
+            };
             if save {
                 ui::text_probe::write();
                 ui::touch_probe::write();
                 let mut shot = get_screen_data();
                 opaque_rgba(&mut shot.bytes);
                 match series {
-                    None => shot.export_png(path),
-                    Some(_) => shot.export_png(&ui::snapshot::series_path(path, at)),
+                    None => export_exit_png(&shot, path, "snapshot"),
+                    // Only the series' last picture is logged: one line per picture would flood the log.
+                    Some(_) if frames < last => shot.export_png(&ui::snapshot::series_path(path, at)),
+                    Some(_) => export_exit_png(&shot, &ui::snapshot::series_path(path, at), "snapshot"),
                 }
             }
-            let last = match series {
-                None => *n,
-                Some((count, every)) => *n + (count - 1) * every,
-            };
             if frames >= last {
-                exit_now(&mut app);
+                exit_now(&mut app, "snapshot taken (RAZDOR_SNAPSHOT), the run ends");
             }
         }
         if is_quit_requested() || app.quit || quit_after.is_some_and(|n| frames >= n) {
-            exit_now(&mut app);
+            let how = if is_quit_requested() {
+                "window closed or quit requested"
+            } else if app.quit {
+                "quit from a menu or the game"
+            } else {
+                "RAZDOR_QUIT_AFTER frames reached"
+            };
+            exit_now(&mut app, how);
         }
         ui::widgets::sync_keyboard();
         // The map frame's last GPU wait (profiling, Android): the frame's draws, cursor included.

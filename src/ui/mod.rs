@@ -920,10 +920,14 @@ impl App {
         bench::abort(self);
         let t0 = web_time::Instant::now();
         // The game's replay is closed first: its last entries and end state are written.
+        razdor::diag::log("exit: closing the replay");
         recording::quit(&mut self.game);
         self.session.end();
+        razdor::diag::log("exit: replay closed, session end done");
         let t1 = web_time::Instant::now();
+        razdor::diag::log("exit: stopping the music");
         self.audio.shutdown();
+        razdor::diag::log("exit: music stopped, changed settings written");
         if razdor::diag::profiling() {
             razdor::diag!("exit timing: session end {:.1} ms, audio shutdown {:.1} ms", (t1 - t0).as_secs_f64() * 1000.0, t1.elapsed().as_secs_f64() * 1000.0);
         }

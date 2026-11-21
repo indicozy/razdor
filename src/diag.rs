@@ -261,6 +261,7 @@ fn install_panic_hook() {
         log(&format!("PANIC in thread '{name}'{place}: {msg}\nbacktrace:\n{bt}"));
         // Only the main thread's panic ends the game (the audio thread's does not).
         if name == "main" {
+            log("exit: the main thread panicked, the process ends after this report");
             match known_cause(&msg) {
                 Some(help) => {
                     log(help);

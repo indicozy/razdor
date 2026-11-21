@@ -46,7 +46,7 @@ except what the screen value, the `App` fields and a few `thread_local!`s hold.
    then on X11 `ui::display::hide_for_exit` (the window is unmapped at once, so the memory the
    kernel frees before the X connection closes is freed off the screen), the update restart,
    and the process ends at once (no teardown of the C libraries). Nothing after `App::shutdown` writes a save. Under `RAZDOR_PROFILE` each step
-   is logged as `exit timing` (on Android its hide is logged as ~0 ms: it ran before the timer).
+   is logged as `exit timing` (on Android its hide is logged as ~0 ms: it ran before the timer). Every step also writes an `exit:` line to `razdor.log` (the path the exit took, each step's start and end, the exit pictures' bytes and sync), flushed as it is written, so a crash at exit leaves its last line behind; a clean exit ends with `exit: ending the process now`.
 
 Install lookup order (`src/dt/install.rs` `locate_with`): `RAZDOR_DT_DIR`, the program's own
 folder when it is an install, the remembered folder (`config_file`), then a search under
