@@ -985,6 +985,11 @@ impl Battle {
         self.ai_level = if on { 2 } else { 1 };
     }
 
+    /// Whether the enemy plays the improved battle AI ([`Battle::set_improved_ai`]).
+    pub fn improved_ai(&self) -> bool {
+        self.ai_level == 2
+    }
+
     /// The original's auto-arrange of a side (483b3c), for the enemy of a battle on screen
     /// and both sides off screen. The side's grid gets the wide row's blocks (48395c), then:
     /// the unit with the highest "front value" goes to the front row; up to 5 times the

@@ -215,6 +215,14 @@ Esc (or the red X) opens the leave-battle window (`saves::battle_exit_dialog(ask
 original hides it. `RAZDOR_SCENE_BATTLE_EXIT=1` snapshots it over any battle scene (`plain`: the fallback window
 without the install's picture).
 
+
+The battle code («Код боя», a player's request, backlog 1677): `BattleView::new` (through `unbegun`) encodes the battle's
+armies as they began (`battle_code`: `custom::from_battle`, each living fighter's type, level and worn items, the player's army
+below, the wide row of the formation; `custom::battle_ai`: 2 maximum, 1 improved, 0 original) into `start_code`. The leave window
+(Esc) has a «Код боя» button before «Отмена» (`saves::battle_exit_row`, `ExitChoice::BattleCode`): `copy_battle_code` puts
+`start_code` on the clipboard (`window::clipboard_set`, as the custom battle's export), the window stays open and its warning
+box shows the copy's message for 10 s (`live_code_note` → `battle_exit_dialog(.., note)`). The format is the one «Свой бой» reads.
+
 ## 6. End of battle and return to the map
 
 `Battle::outcome` / `end_reason`; `end_check` handles wipe-out, surrender (a side left only

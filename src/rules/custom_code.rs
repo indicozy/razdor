@@ -16,14 +16,12 @@
 //! bumps it, and this one says so instead of misreading it.
 
 use super::content::{Content, ItemId, UnitId};
-use super::custom::{Control, Pick, Setup, MAX_LEVEL};
+use super::custom::{Control, Pick, Setup, MAX_LEVEL, MAX_UNITS};
 
 /// The code's start, its version included.
 pub const PREFIX: &str = "RZB1:";
 /// The format's version ([`PREFIX`]).
 pub const VERSION: u32 = 1;
-/// The most units an army may hold in a code (the formations' 12 cells).
-const MAX_UNITS: usize = 12;
 /// The most items a unit may wear in a code.
 const MAX_ITEMS: usize = 16;
 /// The longest record a code can hold: fingerprint, flags, two full armies of units with a
@@ -299,6 +297,7 @@ mod tests {
     use crate::rules::content::testkit::*;
     use crate::rules::content::ArtefactType;
     use crate::rules::custom::choices;
+    use crate::rules::custom;
 
     fn sample() -> (Content, Setup) {
         let c = content(
@@ -425,5 +424,57 @@ mod tests {
             assert_eq!(base58_decode(&base58_encode(&b)).unwrap(), b);
         }
         assert_eq!(base58_decode("0OIl"), None);
+    }
+
+    /// The armies of `setup` as comparable lists: type, level, and the worn items sorted (the
+    /// battle holds them in slot order, the setup in the order they were put on).
+    fn units_of(setup: &Setup) -> Vec<Vec<(u32, i32, Vec<u32>)>> {
+        setup
+            .armies
+            .iter()
+            .map(|army| {
+                army.iter()
+                    .map(|p| {
+                        let mut items: Vec<u32> = p.items.iter().map(|i| i.0).collect();
+                        items.sort();
+                        (p.unit.0, p.level, items)
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_battle_code_brings_back_its_armies_as_they_began() {
+        let (c, mut s) = sample();
+        for wide in [false, true] {
+            s.wide = wide;
+            let mut b = s.battle(&c, true).unwrap();
+            b.set_max_ai(false);
+            let from = custom::from_battle(&b);
+            assert_eq!(from.wide, wide, "the battle's row");
+            assert_eq!(from.control, [Control::Player, Control::Ai]);
+            assert_eq!(units_of(&from), units_of(&s), "the armies as the battle began");
+            assert_eq!(custom::battle_ai(&b), 1, "improved AI");
+            for (improved, max) in [(false, false), (true, false), (true, true)] {
+                b.set_improved_ai(improved);
+                b.set_max_ai(max);
+                let want_ai = custom::battle_ai(&b);
+                let code = encode(&from, b.content(), want_ai);
+                let d = decode(&code, &c).unwrap();
+                assert_eq!(d.setup, from, "the code brings the battle's armies back");
+                assert_eq!((d.ai, d.unknown_units, d.unknown_items), (want_ai, 0, 0));
+            }
+        }
+    }
+
+    #[test]
+    fn a_battle_code_holds_the_battle_as_it_began_and_the_levels_clamp() {
+        let (c, s) = sample();
+        let b = s.battle(&c, false).unwrap();
+        let from = custom::from_battle(&b);
+        assert_eq!(custom::battle_ai(&b), 0, "the original AI");
+        assert!(from.armies.iter().all(|a| a.len() <= MAX_UNITS && a.iter().all(|p| (1..=MAX_LEVEL).contains(&p.level))));
+        assert_eq!(decode(&encode(&from, b.content(), 0), &c).unwrap().setup, from);
     }
 }

@@ -14,6 +14,8 @@ use super::units::Unit;
 
 /// The highest level the setup offers.
 pub const MAX_LEVEL: i32 = 30;
+/// The most units an army may hold (the formations' 12 cells), and so in a battle code.
+pub const MAX_UNITS: usize = 12;
 
 /// Who plays a side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -280,6 +282,34 @@ impl Setup {
             b.auto_arrange(team);
         }
         Some(b)
+    }
+}
+
+/// The setup of an in-game battle, as its code holds it («Код боя»): each living fighter's type,
+/// level (clamped) and worn items, the player's army below and the enemy's above, at most
+/// [`MAX_UNITS`] each, the wide row as the battle's formation says. Read before the first action
+/// (the battle's start), so the code is the battle as it was fought from the start.
+pub fn from_battle(battle: &Battle) -> Setup {
+    let mut armies: [Vec<Pick>; 2] = [Vec::new(), Vec::new()];
+    for f in battle.fighters.iter().filter(|f| f.alive()) {
+        let army = &mut armies[f.team.index()];
+        if army.len() < MAX_UNITS {
+            let items = f.items.iter().flatten().copied().collect();
+            army.push(Pick { unit: f.unit, level: f.level.clamp(1, MAX_LEVEL), items });
+        }
+    }
+    Setup { armies, control: [Control::Player, Control::Ai], wide: battle.formation == Formation::WIDE }
+}
+
+/// The battle AI's strength of `battle` as a battle code holds it (`custom_code::encode`):
+/// 2 maximum, 1 improved, 0 as in the original.
+pub fn battle_ai(battle: &Battle) -> u8 {
+    if battle.max_ai() {
+        2
+    } else if battle.improved_ai() {
+        1
+    } else {
+        0
     }
 }
 

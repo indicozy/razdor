@@ -534,6 +534,12 @@ pub fn stage(app: &mut App) {
             v.open_exit_window();
         }
     }
+    // `RAZDOR_SCENE_BATTLE_CODE=1`: the leave window's «Код боя» pressed (the message shows in the window).
+    if std::env::var("RAZDOR_SCENE_BATTLE_CODE").is_ok_and(|v| v == "1") {
+        if let Screen::Battle(v) = &mut app.screen {
+            v.press_battle_code();
+        }
+    }
     // `RAZDOR_SCENE_BATTLE_RESTART=1`: the same window with its «Рестарт» question open.
     if std::env::var("RAZDOR_SCENE_BATTLE_RESTART").is_ok_and(|v| v == "1") {
         if let Screen::Battle(v) | Screen::CustomBattle(v) = &mut app.screen {

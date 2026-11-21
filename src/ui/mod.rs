@@ -1774,6 +1774,8 @@ impl App {
                 }
                 // The battle's «Отступить» (backlog 1607): the game menu never offers it.
                 (Some(saves::ExitChoice::Retreat), _) => None,
+                // «Код боя» is the battle's window only (`BattleView::frame` copies it there).
+                (Some(saves::ExitChoice::BattleCode), _) => None,
                 (None, next) => next,
             },
             (Screen::Settings, Some(game)) => {
@@ -1899,6 +1901,8 @@ impl App {
                 Some(saves::ExitChoice::Photo) => {}
                 // «Отступить» is carried out by the battle's frame (`BattleView::frame`).
                 Some(saves::ExitChoice::Retreat) => {}
+                // «Код боя» is carried out by the battle's frame, which keeps the window open.
+                Some(saves::ExitChoice::BattleCode) => {}
                 // «Клавиши» (phones): the battle stays, the key list opens over it (Place::Battle).
                 Some(saves::ExitChoice::Keys) => {
                     self.help = true;

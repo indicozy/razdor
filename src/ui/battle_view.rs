@@ -20,7 +20,8 @@ use razdor::i18n::tr;
 use razdor::rules::battle::{patch_globals, set_patch_globals, ActionKind, Battle, EndReason, Fighter, Hit, MaxPoll, MaxThinker, Outcome, PatchGlobals, Preview, Step, Team, XpAward, MAX_QUICK_BUDGET};
 use razdor::av::Echo;
 use razdor::rules::content::{HeroClass, ItemId, Stat};
-use razdor::rules::custom::{Control, Session};
+use razdor::rules::custom::{self, Control, Session};
+use razdor::rules::custom_code;
 use razdor::rules::recording::actions::{apply_battle, BattleAct};
 use razdor::rules::recording::play::{plays_turn, recorded_max_move};
 use razdor::rules::formation::{Formation, Row, Slot};
@@ -46,6 +47,14 @@ const HOVER_EDGE: Color = Color::new(0.80, 0.80, 0.84, 0.85);
 const XP_INK: Color = Color::new(55.0 / 255.0, 180.0 / 255.0, 1.0, 1.0);
 /// The paces of the watched battle.
 const SPEEDS: [u8; 3] = [1, 2, 4];
+/// Seconds the battle code's copy message stays in the leave window (the custom battle's note).
+const CODE_NOTE_SECONDS: f64 = 10.0;
+
+/// The battle's code («Код боя», backlog 1677): the armies and battle AI of `battle`, as the custom
+/// battle reads them (`rules::custom_code`).
+fn battle_code(battle: &Battle) -> String {
+    custom_code::encode(&custom::from_battle(battle), battle.content(), custom::battle_ai(battle))
+}
 
 local! {
     /// The pace last chosen for watching: the next battle watches at it too.
@@ -555,6 +564,10 @@ pub struct BattleView {
     trailer_pace: Option<f32>,
     /// The leave window offers «Отступить» (`with_retreat`, when the game allows the retreat; backlog 1607).
     retreat: bool,
+    /// The battle's code as it began (`battle_code`, made when the view is built): the leave window's «Код боя» copies it.
+    start_code: String,
+    /// The battle code's copy message (`copy_battle_code`): its text and when it was copied.
+    code_note: Option<(String, f64)>,
 }
 
 /// A card's curse and blessing signs.
@@ -717,6 +730,7 @@ impl BattleView {
     /// The view of a battle as it stands (begun or not): the screen's state at its start.
     fn unbegun(battle: Battle) -> Self {
         let begun = Self::moment(&battle);
+        let start_code = battle_code(&battle);
         BattleView {
             battle,
             fx: None,
@@ -745,6 +759,8 @@ impl BattleView {
             paused: false,
             trailer_pace: None,
             retreat: false,
+            start_code,
+            code_note: None,
         }
     }
 
@@ -1220,6 +1236,26 @@ impl BattleView {
         }
     }
 
+    /// Puts the battle's code as it began on the clipboard (the leave window's «Код боя», backlog 1677), with
+    /// the message the custom battle screen shows; the message stays in the window for `CODE_NOTE_SECONDS`.
+    fn copy_battle_code(&mut self) {
+        let code = self.start_code.clone();
+        macroquad::miniquad::window::clipboard_set(&code);
+        let msg = razdor::trf!("Battle code copied ({n} characters): paste it in a chat or in «Custom battle».", n = code.chars().count());
+        self.code_note = Some((msg, crate::ui::clock::now()));
+    }
+
+    /// The snapshot's `RAZDOR_SCENE_BATTLE_CODE=1`: the «Код боя» press, so the window shows its message.
+    pub fn press_battle_code(&mut self) {
+        self.copy_battle_code();
+    }
+
+    /// The copy message while it shows (the leave window draws it in place of the warning).
+    fn live_code_note(&self) -> Option<String> {
+        let (msg, at) = self.code_note.as_ref()?;
+        (crate::ui::clock::now() - at < CODE_NOTE_SECONDS).then(|| msg.clone())
+    }
+
     /// «Отступить» is offered in the leave-battle window at any moment of the battle, when the game allows
     /// the retreat (`with_retreat`, backlog 1607).
     fn retreat_offered(&self) -> bool {
@@ -1311,7 +1347,10 @@ impl BattleView {
         if self.exiting && !just_opened {
             set_input_blocked(outer);
             let retreat = self.retreat_offered();
-            match super::display::with_window_scale(None, || super::saves::battle_exit_dialog(&mut self.exit_asking, retreat)) {
+            let note = self.live_code_note();
+            match super::display::with_window_scale(None, || super::saves::battle_exit_dialog(&mut self.exit_asking, retreat, note.as_deref())) {
+                // «Код боя»: the window stays open, with the copy's message in it.
+                (Some(super::saves::ExitChoice::BattleCode), _) => self.copy_battle_code(),
                 (Some(choice), _) => {
                     self.exiting = false;
                     match choice {
