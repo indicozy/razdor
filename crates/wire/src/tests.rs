@@ -137,6 +137,7 @@ fn round_trip_every_event_kind() {
         },
         EventKind::Progress { day: 40, hero_level: 5, army_size: 12 },
         EventKind::MapEnd {
+            map: "map01".into(),
             outcome: Outcome::Abandoned,
             last_day: 41,
             last_screen: "map".into(),

@@ -123,6 +123,8 @@ pub enum EventKind {
     MapStart { map: String, map_hash: String, difficulty: String, ai_strength: String, experiments: Vec<String> },
     Progress { day: u32, hero_level: u32, army_size: u32 },
     MapEnd {
+        /// The map's file name, as its `MapStart` named it (the server groups the ends by map).
+        map: String,
         outcome: Outcome,
         last_day: u32,
         last_screen: String,
@@ -197,7 +199,8 @@ impl Validate for EventKind {
                 check::number("hero_level", u64::from(*hero_level), 1000)?;
                 check::number("army_size", u64::from(*army_size), 100_000)
             }
-            EventKind::MapEnd { last_day, last_screen, last_battle, seconds_in_map, .. } => {
+            EventKind::MapEnd { map, last_day, last_screen, last_battle, seconds_in_map, .. } => {
+                check::key("map", map, limits::MAX_KEY)?;
                 check::number("last_day", u64::from(*last_day), 1_000_000)?;
                 check::key("last_screen", last_screen, limits::MAX_KEY)?;
                 if let Some(battle) = last_battle {
