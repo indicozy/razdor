@@ -77,7 +77,9 @@ The release copies stay where they are, as the catalog's fallback.
 GitHub setup (NOT RUN; the owner's go is needed, it creates a public site):
 
 ```sh
-# 1. an orphan gh-pages branch with an empty first commit (a fresh clone, pushed once)
+# 1. an orphan gh-pages branch with an empty first commit: in a new empty folder, `git init -b gh-pages`,
+#    `git commit --allow-empty -m "gh-pages: start"` (as the owner), then push it to the repo's gh-pages with the
+#    personal account's token: `git push https://x-access-token:$(gh auth token -u indicozy)@github.com/indicozy/razdor-community.git gh-pages`
 # 2. enable Pages from that branch (today the repo's Pages answers 404: it is off)
 GH_TOKEN=$(gh auth token -u indicozy) gh api -X POST repos/indicozy/razdor-community/pages \
     -f 'source[branch]=gh-pages' -f 'source[path]=/'
@@ -88,6 +90,9 @@ Which app versions read what (checked against the tags): see «Pages layout» in
 `docs/specs/2026-11-13-gitverse-mirrors.md`.
 
 Tests for the layout: `tools/gitverse/test_pages_layout.py` (hermetic, in the same `unittest discover` run).
+
+The update feed (`publish_release.py`) is written to both hosts from the same bytes (`FEED_HOSTS`): the GitHub copy
+needs the GitHub Pages setup above first, or a release run fails at that step (the GitVerse copy is already pushed).
 
 `publish_release.py` takes the files as the GitHub pipeline names them. Versioned names are required
 (`Razdor-X.Y.Z.exe`, `razdor-X.Y.Z-linux`, `razdor-X.Y.Z-macos`, `razdor-X.Y.Z.apk`); the unversioned

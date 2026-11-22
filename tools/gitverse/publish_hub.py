@@ -598,20 +598,50 @@ def publish_pages(args, folder, cat, host):
     for name, data in web.items():
         with open(os.path.join(stage, name), "wb") as f:
             f.write(data)
-    with open(os.path.join(stage, INDEX_V2), "rb") as f:
-        index_bytes = f.read()
-    sample = min(site, key=lambda w: sizes[w])
+    stamp = datetime.date.today().isoformat()
+    samples = pages_samples(cat, rt, site, game_where, sizes)
     with pages.Pages(gv.HUB_REPO, host=host) as pg:
-        pg.sync_site_dir(stage)
-        pushed = pg.commit_push(f"Hub catalog, pages layout ({datetime.date.today().isoformat()})")
-        print(f"{host} Pages: {'pushed ' + pushed if pushed else 'unchanged'}")
-        with open(os.path.join(stage, sample), "rb") as f:
-            sample_bytes = f.read()
-        expected = {pg._in_repo(INDEX_V2): index_bytes, pg._in_repo(sample): sample_bytes}
+        # step 1: the files and pictures, added only. The live index still names the old files and previews, so
+        # nothing is removed and the index is not touched yet.
+        pg.sync_site_dir(stage, remove=False, skip=(INDEX_V2,))
+        pushed = pg.commit_push(f"Hub files, pages layout ({stamp})")
+        print(f"{host} Pages, files: {'pushed ' + pushed if pushed else 'unchanged'}")
+        expected = {pg._in_repo(p): read_bytes(os.path.join(stage, *p.split("/"))) for p in samples}
         waited = pg.wait_served(expected, wait=args.wait)
-        print(f"{host} Pages serves the new index and a sample file (waited {waited:.0f} s)")
+        print(f"{host} Pages serves the files: a map, a mod, the game and a picture, byte for byte "
+              f"(waited {waited:.0f} s)")
+        # step 2: the index, and the removal of what it no longer names
+        pg.sync_site_dir(stage)
+        pushed = pg.commit_push(f"Hub catalog, pages layout ({stamp})")
+        print(f"{host} Pages, index: {'pushed ' + pushed if pushed else 'unchanged'}")
+        index_bytes = read_bytes(os.path.join(stage, INDEX_V2))
+        waited = pg.wait_served({pg._in_repo(INDEX_V2): index_bytes}, wait=args.wait)
+        print(f"{host} Pages serves the new index (waited {waited:.0f} s)")
     print(f"published the {host} pages layout: {base}/{INDEX_V2}")
     return 0
+
+
+def read_bytes(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def pages_samples(cat, rt, site, game_where, sizes):
+    """The site paths that step 1 of a pages publish must serve before the index moves: the first map
+    (not an archive), the first mod's zip, the game and the smallest picture."""
+    plain = archive = None
+    for e in cat["entries"]:
+        for f in e.get("files") or []:
+            name = f.get("path")
+            if name not in rt["files"]:
+                continue
+            if f.get("archive") and archive is None:
+                archive = rt["files"][name]
+            if not f.get("archive") and plain is None:
+                plain = rt["files"][name]
+    pics = [w for w in site if w.startswith(PREVIEWS)]
+    out = [plain, archive, game_where, min(pics, key=lambda w: sizes[w]) if pics else None]
+    return sorted({p for p in out if p})
 
 
 def load_state(folder):

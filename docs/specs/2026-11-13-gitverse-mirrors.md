@@ -190,6 +190,15 @@ the game stay on releases»).
   2026-11-22 catalog (343.8 MB files, 7.9 MB pictures, 42.6 MB game); the limit is 500 MB (warns above 400 MB).
   GitHub Pages: 1 GB a site, 100 MB a file (largest file 42.6 MB).
 - **Routing check**: a file or picture with no place stops the run before anything is fetched or pushed.
+- **Publish order** (`publish_hub.py --layout pages`, not the dry run): step 1 adds the files and pictures (no
+  removal; the live index still names the old files), then a sample is checked byte for byte on Pages: a map, a
+  mod's zip, the game and a picture. Step 2 moves the index and removes what it no longer names, then the index
+  is checked. A failed step 1 leaves the live catalog as it was.
+- **Update feed**: `releases.json` is written to GitVerse's Pages (`docs/`) and to GitHub Pages (the root of
+  `gh-pages`, `publish_release.push_feed_copies`), the same bytes. `data/remote/config.json` lists the GitVerse
+  feed, then the GitHub copy, then the GitHub API (`publish_config.check` enforces the order). The built-in
+  feed list of the app (`mirror::UPDATE_FEED`) is unchanged for old versions: they keep reading their own list,
+  and the config's list only reaches versions that read the remote config.
 
 ### Which app versions read what
 
@@ -201,9 +210,10 @@ Checked in the tags (`git show <tag>:src/hub.rs`, `src/mirror.rs`, `src/gdrive.r
 | 1.5.2, 1.5.3, 1.5.4 | `mirror::HUB`: GitVerse Pages `index-v2.json`, then its `index.json` (not written any more: a miss), then GitHub's `index-v2.json` (none), then GitHub's `index.json`. | Pages files at the absolute address (bare: read as they are); a mod's zip unpacks by its flag | the catalog's `game` (url, then `mirrors`) is offered by `game_import` (1.5.4: `ui/game_import.rs`); the download itself is the remote config's `game.links` (1.5.4), unchanged here |
 
 - Every version reads an absolute `https` address as it is (`hub::resolve`), so the Pages address works.
-- No shipped version has a per-file `mirrors` field (`FileRef` has none, in any tag): a hub file that fails on
-  Pages has no fallback to its release copy from inside the app. The fallback is at the catalog level: when
-  the GitVerse catalog cannot be read, the GitHub catalog (release files) is used. Adding a per-file mirror
+- No shipped version has a per-file `mirrors` field (`FileRef` has none, in any tag), and no shipped tag (1.5.2,
+  1.5.3, 1.5.4 checked) tries another host's copy of a single file. A hub file that fails on Pages has no fallback
+  to its release copy from inside the app. The fallback is at the catalog level: when the GitVerse catalog cannot be
+  read, the GitHub catalog (release files) is used. Adding a per-file mirror
   is an app change (`src/hub.rs`, `FileRef`, `serde(default)`; old readers ignore unknown fields: none of the
   tags denies them).
 - The remote config's `game.links` (`data/remote/config.json`) is what 1.5.4 downloads the game from. It is
@@ -214,8 +224,11 @@ Checked in the tags (`git show <tag>:src/hub.rs`, `src/mirror.rs`, `src/gdrive.r
 1. The candidate index is built locally (`--dry-run`); the app's file rules are checked by the hermetic tests.
 2. An old binary (v1.5.2, v1.5.3, v1.5.4) with the candidate catalog as a folder: `RAZDOR_HUB=<folder>` (a
    `Source::Dir`, read as `index-v2.json` with the paths resolved in the folder). The candidate for the test is
-   a copy whose `files/<sha>.dat` paths are relative, not `https`, because no old binary has an `https` override
-   for a local server. One map, one campaign and one mod are downloaded and played; the game is checked with
+   a copy whose `files/<sha>.dat` paths are relative, not `https`: the folder source (`Source::Dir`) reads a
+   relative path from the folder and an `https` path would be joined to it (checked in `v1.5.3:src/hub.rs`, `folder_file`).
+   This tests the parsing and the file rules, not the `https` download. For that, serve the candidate from a local
+   `https` server with a self-signed certificate (`RAZDOR_HUB=https://localhost:<port>/cand`), if the curl the app
+   calls honours `SSL_CERT_FILE` (to check on this machine first); otherwise the candidate needs a non-live Pages folder (the owner's go). One map, one campaign and one mod are downloaded and played; the game is checked with
    `game_import` by hand.
 3. After the publish: the same binary against the live GitVerse Pages (the real addresses), with a clean
    hub folder, and the GitHub catalog path (`RAZDOR_HUB=https://github.com/…/releases/latest/download`).

@@ -31,6 +31,10 @@ SCHEMA = 1
 MAX_GAME_BYTES = 256 << 20  # the app's MAX_ARCHIVE_DOWNLOAD
 BAD_ADDRESS_CHARS = re.compile(r"[\s\\\x00-\x1f\x7f]")
 SHA256 = re.compile(r"[0-9a-fA-F]{64}")
+# The update feed's first two addresses, in this order (the owner's decision, 2026-11-22): GitVerse's feed, then
+# the copy on GitHub Pages; the GitHub API comes after them.
+FEED_ORDER = ("https://indicozy.gitverse.site/razdor-community/releases.json",
+              "https://indicozy.github.io/razdor-community/releases.json")
 
 
 def https_address(a):
@@ -50,6 +54,11 @@ def check(raw):
         addresses = cfg.get(key)
         if not isinstance(addresses, list) or not addresses or not all(https_address(a) for a in addresses):
             raise gv.GitVerseError(f"config.json: {key} must be a non-empty list of https addresses")
+    feed = cfg["update_feed"]
+    if FEED_ORDER[0] not in feed or FEED_ORDER[1] not in feed:
+        raise gv.GitVerseError(f"config.json: update_feed must name {FEED_ORDER[0]} and {FEED_ORDER[1]}")
+    if feed.index(FEED_ORDER[0]) > feed.index(FEED_ORDER[1]):
+        raise gv.GitVerseError("config.json: update_feed must try GitVerse's feed before GitHub Pages' feed")
     game = cfg.get("game")
     if not isinstance(game, dict):
         raise gv.GitVerseError("config.json: game is missing")

@@ -53,6 +53,8 @@ WORK_ROOT = os.environ.get("RAZDOR_GITVERSE_WORK") or "/mnt/ai_models/razdor-scr
 TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)(-[A-Za-z0-9.]+)?$")
 VERSION_IN_NAME = re.compile(r"-(\d+\.\d+\.\d+)(?=[-.])")
 FEED_PATH = "docs/releases.json"
+FEED_NAME = "releases.json"
+FEED_HOSTS = ("github",)  # the feed on GitHub Pages (razdor-community's gh-pages root), besides GitVerse's docs/
 SUMS_NAMES = ("SHA256SUMS", "SHA256SUMS.txt")
 
 # Per platform: the zip, the versioned program and its unversioned name inside the zip, the translator.
@@ -351,11 +353,25 @@ def publish(args):
             print(f"feed: {'pushed ' + pushed if pushed else 'unchanged'}")
             waited = pg.wait_served({FEED_PATH: data}, wait=args.wait)
             print(f"feed served by Pages (waited {waited:.0f} s)")
+        push_feed_copies(data, args.wait)
         prune(client, reg)
     if not args.keep_work:
         shutil.rmtree(work)
     print(f"published {args.tag}: {html_url}")
     return 0
+
+
+def push_feed_copies(data, wait):
+    """The same feed bytes on the other hosts' Pages (FEED_HOSTS): the GitHub Pages of razdor-community, the
+    root of gh-pages. Each copy is checked to serve exactly these bytes. Needs GitHub Pages on for the repo
+    (the setup in tools/gitverse/README.md): until then the GitVerse feed is the only one that moves."""
+    for host in FEED_HOSTS:
+        with pages.Pages(gv.HUB_REPO, host=host) as pg:
+            pg.write(pg._in_repo(FEED_NAME), data)
+            pushed = pg.commit_push(f"Update feed ({host})")
+            print(f"feed on {host} Pages: {'pushed ' + pushed if pushed else 'unchanged'}")
+            waited = pg.wait_served({pg._in_repo(FEED_NAME): data}, wait=wait)
+            print(f"feed served by {host} Pages (waited {waited:.0f} s)")
 
 
 def unpublish(args):
@@ -380,6 +396,7 @@ def unpublish(args):
                     pg.write(FEED_PATH, data)
                     pg.commit_push(f"Update feed: without {tag}")
                     pg.wait_served({FEED_PATH: data}, wait=args.wait)
+                    push_feed_copies(data, args.wait)
                     print(f"removed {tag} from the update feed")
     gv.unregister(reg, gv.APP_REPO, tag)
     gv.save_registry(reg)

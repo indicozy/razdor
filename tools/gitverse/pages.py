@@ -138,7 +138,9 @@ class Pages:
                 raise PagesError(f"refusing to delete {self.dir}")
             shutil.rmtree(self.dir)
         os.makedirs(self.scratch, exist_ok=True)
-        _git(["-c", "credential.helper=", "clone", "--quiet", "--branch", self.branch, self._url(), self.dir],
+        # a real clone is shallow: the site's history is not needed to add a commit, and the site is hundreds of MB
+        depth = [] if self.remote else ["--depth", "1"]
+        _git(["-c", "credential.helper=", "clone", "--quiet", *depth, "--branch", self.branch, self._url(), self.dir],
              cwd=self.scratch, token=self.token)
         _git(["remote", "set-url", "origin", self.remote or self.plain_url], cwd=self.dir)
         _git(["config", "user.name", AUTHOR[0]], cwd=self.dir)
@@ -191,17 +193,21 @@ class Pages:
         for rel, data in files.items():
             self.write(self._in_repo(rel), data)
 
-    def sync_site_dir(self, src):
+    def sync_site_dir(self, src, remove=True, skip=()):
         """`sync_site` with the new site as a folder `src` (copied file by file, not read into memory: the
-        pages layout's site is hundreds of MB). The same keeps and removals."""
+        pages layout's site is hundreds of MB). The same keeps. `remove=False` only adds and overwrites (the
+        first push of a two-step publish: the live index still names the old files); `skip` leaves out
+        site-relative paths (the index, in that first push)."""
         wanted = set()
         for dirpath, _, names in os.walk(src):
             for n in names:
                 wanted.add(os.path.relpath(os.path.join(dirpath, n), src).replace(os.sep, "/"))
+        wanted -= set(skip)
         root = self._site_root()
-        for rel in self._site_files():
-            if rel not in wanted and rel not in KEEP_IN_DOCS:
-                os.remove(os.path.join(root, *rel.split("/")))
+        if remove:
+            for rel in self._site_files():
+                if rel not in wanted and rel not in KEEP_IN_DOCS and rel not in skip:
+                    os.remove(os.path.join(root, *rel.split("/")))
         for rel in sorted(wanted):
             dst = os.path.join(root, *rel.split("/"))
             os.makedirs(os.path.dirname(dst), exist_ok=True)

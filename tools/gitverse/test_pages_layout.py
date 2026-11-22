@@ -172,6 +172,61 @@ class PublishDryRunTests(HermeticTestCase):
             self.assertFalse(os.path.exists(os.path.join(d, "gitverse-state.json")), "no release state written")
 
 
+class FakePages:
+    """Stands in for pages.Pages: records the calls of a publish, in order (nothing is cloned or pushed)."""
+    calls = []
+
+    def __init__(self, repo, host="gitverse"):
+        self.host = host
+        FakePages.calls.append(("open", host))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def _in_repo(self, rel):
+        return rel
+
+    def sync_site_dir(self, src, remove=True, skip=()):
+        FakePages.calls.append(("sync", remove, tuple(skip)))
+
+    def commit_push(self, message):
+        FakePages.calls.append(("commit", message))
+        return "abc12345"
+
+    def wait_served(self, expected, wait=0):
+        FakePages.calls.append(("wait", sorted(expected)))
+        return 0.0
+
+
+class PublishOrderTests(HermeticTestCase):
+    def test_the_files_are_served_before_the_index_moves(self):
+        with tempfile.TemporaryDirectory() as d:
+            real_catalog(d)
+            saved = ph.pages.Pages
+            ph.pages.Pages = FakePages
+            FakePages.calls = []
+            try:
+                args = types.SimpleNamespace(catalog_dir=d, tag=None, dry_run=False, no_pages=False, wait=0,
+                                             replace=False, keep=2, layout="pages", host="github")
+                self.assertEqual(ph.publish(args), 0)
+            finally:
+                ph.pages.Pages = saved
+            calls = FakePages.calls
+            self.assertEqual(calls[0], ("open", "github"))
+            self.assertEqual(calls[1], ("sync", False, (ph.INDEX_V2,)), "step 1 adds the files, not the index")
+            self.assertEqual(calls[2][0], "commit")
+            self.assertEqual(calls[3][0], "wait")
+            samples = calls[3][1]
+            self.assertIn("files/" + sha(b"GAME-ARCHIVE" * 100) + ".dat", samples)
+            self.assertTrue(any(s.startswith("files/") for s in samples))
+            self.assertTrue(any(s.startswith("previews/") for s in samples))
+            self.assertEqual(calls[4], ("sync", True, ()), "step 2 moves the index and removes what it no longer names")
+            self.assertEqual(calls[6], ("wait", [ph.INDEX_V2]), "the index is the last thing served")
+
+
 class HostTests(HermeticTestCase):
     def setUp(self):
         super().setUp()
@@ -219,6 +274,45 @@ class HostTests(HermeticTestCase):
             pg.sync_site_dir(stage)
             self.assertFalse(os.path.exists(os.path.join(pg.dir, "files", "old.dat")))
             self.assertEqual(pg.read("files/new.dat"), b"new")
+
+    def test_the_feed_copy_goes_to_the_github_root_as_releases_json(self):
+        import publish_release as pr
+        import unittest.mock as mock
+        orig_init = pages.Pages.__init__
+
+        def remote_init(this, repo=gv.HUB_REPO, token=None, remote=None, scratch=None, host="gitverse"):
+            orig_init(this, repo, token=token, remote=self.bare, scratch=self.scratch, host=host)
+
+        with mock.patch.object(pages.Pages, "__init__", remote_init), \
+                mock.patch.object(pages.Pages, "wait_served", lambda self, expected, **k: 0.0):
+            pr.push_feed_copies(b"[]\n", 0)
+        tree = subprocess.run(["git", "--git-dir", self.bare, "ls-tree", "--name-only", "gh-pages"],
+                              capture_output=True, text=True, check=True).stdout.split()
+        self.assertIn("releases.json", tree)
+        content = subprocess.run(["git", "--git-dir", self.bare, "show", "gh-pages:releases.json"],
+                                 capture_output=True, text=True, check=True).stdout
+        self.assertEqual(content, "[]\n")
+
+    def test_two_step_sync_adds_first_then_removes_and_keeps_the_feed(self):
+        stage = os.path.join(self.scratch, "stage-two")
+        os.makedirs(os.path.join(stage, "files"))
+        for rel, data in (("index-v2.json", b"new-index"), ("files/new.dat", b"new")):
+            with open(os.path.join(stage, *rel.split("/")), "wb") as f:
+                f.write(data)
+        with pages.Pages("razdor-community", remote=self.bare, scratch=self.scratch, host="github") as pg:
+            pg.write("releases.json", b"[]")
+            pg.write("index-v2.json", b"old-index")
+            pg.write("files/old.dat", b"old")
+            # step 1: additive, the live index stays
+            pg.sync_site_dir(stage, remove=False, skip=("index-v2.json",))
+            self.assertEqual(pg.read("index-v2.json"), b"old-index")
+            self.assertEqual(pg.read("files/old.dat"), b"old")
+            self.assertEqual(pg.read("files/new.dat"), b"new")
+            # step 2: the index, and what it no longer names goes; the feed stays
+            pg.sync_site_dir(stage)
+            self.assertEqual(pg.read("index-v2.json"), b"new-index")
+            self.assertIsNone(pg.read("files/old.dat"))
+            self.assertEqual(pg.read("releases.json"), b"[]")
 
     def test_wait_uses_the_host_base_and_the_root_paths(self):
         class H(http.server.BaseHTTPRequestHandler):

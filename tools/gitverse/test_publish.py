@@ -118,11 +118,13 @@ class PublishFlowTests(HermeticTestCase):
             unittest.mock.patch.object(pr, "target_for", lambda tag, given: "main"),
             unittest.mock.patch.dict(os.environ, {"RAZDOR_GITVERSE_STATE": self.state}),
             unittest.mock.patch.object(pages, "SCRATCH", self.scratch),
+            # the GitHub copy of the feed has its own bare repository (test_pages_layout covers it)
+            unittest.mock.patch.object(pr, "FEED_HOSTS", ()),
         ]
         orig_init = pages.Pages.__init__
 
-        def remote_init(this, repo=gv.HUB_REPO, token=None, remote=None, scratch=None):
-            orig_init(this, repo, token=token, remote=self.bare, scratch=self.scratch)
+        def remote_init(this, repo=gv.HUB_REPO, token=None, remote=None, scratch=None, host="gitverse"):
+            orig_init(this, repo, token=token, remote=self.bare, scratch=self.scratch, host=host)
 
         self.patches.append(unittest.mock.patch.object(pages.Pages, "__init__", remote_init))
         for p in self.patches:
@@ -231,8 +233,8 @@ class HubFlowTests(HermeticTestCase):
         g.save_registry(reg, os.path.join(self.state, "registry.json"))
         orig_init = pages.Pages.__init__
 
-        def remote_init(this, repo=gv.HUB_REPO, token=None, remote=None, scratch=None):
-            orig_init(this, repo, token=token, remote=self.bare, scratch=self.scratch)
+        def remote_init(this, repo=gv.HUB_REPO, token=None, remote=None, scratch=None, host="gitverse"):
+            orig_init(this, repo, token=token, remote=self.bare, scratch=self.scratch, host=host)
 
         self.patches = [
             unittest.mock.patch.object(gv, "Client", FakeClient),

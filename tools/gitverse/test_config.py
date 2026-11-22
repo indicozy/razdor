@@ -26,7 +26,7 @@ def git(*args, cwd):
 def good():
     return {
         "schema": 1,
-        "update_feed": ["https://feed.example/releases.json", "https://api.example/releases"],
+        "update_feed": list(publish_config.FEED_ORDER) + ["https://api.example/releases"],
         "hub": ["https://hub.example/razdor", "https://github.example/latest/download"],
         "game": {"links": ["https://gitverse.example/game.zip"], "size": 1234,
                  "sha256": "ab" * 32, "name": "game.zip"},
@@ -42,6 +42,17 @@ class CheckTests(HermeticTestCase):
         cfg = publish_config.check(pages.config_bytes())
         self.assertEqual(cfg["schema"], 1)
         self.assertTrue(cfg["update_feed"][0].startswith("https://indicozy.gitverse.site/"))
+        self.assertEqual(cfg["update_feed"][1], "https://indicozy.github.io/razdor-community/releases.json")
+
+    def test_the_github_feed_must_come_after_gitverse_and_be_present(self):
+        def with_feed(feed):
+            cfg = good()
+            cfg["update_feed"] = feed
+            return cfg
+        swapped = list(publish_config.FEED_ORDER)[::-1] + ["https://api.example/releases"]
+        for feed in (swapped, [publish_config.FEED_ORDER[0], "https://api.example/releases"]):
+            with self.assertRaises(gv.GitVerseError):
+                publish_config.check(raw_of(with_feed(feed)))
 
     def test_a_good_config_passes(self):
         self.assertEqual(publish_config.check(raw_of(good()))["game"]["name"], "game.zip")
