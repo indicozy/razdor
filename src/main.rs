@@ -136,6 +136,7 @@ fn export_exit_png(shot: &Image, path: &str, what: &str) {
 /// that is no longer mapped. Everything Razdor writes (saves, `audio.json`) is written and
 /// closed synchronously before this, so skipping the handlers loses nothing.
 fn exit_now(app: &mut App, how: &str) -> ! {
+    ui::analytics::session_end();
     razdor::diag::step("quitting");
     razdor::diag::log(&format!("exit: path: {how}"));
     // Android: the app leaves the screen first, so the slow writes below happen off the screen
@@ -279,6 +280,8 @@ async fn main() {
     // now that the install and the language are set.
     razdor::telemetry::install_loaded(assets.dt.is_some());
     let mut app = App::new(assets, content);
+    // The play events' session (a no-op without the analytics): the window's size and the settings.
+    ui::analytics::session_start(&app);
     // The hub's catalog, read once for the launch (the promo ad and the game check; `ui::launch`).
     ui::launch::start();
     if let Some(job) = waiting {

@@ -5,6 +5,7 @@ pub mod bench;
 pub mod bench_autorun;
 pub mod bench_view;
 pub mod debug_banner;
+pub mod analytics;
 pub mod battle_view;
 pub mod building_view;
 mod ads;
@@ -864,6 +865,7 @@ impl App {
                 } else {
                     Screen::WorldMap
                 };
+                analytics::save_loaded(self, path, &game);
                 self.game = Some(game);
             }
             // A save made with another mod is told with its own words (the save names its ids).
@@ -1403,6 +1405,8 @@ impl App {
         // The map under a windows' copy (`map_freeze`) lives while a window over the map is drawn: a frame
         // with none releases it at the next frame's start.
         map_freeze::begin_frame();
+        // The play events (a no-op without the analytics): the screens, the dialogs and one poll a second.
+        analytics::frame(self);
         // Esc (or Back) closes the performance test's windows, or stops its run: the key is used here.
         if bench::handle_escape(self) {
             return;

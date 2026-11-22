@@ -2258,7 +2258,14 @@ fn help_button(c: &RowCol, geo: &RowGeo, y: f32, text: &'static str) {
         HELP_HOVER.with(|h| h.set(Some(text)));
     }
     if scroll_button(r, "?", geo.btn_size) {
-        HELP_PINNED.with(|p| p.set(if p.get() == Some(text) { None } else { Some(text) }));
+        let opened = HELP_PINNED.with(|p| {
+            let next = if p.get() == Some(text) { None } else { Some(text) };
+            p.set(next);
+            next.is_some()
+        });
+        if opened {
+            super::analytics::hint_opened();
+        }
     }
 }
 

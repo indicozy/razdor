@@ -2023,6 +2023,7 @@ impl BattleView {
     /// `Unit-Upgrade` is the promotion screen's).
     fn close_won(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
         let result = game.resolve_battle(&self.battle);
+        super::analytics::battle_ended(&self.battle, &result);
         if game.won() {
             return Screen::Victory;
         }
@@ -2037,7 +2038,8 @@ impl BattleView {
     /// report follows on the map 250 ms later (4c575b → the chained step 0x4af658); its OK
     /// ends the game ([`Dialog::defeat`]).
     fn close_lost(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
-        game.resolve_battle(&self.battle);
+        let result = game.resolve_battle(&self.battle);
+        super::analytics::battle_ended(&self.battle, &result);
         let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
         dialogs.push_back(Dialog { not_before: Some(due), ..Dialog::defeat(super::last_save_path().is_some()) });
         *message = None;
@@ -2074,6 +2076,7 @@ impl BattleView {
             return None;
         }
         let result = game.resolve_battle(&self.battle);
+        super::analytics::battle_ended(&self.battle, &result);
         match result {
             BattleResult::Defeat => {
                 dialogs.push_back(Dialog::defeat(super::last_save_path().is_some()));

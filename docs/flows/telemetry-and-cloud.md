@@ -135,6 +135,19 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   ASCII case ignored.
 - `src/remote_config.rs`: `API_BUILTIN` (the one const for the API address, a placeholder), the `api`
   list and the `telemetry` kill switch (`false` stops every send). Both come from the config.
+- `src/telemetry/events.rs`: `Tracker`, the play events (pure, time-injected: every call takes `now` and the
+  hub). Records only with the consent yes (`Hub::consent_now`, read without writing the state); batches at most
+  once a minute (at once at 200 pending, and at the session's end) into `paths::EVENTS` with `Class::Consent`.
+  The open map run is `<app data>/telemetry/runs.json` (temporary name, then rename; a read error is no run).
+  A run with no time in the map for 7 days is closed as Abandoned at its last time in the map (`sweep`, on the
+  session start and on each flush). `fnv1a64_hex` is the map hash. `differing_settings` sends the names and
+  keys only (a string goes out only in lower-case snake case).
+- `src/ui/analytics.rs`: the UI's hooks, all no-ops without the hub. `session_start` (`main.rs`, after
+  `App::new`) and `session_end` (`main.rs` `exit_now`, every exit); `frame` (`App::frame`: the screens and the
+  dialogs as windows, the settings when the options close, and one poll a second: the time in the map, the
+  progress, the map's end); `campaign_started` (`screens::start_game_with_rules`: the run starts at the next
+  frame, when the app's settings are at hand); `save_loaded` (`App::load`); `battle_ended`
+  (`battle_view`, after each `resolve_battle`); `hint_opened` (`main_menu::help_button`, the «?» buttons).
 - `src/ui/telemetry_view.rs`: the consent window (`«Помочь Раздору?»`, asked at the first start and once
   after an update), the crash question, and the three Settings panels (show id with copy, delete my data,
   new id). `src/ui/main_menu.rs` `Row::Telemetry*`: the four rows in the Other group.
@@ -155,9 +168,8 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 
 ### Not built yet (the client, phase 3)
 
-- Play events beyond the session: map start and end, progress every five game days, abandoned maps,
-  older saves, changed settings, UI counters. The `wire::EventKind` values exist; the hooks do not.
-- Session start and end (the length) and the heartbeat file that derives the end of a session.
+- The session's end is the clean exit only (`exit_now`): there is no heartbeat file yet, so a crash, a killed
+  process or an Android kill sends no SessionEnd, and the events still pending in memory are lost.
 - Performance reports (device, frame medians, loads, memory, the profiler pass) and battle records
   (reusing `rules::recording`).
 - Native crashes (signals, the Windows access violation): no pending file is written, so they are not
@@ -166,7 +178,9 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 
 ### Tests
 
-`cargo test --profile fasttest --lib -- telemetry:: remote_config::` covers the state file, the queue
+`cargo test --profile fasttest --lib -- telemetry:: remote_config::` covers the events tracker (consent off
+records nothing, the batch validates, the 7-day sweep, the run's restart, progress every five days, the batch
+cadence, the counters once a session, the older save, the settings diff, the map hash), and covers the state file, the queue
 (reopen, cap, refusal, purge), the gates (before consent only the ping; no, delete and new id), the
 sender (2xx, refusal, throttle backoff, consent items never sent without consent, an unreachable host
 that does not block enqueueing and keeps the queue under 5 MB), the crash report (cleaned log, no

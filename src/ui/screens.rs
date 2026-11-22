@@ -791,6 +791,7 @@ pub(super) fn start_game_with_rules(demo: &Arc<Content>, scenario: Option<(&Scen
     };
     g.set_hero_name(name);
     razdor::diag::play(&g.clock.label(), &super::play_game_line(&g, "new game"));
+    super::analytics::campaign_started(&g);
     g
 }
 
