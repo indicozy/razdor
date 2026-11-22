@@ -546,6 +546,66 @@ public String razdorPost(String url, String bodyPath, int stallSeconds, int tota
     }
 }
 
+// One cloud request (`cloud::http`, the Rust side's `Net`): `method` is GET, POST, PUT or DELETE; `key` is the
+// account key, sent as the x-razdor-key header (`razdor_wire::paths::KEY_HEADER`), "" for none; `bodyPath` is the
+// request body's file ("" for no body). The reply's body is written to `replyPath` as bytes (a save is binary,
+// so it never goes through a String). Returns "HTTP <code>", with " retry-after <seconds>" after it when the
+// server sent a Retry-After; "stalled: <why>" for a stall, "timeout: ..." at the cap, or the error's text.
+// The stall and total limits are as razdorDownload's. Called from the cloud worker's thread, never the UI's.
+public String razdorRequest(String method, String url, String key, String bodyPath, String replyPath, int stallSeconds, int totalSeconds) {
+    long deadline = System.currentTimeMillis() + totalSeconds * 1000L;
+    HttpURLConnection connection = null;
+    try {
+        connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setRequestMethod(method);
+        connection.setConnectTimeout(stallSeconds * 1000);
+        connection.setReadTimeout(stallSeconds * 1000);
+        connection.setRequestProperty("User-Agent", "razdor");
+        connection.setRequestProperty("Content-Type", "application/octet-stream");
+        if (key != null && !key.isEmpty()) {
+            connection.setRequestProperty("x-razdor-key", key);
+        }
+        if (bodyPath != null && !bodyPath.isEmpty()) {
+            connection.setDoOutput(true);
+            connection.setFixedLengthStreamingMode(new java.io.File(bodyPath).length());
+            try (java.io.InputStream in = new java.io.FileInputStream(bodyPath); java.io.OutputStream out = connection.getOutputStream()) {
+                byte[] buffer = new byte[65536];
+                int n;
+                while ((n = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, n);
+                }
+            }
+        }
+        int code = connection.getResponseCode();
+        String retryAfter = code / 100 != 2 ? connection.getHeaderField("Retry-After") : null;
+        java.io.InputStream reply = code / 100 == 2 ? connection.getInputStream() : connection.getErrorStream();
+        int n = 0;
+        try (FileOutputStream out = new FileOutputStream(replyPath)) {
+            if (reply != null) {
+                try (java.io.InputStream in = reply) {
+                    byte[] buffer = new byte[65536];
+                    while (System.currentTimeMillis() < deadline && (n = in.read(buffer)) > 0) {
+                        out.write(buffer, 0, n);
+                    }
+                }
+            }
+        }
+        // The loop ended at the cap with the last read still running (n > 0), not at the end.
+        if (n > 0) {
+            return "timeout: the request took longer than " + totalSeconds + " s";
+        }
+        return "HTTP " + code + (retryAfter == null ? "" : " retry-after " + retryAfter.trim());
+    } catch (java.net.SocketTimeoutException e) {
+        return "stalled: " + e;
+    } catch (Exception e) {
+        return e.toString();
+    } finally {
+        if (connection != null) {
+            connection.disconnect();
+        }
+    }
+}
+
 // Fetches `url` for a copy the app keeps: `etag` and `lastModified` ("" when there is none) are sent as
 // If-None-Match and If-Modified-Since. Returns "304" when the copy is current (nothing is written), else
 // "200\n<ETag>\n<Last-Modified>" (empty lines for the headers the server did not send) with the body written

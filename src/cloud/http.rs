@@ -1,7 +1,10 @@
 //! The cloud's requests: any method, an optional account key header, an optional body. Desktop
-//! runs the system's `curl` (like `update.rs`, with the window hidden on Windows). Android and iOS
-//! have no transport here yet (the phones' `razdorPost` takes POST without headers): their requests
-//! fail as offline, so the game stays playable and the sync waits.
+//! runs the system's `curl` (like `update.rs`, with the window hidden on Windows). Android runs the
+//! app's own `HttpURLConnection` through the JNI (`razdorRequest` in `android/MainActivityInject.java`).
+//! iOS has no transport yet: its requests fail as offline, so the game stays playable and the sync waits.
+//! [`platform_net`] picks the one for the platform the game runs on.
+
+use std::sync::Arc;
 
 /// The header that carries the account key ([`razdor_wire::paths::KEY_HEADER`]).
 pub const KEY_HEADER: &str = razdor_wire::paths::KEY_HEADER;
@@ -69,7 +72,54 @@ impl Net for Curl {
     }
 }
 
+/// Android: the app's own `HttpURLConnection`, called through the JNI (`update::phone_request`). `seconds`
+/// is the whole request's cap; a stall gives up after `update::STALL_SECONDS` (as the phones' other calls).
+#[cfg(target_os = "android")]
+pub struct Phone {
+    pub seconds: u32,
+}
+
+#[cfg(target_os = "android")]
+impl Net for Phone {
+    fn send(&self, method: &str, url: &str, key: Option<&str>, body: Option<&[u8]>) -> Result<Reply, String> {
+        let (status, body) = crate::update::phone_request(method, url, key, body, self.seconds)?;
+        Ok(Reply { status, body })
+    }
+}
+
+/// iOS: no cloud transport yet, so every request is `Offline` (the sync waits and retries; the game
+/// plays on). When iOS gets a request call, it replaces this, as [`Phone`] did for Android.
+#[cfg(target_os = "ios")]
+pub struct Offline;
+
+#[cfg(target_os = "ios")]
+impl Net for Offline {
+    fn send(&self, _method: &str, _url: &str, _key: Option<&str>, _body: Option<&[u8]>) -> Result<Reply, String> {
+        Err("no cloud transport on iOS yet".into())
+    }
+}
+
+/// The transport for the platform the game runs on, with `seconds` as its stall limit: [`Curl`] on
+/// desktop, [`Phone`] on Android, [`Offline`] on iOS. Whatever starts the cloud worker takes this one
+/// (no production code starts it yet; the tests use [`Curl`] directly).
+pub fn platform_net(seconds: u32) -> Arc<dyn Net> {
+    #[cfg(target_os = "android")]
+    {
+        Arc::new(Phone { seconds })
+    }
+    #[cfg(target_os = "ios")]
+    {
+        let _ = seconds;
+        Arc::new(Offline)
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        Arc::new(Curl { seconds })
+    }
+}
+
 /// Splits curl's output (the body, then `\n` and the status code) into the reply.
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 fn split_reply(out: &[u8]) -> Result<Reply, String> {
     let cut = out.iter().rposition(|&b| b == b'\n').ok_or("curl: no status code")?;
     let status: u16 = std::str::from_utf8(&out[cut + 1..])

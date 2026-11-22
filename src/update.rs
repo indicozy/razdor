@@ -495,6 +495,12 @@ pub(crate) fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>
     phone::post(url, body, seconds)
 }
 
+/// One cloud request on Android (`cloud::http::Phone`): the phone's own `HttpURLConnection` (`phone::request`).
+#[cfg(target_os = "android")]
+pub(crate) fn phone_request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32) -> Result<(u16, Vec<u8>), String> {
+    phone::request(verb, url, key, body, seconds)
+}
+
 /// The desktop's reply: the body, then a line with the status code (`curl -w "\n%{http_code}"`).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn parse_post_reply_bytes(out: &[u8]) -> Result<(u16, Vec<u8>), String> {
