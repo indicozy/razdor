@@ -76,14 +76,23 @@ without an Android or iOS file gets no offer on that system.
 3b. Carry-over check before the tag (the owner's decision, 2026-11-15: the data an older release left must
    carry over, e.g. the picture cache, the converted game folders, the mods' compressed pictures). With the
    release binary of step 3 (`target/release/razdor`, built with `cargo build --release`), run it against the
-   last three published releases (the newest first):
-   `$(ai-resources prefix) python3 -I tools/release/update_check.py --from vPREV1 --from vPREV2 --from vPREV3 --new-bin target/release/razdor`
-   (`RAZDOR_DT_DIR` and `RAZDOR_COMMUNITY_DIR` from `.env`/`CLAUDE.local.md`; about 6 minutes per old release, so
-   run it in the background with a done-file and poll it in the foreground). Exit 0 goes on. Exit 1 = a
+   older releases in use (the `--from` list): `python3 -I tools/release/from_list.py --args` prints it (the
+   previous release; the oldest release of each minor line that still had player downloads in the last 30 days,
+   from the stats CSV; and v1.5.0 and v1.4.1 whenever they exist; its reasons go to stderr and stay private).
+   Then `$(ai-resources prefix) python3 -I tools/release/update_check.py <that list> --new-bin target/release/razdor`
+   (`RAZDOR_DT_DIR` and `RAZDOR_COMMUNITY_DIR` from `.env`/`CLAUDE.local.md`; about 6 minutes per `--from`, so
+   for ten or more versions it runs past an hour: start it in the background with a done-file and poll it in the
+   foreground). Exit 0 goes on. Exit 1 = a
    carry-over row failed (a lost save, a mod that does not load, a changed file, a crash, a conversion that breaks
    the install): STOP the release, keep the scratch folder, and tell the owner with the rows and the logs the
    tool names; the fix is the owner's to decide. Exit 2 = the check could not run: rerun, report if it persists.
    Put the table (one row per `--from`: the conversion time, the screenshots' folder, the result) in the step-8 report.
+3c. Android, before the tag (only when the release changes anything Android: the Android code, the manifest or
+   the Android build). The pipeline's APK is unsigned (the signing job runs after the tag), and an APK that is not
+   signed with the release key cannot install over a published one. So before the tag only the static rules can
+   run, and only with a release-signed APK the owner has here: `python3 -I tools/release/android_update_check.py
+   --from vPREV --new-apk <that APK> --static-only`. Otherwise say in the step-8 report that the emulator check
+   follows in 6c.
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to
    `changelog/X.Y.Z.md` under the heading `## X.Y.Z — YYYY-MM-DD`, leave `unreleased.md` empty
    (its header only), and regenerate `CHANGELOG.md` with `scripts/changelog.sh`. Sections inside
@@ -110,13 +119,25 @@ without an Android or iOS file gets no offer on that system.
    A release with an iOS file: the `.ipa` is left out of GitVerse (it refuses it), with a warning.
 6b. Update check (the owner's decision, 2026-11-15): after 6a (the GitVerse feed is read first from 1.5.2 on),
    once the pipeline is green and the release is published,
-   `$(ai-resources prefix) python3 -I tools/release/update_check.py --from vPREV --to vX.Y.Z` (vPREV = the previous
-   release; the core pinning prefix from `CLAUDE.local.md`; see `tools/release/README.md` for the scratch folder and
-   the Android SDK). The same run then checks the data carry-over from vPREV with the published Linux binary
+   `$(ai-resources prefix) python3 -I tools/release/update_check.py <the list> --to vX.Y.Z` (the list is
+   `python3 -I tools/release/from_list.py --to vX.Y.Z --args`: the previous release and the older ones still in use,
+   one `--from` each; the desktop part runs for each; the core pinning prefix from `CLAUDE.local.md`; see
+   `tools/release/README.md` for the scratch folder and the Android SDK). The same run then checks the data carry-over from vPREV with the published Linux binary
    (`--from` and `--to` together do both; the README has the rows). Exit 0 goes on; exit 1 = the previous release
    does not update to this one (or the APK cannot install over it), or its data does not carry over: tell the
    owner at once with the summary; exit 2 = network/tool error (or a refused `--to`, which is not the newest
    release): rerun, report if it persists. Put its result in the step-8 report.
+6c. Android update check, after the release (the APK over the previous one: the install, the version, the data,
+   and a crash the old version does not have). Once 6b has run:
+   `$(ai-resources prefix) python3 -I tools/release/android_update_check.py --from vPREV --to vX.Y.Z`
+   It uses the published APKs and a private headless emulator (a copy of the scratch AVD on a private Xvfb; no GPU
+   is used; see the emulator notes in `tools/release/README.md`). It takes about 9 minutes: start it in the
+   background with a done-file and poll it in the foreground. It runs against vPREV, the release players update
+   from; the older releases in use get the desktop check in 6b. Exit 0 goes on. Exit 1 = the new APK does not
+   install over the previous one, its version or its data does not carry over, or the new app crashes where the
+   old one does not: tell the owner at once with the table, and go to the Rollback section. Exit 2 = the check
+   could not run (no emulator boot, network, a device already on the port): rerun, report if it persists. Put its
+   table in the step-8 report.
 7. Follow-up commit: take the SHA-256 from the **published release** (`gh release view vX.Y.Z`),
    never from a local build (the build embeds the git id). Under the version heading in
    `changelog/X.Y.Z.md` add:
@@ -141,7 +162,8 @@ without an Android or iOS file gets no offer on that system.
    pushes the `site` branch of `razdor` on GitVerse, waits for its workflow and the bytes). Its result is
    the step-8 line for the site.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results, and the
-   GitVerse mirror's result (step 6a: pushed, published, or the error).
+   GitVerse mirror's result (step 6a: pushed, published, or the error), the update checks (3b and 6b: the
+   `--from` list and one row per `--from`; 6c: the Android table, or that it follows after the release).
    Add the download statistics: run `python3 -I tools/stats/downloads.py` (it appends a live
    snapshot to the private CSV; the default path needs no argument, or see `CLAUDE.local.md`)
    and paste its summary into the report to the owner (`tools/stats/README.md`). The numbers are
@@ -166,5 +188,32 @@ without an Android or iOS file gets no offer on that system.
      2026-10-27): no follow-up post or reply when the files are built or a pipeline job is rerun;
      a failed pipeline is fixed quietly and reported to the owner only.
      Posting needs `DISCORD_ALLOW_POST=1`. Give the owner the post's link in the report back.
+
+## Rollback (a bad release, no new release)
+
+When: 6b exits 1 (the previous release does not update to this one, or its data does not carry over), 6c exits 1
+(the new APK does not install or start over the previous one, or it crashes where the old one does not), or players
+report a broken update or a crash on start. Run it within minutes, then tell the owner.
+
+1. Dry run: `python3 -I tools/release/rollback.py --to vPREV` (vPREV = the release players should be on). It prints
+   the two changes: the bad release becomes a pre-release on GitHub (`gh release edit vBAD --prerelease`, so the API
+   list the updaters read skips it), and the update feed `releases.json` on the razdor-community Pages is rewritten
+   without the bad release. A blocker stops it (exit 1, nothing changed): report it to the owner; do not work around it.
+2. Apply: `python3 -I tools/release/rollback.py --to vPREV --apply`. It writes the feed first (a commit on
+   razdor-community `main`, then a wait until the address serves it), then flips GitHub, then checks that the newest
+   published release is vPREV. It prints what it changed; a failure says what may have changed: check the feed and
+   the GitHub release by hand.
+3. Tell the owner at once (stolik, kind "proactive", one or two sentences): the bad release, the rollback's result
+   and what it changed.
+4. Players already on the bad release are not moved back: the updaters never offer an older release. They get the
+   next fixed release, so say so to the owner. The bad release's files stay downloadable (as a pre-release).
+5. config.json (`data/remote/config.json`) needs no change for a feed rollback. Change it only when the dry run
+   warns that the live config names the bad tag or does not list the feed: edit the repo file on `main`, then
+   `python3 -I tools/gitverse/publish_config.py`, with the owner's yes first.
+6. Android (APKs cannot be withdrawn from a phone): nothing to roll back there; the feed keeps the newer APK from
+   being offered.
+
+The rollback needs `gh` logged in as indicozy and `GITVERSE_TOKEN` (`.env`). Its tests run with the release tools
+(`python3 -I -m unittest discover -s tools/release -p 'test_*.py'`).
 
 Release notes are public at once: no personal data, nothing from the game.

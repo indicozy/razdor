@@ -1,8 +1,24 @@
 # Release tools
 
-`update_check.py`: checks that the previous release updates to the new one (release step 6b), and
-that the data an older release left carries over to the new program (the carry-over check, steps 3b
-and 6b).
+Checks run by the release skill on a Razdor release. Plain Python 3, standard library only; run them with
+`python3 -I` from the repository root.
+
+| Script | What it checks | Release step |
+|---|---|---|
+| `update_check.py` | the desktop update (the previous release puts the new one in place) and the data carry-over (saves, mods, the picture cache) | 3b, 6b |
+| `from_list.py` | prints the `--from` list for `update_check.py` from the download stats | 3b, 6b |
+| `android_update_check.py` | the Android APK over the previous one: signatures, package, versionCode, and a headless emulator install with the data kept | 6c (after the release) |
+| `rollback.py` | withdraws a bad release from the update feeds (dry run by default) | Rollback |
+| `testkit.py`, `test_*.py` | hermetic tests of the four tools above (fakes; no network, no emulator, no gh, no token) | the gate |
+
+Tests (about a second):
+
+    python3 -I -m unittest discover -s tools/release -p 'test_*.py'
+
+## update_check.py
+
+Checks that the previous release updates to the new one (release step 6b), and that the data an older
+release left carries over to the new program (the carry-over check, steps 3b and 6b).
 
 After the release (the published binary is the new one):
 
@@ -13,9 +29,13 @@ Before the tag (the locally built program; the carry-over check only, no self-up
     $(ai-resources prefix) python3 -I tools/release/update_check.py --from v1.5.1 --from v1.5.0 --from v1.4.1 \
         --new-bin target/release/razdor
 
+The `--from` list comes from `from_list.py --args` (see below).
+
 - `--to` must be the newest published release (drafts and pre-releases aside): the updater only
   offers the newest. `--from` must be an older published release; give it once per old release.
-  Each `--from` runs in its own folder under the scratch folder.
+  Each `--from` runs in its own folder under the scratch folder, and the desktop part runs for each.
+- The release list is read on every page of the GitHub API (100 at a time): the repo has more than 30
+  releases, and an old one such as v1.4.1 is not in the first page.
 - Desktop (Linux) update: the old program, `updates = always`, puts the new one in place; the file must
   match the new release's `SHA256SUMS` and the updated program must start and log the new version.
   Android: both APKs verify, the same certificate, the same package, a versionCode that does not go down.
@@ -56,3 +76,112 @@ Before the tag (the locally built program; the carry-over check only, no self-up
 - Not covered: Windows, macOS, iOS, phones (the first-start conversion there is always on: an emulator
   run is separate), and a player's real install (its saves, its Hub, the phone's install dialog). The
   conversion's screens are the harness's own screenshots on a private display, not a player's.
+
+## from_list.py: the `--from` list
+
+    python3 -I tools/release/from_list.py --args                # before the tag: the newest published release and the rest
+    python3 -I tools/release/from_list.py --to v1.5.5 --args    # after the release: --to is the new one
+
+Prints the older releases the update check runs against, newest first (`--args`: as one line of
+`--from` arguments). The reasons go to stderr; they carry download counts, so they stay private.
+
+- the previous release: the newest published one before `--to` (without `--to`: the newest published);
+- the oldest release of each minor line (X.Y) that still had player downloads in the last `--window` days
+  (default 30). The count is the growth of the player platforms (windows, linux, macos, android, ios)
+  between the last snapshot at or before the window's start and the newest snapshot. The `translate` and
+  `sums` rows (bots, the updater's checksum fetch) are not counted. A release published inside the window
+  counts from zero; one older than the window with no snapshot before its start counts from its first
+  snapshot (a lower bound, flagged in the reason);
+- v1.5.0 and v1.4.1 whenever they exist (the owner's floor, 2026-11-22);
+- `--min-downloads N` raises the bar (default 1); `--csv` (default `$RAZDOR_STATS_CSV`, else
+  `/mnt/ai_models/razdor-stats/downloads.csv`); `--releases FILE` (a JSON list of release objects instead of
+  the GitHub API; for tests and offline use).
+- Exit 2: no stats CSV (`--allow-no-stats` prints the previous release and the floor only), or no published
+  release before the new one.
+
+## android_update_check.py: the Android update
+
+    python3 -I tools/release/android_update_check.py --from v1.5.3 --to v1.5.4
+    python3 -I tools/release/android_update_check.py --from v1.5.3 --new-apk <APK> --static-only
+
+1. The APKs (the rules of `update_check.check_apk_pair`): the old APK comes from its release and must match its
+   `SHA256SUMS` line; both verify (`apksigner`); the same signing certificate; the same package; a versionCode
+   that does not go down; the versionName. Every release so far ships versionCode 1.
+2. A private headless emulator: a copy of the AVD (2.4 GB; removed at the end unless `--keep`), a private Xvfb on a
+   free display (never the owner's `:0`), `-gpu host` (Mesa is forced on the X server, so the software renderer
+   draws and no GPU is used), `-no-window -no-audio -no-snapshot`, pinned to `ai-resources cpus` at nice 19.
+3. The old APK is installed (after an uninstall, so the data starts empty), started, and its log
+   (`files/Razdor/razdor.log` in the app's folder) names its version. Data is made the way a player's is:
+   `settings.json` with a test marker and `saves/carry-test.txt`, pushed with `adb push`. A release APK is not
+   debuggable, so `run-as` does not work; `adb push` into the app's folder does.
+4. The old app runs 30 s and its crash lines are recorded (log and logcat). The data must read back as pushed,
+   after a `sync`, before the emulator stops. The emulator is then booted again: the new version gets a fresh GL
+   session (see the emulator notes).
+5. The new APK is installed over the old one (`adb install -r`); the package reports the new version; the app
+   starts and its log names the new version; it runs 30 s. A crash line that only the new version shows fails
+   the check; one that both versions show is an emulator limit (INFO). The saves file must be unchanged; the
+   settings file unchanged, or rewritten by the app with the test's marker still set.
+
+Exit: 0 every check passed, 1 a check failed (the install, the version, a new crash, the data), 2 the check
+could not run (no SDK, no emulator boot, no network, a device already on the port).
+
+Emulator notes (measured on this machine, 2026-11-22):
+
+- The emulator needs a display even with `-no-window`: it runs on a private Xvfb (the script starts one).
+- `-gpu swiftshader_indirect` segfaults (exit -11) just after «Emulator is performing a full startup» here;
+  `-gpu host` on the private Xvfb boots. The script forces Mesa (`__GLX_VENDOR_LIBRARY_NAME=mesa`,
+  `LIBGL_ALWAYS_SOFTWARE=1`), so no GPU is used.
+- A second GL app on the same emulator process failed to create its EGL config (miniquad `egl.rs:209`, the
+  `cfg_count > 0` assert): the check restarts the emulator before the new version. A player's update is a new
+  process too.
+- `adb shell cat` goes through a terminal and turns LF into CRLF: the check reads files with `adb pull`.
+- A run takes about 9 minutes (two boots and the two APK downloads): start it in the background with a done-file.
+
+Not covered: a real phone (Play, the installer dialog, the app's own updater, which offers «Ask» on a phone),
+a player's saves and Hub, the first-start conversion on a phone (see the mobile checks).
+
+Before the tag, the pipeline's APK is unsigned (the signing job runs after the tag), and an unsigned or
+debug-signed APK cannot install over a release-signed one. So the emulator check runs after the release (6c)
+on the published APK. Before the tag, only `--static-only --new-apk <APK signed with the release key>` is
+possible, and only if the owner has that build here.
+
+Setup, if the SDK, the image or the AVD is missing (on this machine all exist under
+`/mnt/ai_models/razdor-scratch/android-apk`; nothing was downloaded for this check):
+
+    sdkmanager "platform-tools" "emulator" "platforms;android-34" "build-tools;35.0.0" \
+        "system-images;android-34;google_apis;x86_64"       # the system image is about 4.3 GB
+    avdmanager create avd -n razdor -k "system-images;android-34;google_apis;x86_64" -d pixel_6 --force
+
+The AVD here: android-34 google_apis x86_64, 1080x2340, 1536 MB RAM, a 512 MB SD card.
+
+## rollback.py: withdraw a bad release
+
+    python3 -I tools/release/rollback.py --to v1.5.3                # dry run (the default): prints the plan
+    python3 -I tools/release/rollback.py --to v1.5.3 --bad v1.5.4 --apply
+
+The updaters read two things: the GitHub release list (drafts and pre-releases skipped; an offer only for a
+release newer than the program) and the update feed `releases.json` on the razdor-community Pages (the first
+address of `UPDATE_FEED` in `src/mirror.rs`). A rollback makes the bad release a pre-release on GitHub
+(`gh release edit vBAD --repo indicozy/razdor --prerelease`) and rewrites the feed without it and without
+anything newer than the target. The feed is written through `tools/gitverse/pages.py` (a commit on
+razdor-community `main`, then a wait until the address serves the new bytes). The target's own entry keeps its
+asset addresses.
+
+- The dry run reads GitHub, the feed and the live config (anonymous reads) and writes nothing. It prints the two
+  changes, the warnings and any blockers.
+- Blockers (exit 1, nothing changed): the bad release is not the newest published one; the target is not older
+  than it or not published; the feed cannot be read or does not list the target; the repo's
+  `data/remote/config.json` differs from the live config (a Pages push writes the repo's file over the live one).
+- Warnings: the live config names the bad tag (fix `data/remote/config.json`, then `publish_config.py`); its
+  `update_feed` does not list the feed; the config cannot be read.
+- `--apply` writes the feed first, then flips GitHub, then checks that the newest published release is the target.
+  It prints what it changed; a failure says what may have changed.
+- A player already on the bad release is not moved back: the updaters never offer an older release. Those players
+  get the next fixed release.
+- `--apply` needs `gh` logged in as indicozy (`gh auth token -u indicozy`) and `GITVERSE_TOKEN` (in `.env`).
+
+## Tests
+
+`testkit.HermeticTestCase` gives each test a temp folder and makes a socket connection raise. The tests inject
+fakes for the release list, the feeds, the stats CSV, the adb device, the emulator process and the Pages writer.
+Only the mirror and remote-config source files are read (for their addresses), never written.
