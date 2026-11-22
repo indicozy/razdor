@@ -815,8 +815,12 @@ impl Book {
             // The cloud mark at the row's left edge, after the pin of a pinned row.
             if let Some(state) = row.cloud {
                 let sign = 18.0 * k * self.grow;
-                // Past the selected row's arrow, or the row's left edge (after a pin).
-                let x = if selected == Some(i) { r.x + 36.0 * k } else { r.x + 6.0 * k + if row.pinned { sign + 4.0 * k } else { 0.0 } };
+                // The selected row's arrow is at the left: its mark sits left of the pin instead.
+                let x = if selected == Some(i) {
+                    r.x + r.w - 2.0 * 22.0 * k * self.grow - 10.0 * k - sign - 4.0 * k
+                } else {
+                    r.x + 6.0 * k + if row.pinned { sign + 4.0 * k } else { 0.0 }
+                };
                 draw_cloud_mark(Rect::new(x, r.y + (r.h - sign) / 2.0, sign, sign), state);
             }
             let lh = r.h;

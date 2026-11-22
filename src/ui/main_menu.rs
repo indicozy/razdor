@@ -2909,7 +2909,7 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         }
         Row::CloudState => {
             let v = super::cloud_view::view();
-            labelled_row(c, geo, tr("Cloud state"), &v.state);
+            labelled_row_help(c, geo, tr("Cloud state"), &v.state, Some(tr("The cloud holds 20 MB per account: delete old saves to upload new ones.")));
         }
         Row::CloudSpace => {
             let v = super::cloud_view::view();

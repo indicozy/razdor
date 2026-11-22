@@ -274,7 +274,35 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
   two devices (linked by a code), the window, the session conflict, the quota, the marks and settings, the
   account deletion, and the background worker.
 
-Not built yet (phase 4b, the UI and the device adapters): the game's `Local` store (the save folders, the
-`marks.json`, the settings file, the Hub and benchmark records, the pinned flags and the device name);
-the settings rows and the load list; the Android transport (`razdorPost` takes POST without headers); the
-sync's start and exit hooks. The session's names use the zone offset the store gives.
+The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not the lib):
+
+- `cloud_store::Store` implements `sync::Local` over this device. Saves: the install's manual folder
+  (`save::games_dir`), where a quick save is a manual save named «Quick save» and the «Продолжить» slot
+  is the auto folder's `session.rzsave`; the map is the save's scenario (`demo` or the map's slot key).
+  A pulled save is written as its own `cloud-<hash>.rzsave` beside the local ones; its origin device
+  and a session's title live in a `<save>.rzsave.cloud` sidecar (the load list reads it). A session from
+  the cloud lands as an ordinary save (approximated: the session slot is one per install, not per map).
+  Marks: `rules::marks::Records` (merged in `set_marks`, written by the worker). Synced settings: the
+  language (`ui::language::Settings`, settings.json), the speeds, hints, keys and AI strength (`audio.json`);
+  `cloud/synced.json` keeps each key's value and when this device first saw it. Applied at the next start
+  (approximated: the running game keeps its in-memory copy). Hub: the installed items (`installed.json`).
+  Benchmark reports: none pending yet (approximated).
+- Start: `cloud_store::start_if_on` after the install is loaded, only with an account and the cloud on.
+  The worker starts on a thread of its own (the remote config's API list is read there), with
+  `platform_net(30)`. Push: on exit (`finish_on_exit` waits up to 4 s), on minimise (the window's focus
+  watch) and when the app is left (`session::flush_now`, the phone's pause). Nothing without an account.
+- Off switch: `cloud/off` in the cloud folder; the key stays. Turning on creates the account when there is
+  none (`Job::CreateAccount`), else syncs.
+- Settings rows (Прочее, under the analytics rows): «Облачные сохранения», «Состояние облака» (state line,
+  «?» help with the 20 MB rule), «Место в облаке», «Синхронизировать сейчас», «Привязать устройство»
+  (the code, 10 minutes), «Ввести код», «Фраза восстановления» (shows the phrase; restores from a typed one),
+  «Удалить аккаунт» (confirmed). Windows: `cloud_view::Panel`.
+- Load list: a cloud, an hourglass (waiting to upload) or a floppy (local only), drawn with shapes at the
+  row's left edge (the selected row's, left of its pin); a cloud copy from another device names its
+  device in the scenario line («Начало пути — телефон, 21:46»), not the name line (the name is cut on phones).
+- Snapshots: `RAZDOR_SNAPSHOT` with `RAZDOR_SCENE_CLOUD=off|synced|offline|full|working|link|enter|phrase|
+  delete|saves` shows made-up states (no worker, no key); `saves` also marks the save files by name.
+
+Not built (approximated or left for later): the Hub offer «Установить то же самое?» (the list is stored
+in `cloud_store::HUB_OFFER`, no window); «Нужна новая версия» in the load list (the worker's `newer`
+list is not shown); the benchmark reports; the running game's settings apply at the next start.

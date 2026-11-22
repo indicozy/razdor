@@ -40,8 +40,6 @@ pub struct View {
     pub space: String,
     /// The link code and when it stops working (unix seconds), while one is issued.
     pub link: Option<(String, u64)>,
-    /// The account's saves from a newer Razdor (listed, never downloaded).
-    pub newer: usize,
     /// The account exists on this device (on or off): the phrase and the delete rows need it.
     pub has_account: bool,
 }
@@ -66,7 +64,6 @@ pub fn view() -> View {
         state,
         space,
         link: shared.as_ref().and_then(|s| s.link.as_ref()).map(|l| (l.code.as_str().to_string(), l.expires_at)),
-        newer: shared.as_ref().map_or(0, |s| s.newer.len()),
         has_account: cloud_store::has_account(),
     }
 }
@@ -85,7 +82,6 @@ fn canned_view(scene: &str) -> View {
         state,
         space: space_line(on, used),
         link: (scene == "link").then(|| ("4F7K-2Q9M".to_string(), telemetry::now_secs() + 600)),
-        newer: 0,
         has_account: true,
     }
 }
@@ -98,7 +94,7 @@ pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>) -> String {
     }
     let Some((phase, last)) = shared else { return tr("Not synced yet").to_string() };
     match phase {
-        Phase::Full => tr("The cloud is full: delete old saves").to_string(),
+        Phase::Full => tr("The cloud is full").to_string(),
         Phase::Offline => tr("No connection").to_string(),
         Phase::Failed => tr("Sync failed, it will try again").to_string(),
         Phase::Working => tr("Syncing…").to_string(),
