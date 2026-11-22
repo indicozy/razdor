@@ -148,8 +148,7 @@ files are consistent snapshots and the battle, crash and save folders are comple
 5. `systemctl start razdor-api`, then check `https://razdor.indicozy.dev/api/v1/...` (a cloud save of a
    test account, or the dashboard's counts) against the numbers from before.
 
-Tested locally (2026-11-22): a backup of a data folder with saves restored into a fresh folder, and the
-server served the same saves.
+Not yet tested end to end (the restore drill is open): run it once on a copy before relying on it.
 
 ## 7. Operate
 
