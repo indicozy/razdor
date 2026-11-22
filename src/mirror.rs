@@ -1,5 +1,6 @@
 //! The built-in addresses Razdor reads and downloads from, each list in the order it is tried:
-//! GitVerse first (players in Russia reach it), GitHub as the fallback. They are the defaults of the
+//! GitHub first (the owner's decision, 2026-11-22), GitVerse as the fallback mirror for players in
+//! Russia. They are the defaults of the
 //! remote config (`remote_config::Config::builtin`): the lists in use are the config's, which the
 //! app takes from `config.json` (see `remote_config`). See `docs/specs/2026-11-13-gitverse-mirrors.md`.
 //!
@@ -27,31 +28,37 @@ use std::time::Duration;
 use serde::Deserialize;
 use web_time::Instant;
 
-/// The built-in update feed: the release list in the GitHub API's shape. GitVerse's copy is a static
-/// file on the community's Pages; GitHub's Pages copy is the same file, tried before the API (the API
-/// allows 60 anonymous requests an hour per IP). A copy that is not there (404) gives way to the next.
+/// The built-in update feed: the release list in the GitHub API's shape. GitHub's Pages copy is a
+/// static file of the community's Pages, tried first; the API is the next fallback (it allows 60
+/// anonymous requests an hour per IP); GitVerse's copy of the same file comes last. A copy that is not
+/// there (404) gives way to the next.
 pub const UPDATE_FEED: [&str; 3] = [
-    "https://indicozy.gitverse.site/razdor-community/releases.json",
     "https://indicozy.github.io/razdor-community/releases.json",
     "https://api.github.com/repos/indicozy/razdor/releases?per_page=30",
+    "https://indicozy.gitverse.site/razdor-community/releases.json",
 ];
 
 /// The built-in hub folders: the catalog's `index.json` names the files, resolved against the folder
-/// that gave the catalog. GitHub's is `hub::DEFAULT_SOURCE`.
-pub const HUB: [&str; 2] = ["https://indicozy.gitverse.site/razdor-community", crate::hub::DEFAULT_SOURCE];
+/// that gave the catalog. GitHub's is `hub::DEFAULT_SOURCE`, then GitVerse's Pages.
+pub const HUB: [&str; 2] = [crate::hub::DEFAULT_SOURCE, "https://indicozy.gitverse.site/razdor-community"];
 
-/// The built-in game archive (`gdrive::game` gives the one in use): GitVerse's attachment, then
-/// GitHub's release file.
+/// The built-in game archive (`gdrive::game` gives the one in use): GitHub's release file, then
+/// GitVerse's attachment.
 pub const GAME: [&str; 2] = [
-    "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5",
     "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip",
+    "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5",
 ];
 
 /// The file the learned primary is saved in, in the cache folder (`platform::cache_dir`).
 const PREF_FILE: &str = "mirror-pref.json";
 
-/// The two hosts Razdor downloads from. GitVerse is `gitverse.ru` and `*.gitverse.site` (the Pages);
-/// GitHub is `github.com`, `api.github.com`, `*.github.io` and the release file hosts.
+/// The order a saved primary was learned under: 2 is the GitHub-first order (2026-11-22). A saved
+/// file without it (learned under the GitVerse-first order) is no primary, so every player starts on
+/// GitHub once, and a GitVerse primary is learned again only when GitHub fails.
+const PREF_ORDER: u64 = 2;
+
+/// The two hosts Razdor downloads from. GitHub is `github.com`, `api.github.com`, `*.github.io` and the
+/// release file hosts; GitVerse is `gitverse.ru` and `*.gitverse.site` (the Pages), the fallback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Host {
     GitVerse,
@@ -357,14 +364,18 @@ pub fn retrying<T>(what: &str, mut attempt: impl FnMut() -> Result<T, String>) -
     }
 }
 
-/// The primary host a saved file gives: `{"host": "gitverse" | "github", ...}`. Anything else (a
-/// damaged file, another word) is no primary.
+/// The primary host a saved file gives: `{"host": "gitverse" | "github", "order": 2, ...}`. Anything
+/// else (a damaged file, another word, a file learned under an older order) is no primary.
 pub fn parse_pref(bytes: &[u8]) -> Option<Host> {
     #[derive(Deserialize)]
     struct Saved {
         host: String,
+        order: Option<u64>,
     }
     let saved: Saved = serde_json::from_slice(bytes).ok()?;
+    if saved.order != Some(PREF_ORDER) {
+        return None;
+    }
     match saved.host.as_str() {
         "gitverse" => Some(Host::GitVerse),
         "github" => Some(Host::GitHub),
@@ -381,7 +392,7 @@ fn pref_path() -> Option<PathBuf> {
 /// Saves `to` at `path` (written whole under a temporary name, then renamed). A failure is logged.
 fn write_pref(path: &Path, to: Host) {
     let since = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let json = serde_json::json!({ "host": to.name(), "since": since }).to_string();
+    let json = serde_json::json!({ "host": to.name(), "since": since, "order": PREF_ORDER }).to_string();
     let tmp = path.with_extension("json.part");
     let written = path.parent().map_or(Ok(()), fs::create_dir_all).and_then(|_| fs::write(&tmp, json)).and_then(|_| fs::rename(&tmp, path));
     if let Err(e) = written {
@@ -448,14 +459,15 @@ mod tests {
     }
 
     #[test]
-    fn the_addresses_are_gitverse_first_and_github_last() {
-        assert!(UPDATE_FEED[0].starts_with("https://indicozy.gitverse.site/"));
-        assert_eq!(UPDATE_FEED[1], "https://indicozy.github.io/razdor-community/releases.json", "the Pages copy before the API");
-        assert!(UPDATE_FEED[2].starts_with("https://api.github.com/"), "the API is the last fallback");
-        assert!(HUB[0].starts_with("https://indicozy.gitverse.site/"));
-        assert_eq!(HUB[1], crate::hub::DEFAULT_SOURCE);
-        assert!(GAME[0].starts_with("https://gitverse.ru/api/attachments/"));
-        assert!(GAME[1].starts_with("https://github.com/"));
+    fn the_addresses_are_github_first_and_gitverse_the_fallback() {
+        assert_eq!(UPDATE_FEED[0], "https://indicozy.github.io/razdor-community/releases.json", "the Pages copy first");
+        assert!(UPDATE_FEED[1].starts_with("https://api.github.com/"), "the API is the next fallback");
+        assert!(UPDATE_FEED[2].starts_with("https://indicozy.gitverse.site/"), "GitVerse's copy is the last");
+        assert!(HUB[0].starts_with("https://github.com/"));
+        assert!(HUB[1].starts_with("https://indicozy.gitverse.site/"));
+        assert_eq!(HUB[0], crate::hub::DEFAULT_SOURCE);
+        assert!(GAME[0].starts_with("https://github.com/"));
+        assert!(GAME[1].starts_with("https://gitverse.ru/api/attachments/"));
     }
 
     #[test]
@@ -635,9 +647,18 @@ mod tests {
 
     #[test]
     fn the_saved_primary_reads_back_and_a_garbage_file_is_no_primary() {
-        assert_eq!(parse_pref(br#"{"host":"gitverse","since":1763000000}"#), Some(Host::GitVerse));
-        assert_eq!(parse_pref(br#"{"host":"github"}"#), Some(Host::GitHub));
-        let bad: [&[u8]; 6] = [b"", b"garbage", b"{\"host\":\"mars\"}", b"{\"host\":5}", b"[1,2]", b"\xff\xfe"];
+        assert_eq!(parse_pref(br#"{"host":"gitverse","since":1763000000,"order":2}"#), Some(Host::GitVerse));
+        assert_eq!(parse_pref(br#"{"host":"github","order":2}"#), Some(Host::GitHub));
+        let bad: [&[u8]; 8] = [
+            b"",
+            b"garbage",
+            b"{\"host\":\"mars\",\"order\":2}",
+            b"{\"host\":5,\"order\":2}",
+            b"[1,2]",
+            b"\xff\xfe",
+            br#"{"host":"gitverse","since":1763000000}"#,
+            br#"{"host":"gitverse","order":1}"#,
+        ];
         for bad in bad {
             assert_eq!(parse_pref(bad), None, "{bad:?}");
         }
@@ -650,6 +671,8 @@ mod tests {
         let path = dir.join(PREF_FILE);
         write_pref(&path, Host::GitHub);
         assert_eq!(parse_pref(&fs::read(&path).unwrap()), Some(Host::GitHub));
+        write_pref(&path, Host::GitVerse);
+        assert_eq!(parse_pref(&fs::read(&path).unwrap()), Some(Host::GitVerse), "written with the order it was learned under");
         fs::write(&path, b"not json").unwrap();
         assert_eq!(parse_pref(&fs::read(&path).unwrap()), None, "a damaged file is no primary");
         let _ = fs::remove_dir_all(&dir);

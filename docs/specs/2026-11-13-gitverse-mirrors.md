@@ -2,8 +2,9 @@
 
 The owner's decision (2026-11-13): GitHub is slow or blocked for many players in Russia (a player's
 game download sat at 0%). Every release and every download players get is also on GitVerse
-(`gitverse.ru`), and from 1.5.2 on the app tries **GitVerse first, GitHub as the fallback**, for app
-updates, the hub and the game download. Releases are mirrored from 1.5.2 on (nothing older).
+(`gitverse.ru`), and from 1.5.2 on the app tried GitVerse first. The owner's decision (2026-11-22): **GitHub
+is the main host and GitVerse the fallback mirror** for everything the app downloads (app updates, the hub
+catalog and its files, the game download, the holiday files). Releases are mirrored from 1.5.2 on (nothing older).
 
 Lands after the download fix (30 s stall limit, progress and cancel on phones), which it builds on.
 
@@ -49,10 +50,11 @@ app releases and the newest two catalogs; never the game archive.
 ## The app
 
 1. **Sources in order.** A small module (e.g. `src/mirror.rs`, no macroquad) lists each resource's
-   addresses in order, GitVerse first: the update feed (`releases.json` on GitVerse Pages, then the
-   same file on GitHub Pages, then the GitHub API), the hub catalog (GitVerse Pages, then `hub::DEFAULT_SOURCE`), the game
-   (`gdrive::GAME` with GitVerse first and the GitHub URL as its mirror; the catalog's
-   `game.mirrors`). The next address is tried on: a connection error, an HTTP error, the stall limit,
+   addresses in order, GitHub first: the update feed (`releases.json` on GitHub Pages, then the
+   GitHub API, then the same file on GitVerse Pages), the hub catalog (`hub::DEFAULT_SOURCE`, then GitVerse
+   Pages), the game (`gdrive::GAME` with the GitHub release file first and the GitVerse attachment after it; the
+   catalog's `game.mirrors`). A hub file's addresses (its `path` and `mirrors`) are tried GitHub's first whichever
+   index the client read (`hub::file_addresses`). The next address is tried on: a connection error, an HTTP error, the stall limit,
    a reply that does not parse, a file whose size or SHA-256 is wrong. Cancel stops all. Each
    attempt is logged with `razdor::diag!`. `RAZDOR_HUB` still overrides the hub (one source).
 2. **Hub.** A catalog is read from the first source that gives a valid catalog; its files are
@@ -96,7 +98,7 @@ The service info the app needs (the update feed's addresses, the hub's folders, 
   and pushes only it to GitVerse, then waits until the anonymous address serves those bytes.
 - **The app** (`src/remote_config.rs`, no macroquad): `remote_config::start()` at start installs the cached config
   at once (`remote-config.json` in the cache folder, the last good one) and a thread fetches `ADDRESSES`
-  (GitVerse first, GitHub after; the stall limit as the update feed's). Without a learned primary host (the first
+  (GitHub first, GitVerse after; the stall limit as the update feed's). Without a learned primary host (the first
   start) all addresses are fetched at once and the first reply that parses as a config wins (an unknown path
   answers HTML on GitVerse: a web page is no config) and is kept as the cache; with one, the addresses are tried
   in the primary's order (see «Learned primary»).
@@ -122,7 +124,8 @@ no macroquad):
   at once (`resolve_race`). The first reply that parses as a config wins; an HTML page (GitVerse answers an
   unknown path with HTTP 200) loses to a slower valid config. The winner's host is saved as the primary.
 - **Ordering**: every list is ordered with the primary host's addresses first (`mirror::ordered_by`), each
-  part in the list's own order. Without a primary, the list as it is. The lists: the update feed (`update::check`,
+  part in the list's own order. Without a primary, the list as it is, which is GitHub first (the config's
+  order; a hub file's addresses are put GitHub first as well). The lists: the update feed (`update::check`,
   through `mirror::first_ok`), the hub catalog (`catalog_from_mirrors`, through `first_ok`) and the hub's files
   (they come from the catalog that was read), the game archive's links (`gdrive::download_game`), and the
   updater's file (its release comes from the feed that answered, so the feed's order decides it).
@@ -149,8 +152,9 @@ no macroquad):
   `update-feed.json` (the cache folder).
 - **The updater**: the host a new version's file was downloaded from becomes the primary (`mirror::learn_from`,
   after the file checks out).
-- **Saved** in the cache folder as `mirror-pref.json` (`{"host": "gitverse" | "github", "since": <unix s>}`);
-  a file that does not read is no primary. Every change is logged (`mirror: the primary host is … (was …): why`).
+- **Saved** in the cache folder as `mirror-pref.json` (`{"host": "gitverse" | "github", "since": <unix s>, "order": 2}`);
+  a file that does not read is no primary. `order` 2 is the GitHub-first order (2026-11-22): a file without it
+  (learned under the old GitVerse-first order) is ignored, so each player starts on GitHub once. Every change is logged (`mirror: the primary host is … (was …): why`).
 - **Hosts**: GitVerse = `gitverse.ru` and `*.gitverse.site`; GitHub = `github.com`, `api.github.com`,
   `*.github.io`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`. Any other host is in
   neither group and keeps its place.
@@ -219,8 +223,9 @@ game archive as bare Pages files on both hosts, with the release files as the fa
   mod's zip, the game and a picture. Step 2 moves the index and removes what it no longer names, then the index
   is checked. A failed step 1 leaves the live catalog as it was.
 - **Update feed**: `releases.json` is written to GitVerse's Pages (`docs/`) and to GitHub Pages (the root of
-  `gh-pages`, `publish_release.push_feed_copies`), the same bytes. `data/remote/config.json` lists the GitVerse
-  feed, then the GitHub copy, then the GitHub API (`publish_config.check` enforces the order). The built-in
+  `gh-pages`, `publish_release.push_feed_copies`), the same bytes. `data/remote/config.json` lists the GitHub
+  Pages copy, then the GitHub API, then the GitVerse copy (`publish_config.check` enforces that the GitHub Pages
+  copy comes before GitVerse's). The built-in
   feed list of the app (`mirror::UPDATE_FEED`) is unchanged for old versions: they keep reading their own list,
   and the config's list only reaches versions that read the remote config.
 

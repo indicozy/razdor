@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that the community's game archive is alive before a release: every address the app tries
-# (src/mirror.rs, GAME: GitVerse first, then GitHub) must serve the file Razdor expects, whose size
+# (src/mirror.rs, GAME: GitHub first, then GitVerse) must serve the file Razdor expects, whose size
 # is the built-in game's (src/remote_config.rs, fn builtin). Exit 0 when every address does, 1 when
 # a link is dead or refused, or serves another file (it says which address), 2 on a network error
 # on this machine. If both kinds occur, 1 wins. The addresses and size are read from the code, so

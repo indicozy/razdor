@@ -10,8 +10,9 @@ release is withdrawn by two changes, both done here:
 
 1. GitHub: the bad release becomes a pre-release (`gh release edit vBAD --prerelease`). The API list the
    app reads skips it, so the newest published release is vTO again. Its files stay downloadable.
-2. GitVerse: the update feed `releases.json` on the razdor-community Pages (the first address of
-   `UPDATE_FEED` in `src/mirror.rs`, the one the remote config lists first) is rewritten without the bad
+2. GitVerse: the update feed `releases.json` on the razdor-community Pages (the GitVerse address of
+   `UPDATE_FEED` in `src/mirror.rs`; GitHub's Pages copy, the first address since 2026-11-22, is NOT
+   rewritten by this tool yet, so a rollback must also fix that copy by hand) is rewritten without the bad
    release and anything newer than vTO. Its entry for vTO is kept as it is (its own asset addresses).
    It is written through `tools/gitverse/pages.py` (`Pages.write`, `commit_push`, `wait_served`): a
    commit on the razdor-community `main`, then a wait until the anonymous address serves the new bytes.
@@ -75,8 +76,9 @@ def rust_urls(path, const):
 
 
 def feed_url_default():
-    """The feed address the app tries first (the GitVerse Pages one)."""
-    return rust_urls(MIRROR_SRC, "UPDATE_FEED")[0]
+    """The feed address this tool rewrites: GitVerse's Pages copy (`pages.py` writes it). The app tries the
+    GitHub Pages copy first since 2026-11-22; that copy is not rewritten by this tool yet (see the notes)."""
+    return next(u for u in rust_urls(MIRROR_SRC, "UPDATE_FEED") if "gitverse" in u)
 
 
 def config_urls_default():

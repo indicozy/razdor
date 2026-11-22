@@ -27,7 +27,7 @@ without an Android or iOS file gets no offer on that system.
    If the previous release's `changelog/X.Y.Z.md` has no SHA-256 lines (the machine was shut
    down right after its tag, `CLAUDE.local.md`), do its follow-up (step 7) first.
 1a. The game links are alive: `bash scripts/check-game-link.sh` (network only, light; it reads the
-   addresses from `src/mirror.rs` (`GAME`: GitVerse, then the GitHub release file) and the size from
+   addresses from `src/mirror.rs` (`GAME`: the GitHub release file, then GitVerse) and the size from
    `src/remote_config.rs` (the built-in game), and checks every address: a range request for the first
    1 KiB, redirects followed: 206 (or 200 with the full length), the total size, and a `PK` start). It is blocking, here and in
    `release.yml` (its step "The game download's link is alive"): exit 0 goes on; exit 1 means a link is
@@ -124,7 +124,7 @@ without an Android or iOS file gets no offer on that system.
    - then delete the scratch folder and the notes file. A GitVerse failure does not undo the GitHub
      release: report it to the owner with the error, and the owner decides whether to rerun.
    A release with an iOS file: the `.ipa` is left out of GitVerse (it refuses it), with a warning.
-6b. Update check (the owner's decision, 2026-11-15): after 6a (the GitVerse feed is read first from 1.5.2 on),
+6b. Update check (the owner's decision, 2026-11-15): after 6a (the GitHub Pages feed is read first from 1.5.x on, the owner's decision 2026-11-22),
    once the pipeline is green and the release is published,
    `$(ai-resources prefix) python3 -I tools/release/update_check.py <the list> --to vX.Y.Z` (the list is
    `python3 -I tools/release/from_list.py --to vX.Y.Z --args`: the previous release and the older ones still in use,

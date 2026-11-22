@@ -202,12 +202,13 @@ class MainTests(HermeticTestCase):
 
 
 class RealSourceTests(unittest.TestCase):
-    def test_the_feed_is_the_first_update_feed_address(self):
+    def test_the_feed_is_the_gitverse_copy_of_the_update_feed(self):
         self.assertEqual(rb.feed_url_default(), FEED_URL)
 
-    def test_the_config_names_the_gitverse_config(self):
+    def test_the_config_names_github_first_then_gitverse(self):
         urls = rb.config_urls_default()
-        self.assertEqual(urls[0], "https://indicozy.gitverse.site/razdor-community/config.json")
+        self.assertEqual(urls[0], "https://indicozy.github.io/razdor/config.json")
+        self.assertEqual(urls[1], "https://indicozy.gitverse.site/razdor-community/config.json")
         self.assertEqual(len(urls), 2)
 
     def test_the_repo_config_is_readable(self):

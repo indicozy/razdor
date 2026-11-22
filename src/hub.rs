@@ -6,7 +6,7 @@
 //!   its titles and descriptions in Russian and English, the languages its maps come in
 //!   (Russian as written, English from the import's translation) and the mods it needs.
 //! - **Source** ([`Source`]): `RAZDOR_HUB` names an `https://` address or a folder; unset, the
-//!   mirrors of [`mirror::HUB`] are tried, the learned primary host's first (GitVerse, then GitHub
+//!   mirrors of [`mirror::HUB`] are tried, the learned primary host's first (GitHub, then GitVerse
 //!   until one is learned; see `mirror`); a snapshot or `RAZDOR_HUB=mock`
 //!   reads a mock hub written once under the hub folder ([`mock::build`]).
 //! - **Cache** ([`read_cache`], [`write_cache`]): from an address, the catalog last fetched is kept
@@ -57,8 +57,8 @@ pub const INDEX_V2: &str = "index-v2.json";
 /// The error of a catalog that no address of its source list gave (`catalog_from_mirrors`): the
 /// window says so; each address's reason is in the log.
 pub const NO_ADDRESS: &str = "no address answered for the catalog";
-/// The hub on GitHub, the default's fallback after GitVerse (`mirror::HUB`): the latest release of the
-/// community repository (its assets are the catalog and the files it names).
+/// The hub on GitHub, the default's first source (`mirror::HUB`; GitVerse's Pages is the fallback): the
+/// latest release of the community repository (its assets are the catalog and the files it names).
 pub const DEFAULT_SOURCE: &str = "https://github.com/indicozy/razdor-community/releases/latest/download";
 /// The most a downloaded archive may be (the desktop's curl stops there).
 pub const MAX_ARCHIVE_DOWNLOAD: u64 = 256 << 20;
@@ -735,9 +735,14 @@ fn check_mirrors(f: &mut FileRef) {
     f.mirrors = kept;
 }
 
-/// The addresses of `f`'s bytes in the order they are tried: `path`, then the mirrors.
+/// The addresses of `f`'s bytes in the order they are tried: `path` and the mirrors, GitHub's first
+/// (the owner's decision, 2026-11-22: whichever index the client read, its GitVerse links come after
+/// the GitHub copy), each part in its own order. A learned primary host is put first by `mirror`.
 fn file_addresses(f: &FileRef) -> Vec<&str> {
-    std::iter::once(f.path.as_str()).chain(f.mirrors.iter().map(String::as_str)).collect()
+    let all = std::iter::once(f.path.as_str()).chain(f.mirrors.iter().map(String::as_str));
+    let (mut github, rest): (Vec<&str>, Vec<&str>) = all.partition(|u| mirror::Host::of(u) == Some(mirror::Host::GitHub));
+    github.extend(rest);
+    github
 }
 
 /// Whether the file has addresses after its `path` (the file's bytes are then tried at each in order).
@@ -1098,7 +1103,7 @@ pub fn needed_by(catalog: &Catalog, installed: &Installed, id: &str) -> Vec<Stri
 pub enum Source {
     /// One address (`RAZDOR_HUB`).
     Url(String),
-    /// The default: the mirrors of the hub in order (`mirror::HUB`, GitVerse first).
+    /// The default: the mirrors of the hub in order (`mirror::HUB`, GitHub first).
     Mirrors,
     Dir(PathBuf),
     /// The mock hub, written under the hub folder on first use.
@@ -2326,7 +2331,7 @@ mod tests {
         let f = &c.entries[0].files[0];
         assert_eq!(f.mirrors, ["https://gitverse.ru/api/attachments/y", "https://github.com/indicozy/razdor-community/releases/latest/download/Map.DTm"]);
         assert!(mirrored(f));
-        assert_eq!(file_addresses(f), [page, "https://gitverse.ru/api/attachments/y", "https://github.com/indicozy/razdor-community/releases/latest/download/Map.DTm"]);
+        assert_eq!(file_addresses(f), ["https://github.com/indicozy/razdor-community/releases/latest/download/Map.DTm", page, "https://gitverse.ru/api/attachments/y"], "GitHub's copy first");
         // A folder's relative path takes no mirror; a catalog without the field has none.
         let mut local = f.clone();
         local.path = "Hub_Map.DTm".into();
@@ -2929,15 +2934,16 @@ mod tests {
         let mut asked = Vec::new();
         let c = catalog_from_mirrors(&mirror::HUB, |url| {
             asked.push(url.to_string());
-            if url.starts_with("https://indicozy.gitverse") { Ok(gitverse_html.clone()) } else { Ok(github_json.clone().into_bytes()) }
+            if url.starts_with("https://github.com") { Ok(gitverse_html.clone()) } else { Ok(github_json.clone().into_bytes()) }
         })
         .unwrap();
-        // GitVerse's zipped catalog and its bare one answer the page; GitHub's zipped one answers the JSON.
+        // GitHub's zipped and bare catalogs answer the page; GitVerse's zipped one answers the JSON.
         assert_eq!(asked, vec![format!("{}/index-v2.json", mirror::HUB[0]), format!("{}/index.json", mirror::HUB[0]), format!("{}/index-v2.json", mirror::HUB[1])]);
+        let base = mirror::HUB[1];
         let e = &c.entries[0];
-        assert_eq!(e.files[0].path, format!("{DEFAULT_SOURCE}/mods/m/a.ini"), "resolved against the GitHub folder that gave it");
-        assert_eq!(e.preview.as_ref().unwrap().path, format!("{DEFAULT_SOURCE}/previews/p.png"));
-        assert_eq!(c.game.as_ref().unwrap().url, format!("{DEFAULT_SOURCE}/game/discord-times-cu.zip"));
+        assert_eq!(e.files[0].path, format!("{base}/mods/m/a.ini"), "resolved against the GitVerse folder that gave it");
+        assert_eq!(e.preview.as_ref().unwrap().path, format!("{base}/previews/p.png"));
+        assert_eq!(c.game.as_ref().unwrap().url, format!("{base}/game/discord-times-cu.zip"));
         assert_eq!(c.game.as_ref().unwrap().mirrors, vec!["https://gitverse.ru/api/attachments/x".to_string()]);
     }
 

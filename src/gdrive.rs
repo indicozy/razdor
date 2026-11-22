@@ -29,8 +29,8 @@ pub struct Archive {
 }
 
 /// The community's game as the remote config gives it (`remote_config::game_info`; the built-in one
-/// until the config arrives: `scripts/check-game-link.sh` checks the built-in links). The GitVerse
-/// mirror first, the GitHub release file after it.
+/// until the config arrives: `scripts/check-game-link.sh` checks the built-in links). The GitHub
+/// release file first, the GitVerse mirror after it.
 pub fn game() -> Archive {
     archive_from(&crate::remote_config::game_info())
 }
@@ -358,11 +358,12 @@ mod tests {
     }
 
     #[test]
-    fn the_game_is_the_gitverse_archive_then_the_github_one() {
-        assert_eq!(file_page(&game()), "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
+    fn the_game_is_the_github_archive_then_the_gitverse_one() {
+        assert_eq!(file_page(&game()), "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
         let links: Vec<String> = game().links.iter().map(|l| l.to_string()).collect();
         assert_eq!(links, crate::remote_config::Config::builtin().game.links);
-        assert!(links[1].ends_with("/game-cu-1.2/discord-times-cu.zip"));
+        assert!(links[0].ends_with("/game-cu-1.2/discord-times-cu.zip"));
+        assert!(links[1].starts_with("https://gitverse.ru/api/attachments/"));
         assert_eq!(game().size, 44_619_982);
         assert_eq!(game().name, "discord-times-cu.zip");
         assert_eq!(game().sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");

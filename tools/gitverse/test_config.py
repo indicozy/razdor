@@ -41,8 +41,8 @@ class CheckTests(HermeticTestCase):
     def test_the_shipped_config_passes(self):
         cfg = publish_config.check(pages.config_bytes())
         self.assertEqual(cfg["schema"], 1)
-        self.assertTrue(cfg["update_feed"][0].startswith("https://indicozy.gitverse.site/"))
-        self.assertEqual(cfg["update_feed"][1], "https://indicozy.github.io/razdor-community/releases.json")
+        self.assertEqual(cfg["update_feed"][0], "https://indicozy.github.io/razdor-community/releases.json")
+        self.assertTrue(cfg["update_feed"][2].startswith("https://indicozy.gitverse.site/"))
 
     def test_the_github_feed_must_come_after_gitverse_and_be_present(self):
         def with_feed(feed):

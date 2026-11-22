@@ -1,4 +1,4 @@
-//! The service info the app reads from `config.json` on both Pages sites (GitVerse first, GitHub
+//! The service info the app reads from `config.json` on both Pages sites (GitHub first, GitVerse
 //! after): the update feed's addresses, the hub's sources and the game archive. Its source is
 //! `data/remote/config.json` (on both sites, the same bytes), so a change there needs no app
 //! release. The built-in values (`mirror`) are used until a fresh config arrives, or when none does;
@@ -15,11 +15,11 @@ use crate::mirror;
 /// The schema this app reads. A config of another schema is ignored whole (the built-ins are used).
 pub const SCHEMA: u32 = 1;
 
-/// Where the config is, GitVerse first. GitVerse's Pages answer an unknown path with HTTP 200 and an
-/// HTML page, so only a config that parses counts.
+/// Where the config is, GitHub first (the owner's decision, 2026-11-22), GitVerse after. GitVerse's
+/// Pages answer an unknown path with HTTP 200 and an HTML page, so only a config that parses counts.
 pub const ADDRESSES: [&str; 2] = [
-    "https://indicozy.gitverse.site/razdor-community/config.json",
     "https://indicozy.github.io/razdor/config.json",
+    "https://indicozy.gitverse.site/razdor-community/config.json",
 ];
 
 /// The fetch's stall limit in seconds (the update feed's).
@@ -386,9 +386,10 @@ mod tests {
     #[test]
     fn the_built_in_config_has_today_s_addresses() {
         let b = Config::builtin();
-        assert!(b.update_feed[0].starts_with("https://indicozy.gitverse.site/"));
-        assert!(b.hub[0].starts_with("https://indicozy.gitverse.site/"));
-        assert_eq!(b.game.links[0], "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
+        assert!(b.update_feed[0].starts_with("https://indicozy.github.io/"));
+        assert!(b.hub[0].starts_with("https://github.com/"));
+        assert_eq!(b.game.links[0], "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
+        assert_eq!(b.game.links[1], "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
     }
 
     #[test]
@@ -528,8 +529,9 @@ mod tests {
         assert!(mirror::ordered_by(gh, &c.hub)[0].starts_with("https://github.com/"));
         assert!(mirror::ordered_by(gh, &c.game.links)[0].starts_with("https://github.com/"));
         let gv = Some(mirror::Host::GitVerse);
-        assert_eq!(mirror::ordered_by(gv, &c.update_feed), refs(&c.update_feed), "GitVerse first is the config's own order");
-        assert_eq!(mirror::ordered_by(None, &c.hub), refs(&c.hub), "no primary: the config's order");
+        assert!(mirror::ordered_by(gv, &c.update_feed)[0].starts_with("https://indicozy.gitverse.site/"), "a learned GitVerse primary goes first");
+        assert_eq!(mirror::ordered_by(gv, &c.update_feed)[1..], refs(&c.update_feed)[..2], "the rest keeps the config's order");
+        assert_eq!(mirror::ordered_by(None, &c.hub), refs(&c.hub), "no primary: the config's order, GitHub first");
     }
 
     #[test]
