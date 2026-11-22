@@ -48,6 +48,10 @@ Never sent: hero or save names, chat, typed text, anything outside the game.
 - A "what we send" page on the site and in the wiki (ru + en): what, why, how long, a link to the server code.
 
 ## Abuse
+- Send-time jitter: a battle upload waits a per-install offset of 0–15 minutes past its hour (drawn once per hour
+  slot, kept in the state), and retries wait with ±25% jitter. This spreads the upload load so the server does not
+  get every install at the top of the hour, and makes the timing less of a fingerprint. The server keeps the
+  per-install caps (pings per day, battles per hour, and the others above) whatever the client sends.
 - No secrets in the client (the code is public; a key would leak). Server-side: rate limits per install id and
   per IP, size limits, a strict schema (anything else dropped), the version must be a real release.
 - Automatic bans: an id that sends more than a player can (e.g. >3 pings a day, >1000 events an hour, >60 battles

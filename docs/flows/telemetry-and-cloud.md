@@ -55,6 +55,10 @@ Every analytics write goes through the same gates (`server/src/analytics.rs`, `a
    install: ten in a row, or over 20% invalid items in an hour, bans it.
 5. The endpoint's own limits: pings per day, events per hour, battles per hour (each a ban), and
    overlapping battles (a ban).
+   Battles, as the client sees them: over the hour's limit 429 (kept, retried; a gross volume bans),
+   an overlap 409 (dropped, not banned), a re-sent record (same sha256) 200 once.
+   The storage budget (`server/src/budget.rs`, A3) answers analytics writes with 429 while the data cap or the
+   disk's free space is short; the client retries them with the backoff above.
 
 A banned sender always gets `200 {}`, and nothing is stored. Bans are 24 h, then 7 days, then for good.
 A ban quarantines the install's raw rows received since the offence window opened: they stay on disk
@@ -164,9 +168,14 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   format, a header block, the battle's start block and an entries block, the stream's encoding) and the
   `BattleUpload` header (schema, install id, game, map and its hash, rules, experiments, tags, outcome, times,
   the record's SHA-256 and length), validated before it is returned. `submit` queues it at `paths::BATTLES` with
-  `Class::Consent` and `not_before` = the next UTC hour (`send_at`: 10:59:59 waits for 11:00:00). At most
-  `BATTLES_PER_HOUR` (60) records wait for one boundary: the next one is refused, counted in
+  `Class::Consent` and `not_before` = the next UTC hour (`send_at`: 10:59:59 waits for 11:00:00) plus the
+  slot's offset: 0 to 900 s (`jitter::slot_offset_secs`, drawn from the install's seed and the hour's index).
+  The offset is kept in `state.json` (`battle_offset`, one slot, a serde default), so a restart keeps it.
+  At most `BATTLES_PER_HOUR` (60) records wait for one send time: the next one is refused, counted in
   `Hub::battles_dropped`, and never queued. `Hub::enqueue_frame_at` is the queueing with a `not_before`.
+- `src/telemetry/jitter.rs`: the send-time jitter. A splitmix64 generator seeded from the install id (FNV-1a
+  over it), separate from the rules' RNG; it takes numbers only. `slot_offset_secs(seed, slot)` is in
+  0..=900; `jittered(base, seed, attempt)` is within base ±25% (integer maths, rounded inwards).
 - `src/rules/recording/hook.rs` `arm_battle_tap` / `take_battle_tap`: the capture for the battle records. It
   is a copy beside the recorder (the replay session keeps its own; the hook has one recorder slot): armed only
   for a campaign game with the consent yes (`arm_battles`, from `campaign_started` and `save_loaded`), it takes
@@ -194,7 +203,8 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 - The ping is once a UTC day (`last_ping_day`).
 - The sender never holds the queue's lock during a request, so a frame never waits for the network.
 - 2xx sends. 408, 429 and 5xx, and transport failures, wait: 1 minute, doubled each time, at most six
-  hours. Any other 4xx is dropped (a refused body is never sent again: the server bans senders that
+  hours, each wait with ±25% jitter (`worker::retry_wait`, `jitter::jittered`, seeded from the install id).
+  Any other 4xx is dropped (a refused body is never sent again: the server bans senders that
   keep sending invalid data). A 429 or 503 also pauses the host (`mirror::throttled`).
 - The mirror's pauses are per host: `worker::step` takes the first address of the `api` list that is not
   paused.
@@ -223,7 +233,7 @@ the server checked the record's hash on ingest, so the verifier does not. `tools
 on the pending battles and posts the verdicts. Open points:
 `mod_hash` is always none (the client keeps no hub mod hash); the reload tag is set when a save is loaded
 while a battle is open; whether the battle screen can load a save at all was not checked, so the tag may never be sent;
-the hour cap counts only the items queued for one boundary, so backlog from earlier hours that retries into
+the hour cap counts only the items queued for one send time (boundary plus offset), so backlog from earlier hours that retries into
 the same hour can go past the server's 60; the consent is read when a campaign starts or a save loads, so
 a yes given during a game takes effect at the next one.
 
@@ -241,7 +251,10 @@ that does not block enqueueing and keeps the queue under 5 MB), the crash report
 question without a yes, the save only on «Отправить») and the sanitizer. `ui::main_menu::tests` covers
 the new rows' list. `telemetry::battles::tests` covers the packing (deterministic, the header validates, the
 hash and length match the bytes, the record reads back), the send time (the next UTC hour), no record without
-consent, the shared boundary for one hour and the cap (60 queued, the 61st dropped and counted), and
+consent, the shared send time for one hour and the cap (60 queued, the 61st dropped and counted), the stored
+offset kept across a reopen (`the_send_offset_is_within_fifteen_minutes_and_kept_across_a_restart`), `telemetry::jitter::tests`
+(the offset within 0..=900, spread, the same seed and slot the same, the jitter within ±25% for many attempts),
+the state file from before `battle_offset` (`a_state_file_from_before_the_battle_offset_loads_with_it_unset`), and
 `ui::analytics::tests` the tags. `rules::recording::hook::tap_tests` covers the capture (after the start only,
 read-only sections skipped, the recorder untouched, a new start replacing an open capture).
 

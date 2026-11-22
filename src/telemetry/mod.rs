@@ -10,6 +10,7 @@
 pub mod battles;
 pub mod crash;
 pub mod events;
+pub mod jitter;
 pub mod perf;
 pub mod queue;
 pub mod sanitize;

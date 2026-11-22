@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use razdor_wire::{frame, Ack};
 
+use super::jitter::{jittered, seed_of};
 use super::queue::Class;
 use super::state::Consent;
 use super::transport::Transport;
@@ -36,6 +37,13 @@ pub enum Step {
 /// The wait before the `tries`-th retry: a minute, doubled each time, at most six hours.
 pub fn backoff_secs(tries: u32) -> u64 {
     (60u64 << tries.min(8)).min(6 * 3600)
+}
+
+/// The wait before the `tries`-th retry of an item: [`backoff_secs`] with ±25% jitter from the install's
+/// seed (`jitter::jittered`). Called with the queue's lock held: the order is queue, then state.
+fn retry_wait(hub: &Hub, tries: u32) -> u64 {
+    let seed = seed_of(&hub.install_id());
+    jittered(backoff_secs(tries) as i64, seed, tries) as u64
 }
 
 /// Sends the first due item, if any. `now` is unix seconds. The api addresses come from the config
@@ -108,8 +116,9 @@ pub fn step(hub: &Hub, transport: &dyn Transport, api: &[String], now: u64) -> S
                 mirror::throttled(&url, None);
             }
             let tries = meta.tries + 1;
-            let _ = queue.reschedule(meta.seq, tries, now + backoff_secs(meta.tries));
-            Step::Wait(Some(backoff_secs(meta.tries)))
+            let wait = retry_wait(hub, meta.tries);
+            let _ = queue.reschedule(meta.seq, tries, now + wait);
+            Step::Wait(Some(wait))
         }
         Ok(reply) => {
             crate::diag!("telemetry: {url}: HTTP {} refused the item, dropped", reply.status);
@@ -118,8 +127,9 @@ pub fn step(hub: &Hub, transport: &dyn Transport, api: &[String], now: u64) -> S
         }
         Err(why) => {
             mirror::note_failure(&url, &why, None);
-            let _ = queue.reschedule(meta.seq, meta.tries + 1, now + backoff_secs(meta.tries));
-            Step::Wait(Some(backoff_secs(meta.tries)))
+            let wait = retry_wait(hub, meta.tries);
+            let _ = queue.reschedule(meta.seq, meta.tries + 1, now + wait);
+            Step::Wait(Some(wait))
         }
     }
 }
@@ -212,8 +222,9 @@ mod tests {
         assert!(hub.queue().is_empty(), "a 400 is not sent again");
         hub.enqueue_json("/v1/events", Class::Consent, b"{}".to_vec()).unwrap();
         let waited = step(&hub, &Fixed(Ok(reply(503, ""))), std::slice::from_ref(&a), 1_000);
-        assert_eq!(waited, Step::Wait(Some(60)));
-        assert_eq!(hub.queue().metas().next().unwrap().not_before, 1_060);
+        let Step::Wait(Some(wait)) = waited else { panic!("{waited:?}") };
+        assert!((45..=75).contains(&wait), "a minute with ±25% jitter: {wait}");
+        assert_eq!(hub.queue().metas().next().unwrap().not_before, 1_000 + wait);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -256,7 +267,7 @@ mod tests {
         let took = started.elapsed();
         assert!(took < Duration::from_millis(1000), "enqueue took {took:?}: it must not wait for the network");
         assert!(hub.queue().total() <= razdor_wire::limits::CLIENT_QUEUE_BYTES, "the queue is capped");
-        assert_eq!(sender.join().unwrap(), Step::Wait(Some(60)), "the unreachable send is retried later");
+        assert!(matches!(sender.join().unwrap(), Step::Wait(Some(45..=75))), "the unreachable send is retried later");
         assert_eq!(hits.load(Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }

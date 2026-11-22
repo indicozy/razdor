@@ -33,6 +33,17 @@ pub struct State {
     /// The server's id of each crash report sent, by the local token (the queue item's seq).
     #[serde(default)]
     pub crash_ids: BTreeMap<String, String>,
+    /// The battle uploads' send offset for the last hour slot that drew one (`jitter::slot_offset_secs`),
+    /// so a restart keeps the draw.
+    #[serde(default)]
+    pub battle_offset: Option<SlotOffset>,
+}
+
+/// One hour slot's battle-upload offset: `secs` past the slot's boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlotOffset {
+    pub slot: i64,
+    pub secs: i64,
 }
 
 /// The state file in `dir`. A missing or unreadable file is the default state.
@@ -86,6 +97,21 @@ mod tests {
         assert_eq!(a.len(), 32);
         assert!(razdor_wire::InstallId::parse(&a).is_ok(), "{a}");
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn a_state_file_from_before_the_battle_offset_loads_with_it_unset() {
+        let dir = std::env::temp_dir().join(format!("razdor-state-old-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let id = "cd".repeat(16);
+        std::fs::write(dir.join(FILE), format!(r#"{{"install_id": "{id}", "consent": "yes", "last_ping_day": 20000}}"#)).unwrap();
+        let s = load(&dir);
+        assert_eq!(s.install_id.as_deref(), Some(id.as_str()));
+        assert_eq!(s.consent, Consent::Yes);
+        assert_eq!(s.last_ping_day, Some(20_000));
+        assert_eq!(s.battle_offset, None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

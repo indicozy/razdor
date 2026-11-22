@@ -12,8 +12,9 @@ use razdor_wire::analytics::{BattleOutcome, BattleTag, BattleUpload};
 use razdor_wire::{limits, paths, InstallId, Validate, SCHEMA};
 use sha2::{Digest, Sha256};
 
+use super::jitter::{seed_of, slot_offset_secs};
 use super::queue::Class;
-use super::state::Consent;
+use super::state::{Consent, SlotOffset};
 use super::{Hub, Refused};
 use crate::rules::recording::battle_start::BattleStart;
 use crate::rules::recording::file::cut_bytes;
@@ -80,9 +81,25 @@ pub fn send_at(now: u64) -> u64 {
     now / 3600 * 3600 + 3600
 }
 
-/// Queues a packed battle at `now` (unix seconds), to be sent at [`send_at`]. Nothing is queued
-/// without the consent yes. When the hour's cap (`BATTLES_PER_HOUR` records for one boundary) is full,
-/// the record is dropped and counted (`Hub::battles_dropped`), not queued.
+/// The offset of the hour slot that starts at `boundary` (unix seconds): drawn once per slot from the
+/// install's seed (`jitter::slot_offset_secs`) and kept in the state, so a restart keeps the same draw.
+fn offset_of_slot(hub: &Hub, boundary: u64) -> i64 {
+    let slot = (boundary / 3600) as i64;
+    let seed = seed_of(&hub.install_id());
+    hub.with_state(|s| match s.battle_offset {
+        Some(o) if o.slot == slot => o.secs,
+        _ => {
+            let secs = slot_offset_secs(seed, slot);
+            s.battle_offset = Some(SlotOffset { slot, secs });
+            secs
+        }
+    })
+}
+
+/// Queues a packed battle at `now` (unix seconds), to be sent at [`send_at`] plus the slot's offset
+/// (0..=15 minutes, so the installs do not all arrive at the hour). Nothing is queued without the
+/// consent yes. When the hour's cap (`BATTLES_PER_HOUR` records for one send time) is full, the record
+/// is dropped and counted (`Hub::battles_dropped`), not queued.
 pub fn submit(hub: &Hub, packed: &Packed, now: u64) -> Result<u64, Refused> {
     if hub.consent() != Consent::Yes {
         return Err(Refused::NoConsent);
@@ -91,7 +108,8 @@ pub fn submit(hub: &Hub, packed: &Packed, now: u64) -> Result<u64, Refused> {
     if packed.upload.record_len != packed.record.len() as u64 {
         return Err(Refused::Invalid("the record's length is not the header's".into()));
     }
-    let at = send_at(now);
+    let boundary = send_at(now);
+    let at = boundary + offset_of_slot(hub, boundary) as u64;
     // The items already queued for this boundary (a restart keeps them: they are on disk).
     let queued = hub.queue().metas().filter(|m| m.path == paths::BATTLES && m.not_before == at).count();
     if queued >= limits::BATTLES_PER_HOUR as usize {
@@ -240,11 +258,39 @@ mod tests {
         submit(&hub, &p, hour + 600).unwrap();
         submit(&hub, &p, hour + 3000).unwrap();
         submit(&hub, &p, hour + 3599).unwrap();
+        let sent = hour + 3600 + offset(&hub, hour + 3600);
         let at: Vec<u64> = hub.queue().metas().map(|m| m.not_before).collect();
-        assert_eq!(at, vec![hour + 3600; 3]);
+        assert_eq!(at, vec![sent; 3]);
         let late = pack(&header(), &start(2), &entries(), &facts(vec![], hour + 3599)).unwrap();
         submit(&hub, &late, hour + 3599).unwrap();
-        assert_eq!(hub.queue().metas().last().unwrap().not_before, hour + 3600);
+        assert_eq!(hub.queue().metas().last().unwrap().not_before, sent);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// The offset the hour slot of `boundary` has for this install (the same draw `submit` makes).
+    fn offset(hub: &Hub, boundary: u64) -> u64 {
+        slot_offset_secs(seed_of(&hub.install_id()), (boundary / 3600) as i64) as u64
+    }
+
+    #[test]
+    fn the_send_offset_is_within_fifteen_minutes_and_kept_across_a_restart() {
+        let (hub, folder) = hub("offset", Consent::Yes);
+        let now = 1_800_000_000;
+        let boundary = send_at(now);
+        let p = pack(&header(), &start(1), &entries(), &facts(vec![], now)).unwrap();
+        submit(&hub, &p, now).unwrap();
+        let first = hub.queue().metas().next().unwrap().not_before;
+        assert!((boundary..=boundary + 900).contains(&first), "{first} is not in the slot's first 15 minutes");
+        assert_eq!(first - boundary, offset(&hub, boundary));
+        // A restart reopens the folder: the stored draw is read back, not drawn again.
+        drop(hub);
+        let hub = Hub::open(&folder, limits::CLIENT_QUEUE_BYTES).unwrap();
+        submit(&hub, &p, now + 60).unwrap();
+        assert!(hub.queue().metas().all(|m| m.not_before == first));
+        // The store is what is used: a stored offset the function would not draw is kept for its slot.
+        hub.with_state(|s| s.battle_offset = Some(SlotOffset { slot: (boundary / 3600) as i64, secs: 7 }));
+        submit(&hub, &p, now + 120).unwrap();
+        assert_eq!(hub.queue().metas().last().unwrap().not_before, boundary + 7);
         let _ = std::fs::remove_dir_all(folder);
     }
 
