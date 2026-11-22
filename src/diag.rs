@@ -55,6 +55,11 @@ fn elapsed() -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64()
 }
 
+/// The time since the process started (the log's clock): the performance reports' load times count from here.
+pub fn since_start() -> std::time::Duration {
+    START.get_or_init(Instant::now).elapsed()
+}
+
 /// Writes `msg` to the log, one line per line, with the time since the start.
 pub fn log(msg: &str) {
     let t = elapsed();

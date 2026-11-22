@@ -9,6 +9,7 @@
 
 pub mod crash;
 pub mod events;
+pub mod perf;
 pub mod queue;
 pub mod sanitize;
 pub mod state;
