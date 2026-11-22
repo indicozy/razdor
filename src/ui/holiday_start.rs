@@ -65,6 +65,17 @@ pub struct Start {
     pub was_installed: bool,
 }
 
+/// The holiday files are written by one thread at a time: the switch's worker and the launch's files check can
+/// both run at a launch with the switch on, and their `.part` files of the same names would clash (a file's
+/// download failed with «No such file or directory» on the race). The second one finds the files there and skips them.
+static FILES_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// `Hub::install_holiday` under [`FILES_LOCK`].
+fn install_files(hub: &Hub, h: &HolidayRef) -> Result<usize, String> {
+    let _one_at_a_time = FILES_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    hub.install_holiday(h)
+}
+
 /// The worker: the hub's catalog (fresh from the address, else the cached one when offline), the mod it
 /// names, and its download and install when it is not on the disk. The whole catalog is read, so the
 /// listing's `visible_from` does not hide the mod from the switch. Runs on a thread.
@@ -82,7 +93,7 @@ fn run(local: PathBuf) -> Result<Start, String> {
     // The bell, the music and the sleigh come with the switch. A failure is not fatal: the look's copy
     // (`files_tick`) tries them again on the next launch. Offline (the cached catalog) they wait.
     if let (true, Some(h)) = (fresh, &catalog.holiday) {
-        if let Err(why) = hub.install_holiday(h) {
+        if let Err(why) = install_files(&hub, h) {
             razdor::diag!("holiday: the files are not all there ({why}); they are tried again on the next launch");
         }
     }
@@ -155,7 +166,7 @@ fn start_files(h: HolidayRef) -> Files {
     let hub = Hub { source: Source::from_env(), local };
     let (tx, rx) = channel();
     let spawned = std::thread::Builder::new().name("holiday-files".into()).spawn(move || {
-        let _ = tx.send(hub.install_holiday(&h));
+        let _ = tx.send(install_files(&hub, &h));
     });
     match spawned {
         Ok(_) => Files::Installing(rx),
