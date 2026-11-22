@@ -24,9 +24,10 @@ saves, and other devices' saves are listed and downloaded on demand.
 - Order when the mirror is over its limit: pinned first, then «Продолжить», then the newest by time. The
   limits are `cloud_saves_per_device` (remote config, default 100, never above the server's 100) and the
   account's 20 MB. A save that does not fit stays local: the load list marks it «не в облаке».
-- A save deleted on the device, or overwritten (a quick save), or pushed out of the mirror by newer saves, is
-  deleted from the cloud at the next sync. The device's mirror is the device: no bin, no pinned shelf, no
-  special cap for pinned saves.
+- A save deleted on the device, or overwritten (a quick save), is deleted from the cloud at the next sync.
+  A save only pushed out of the mirror by newer saves (over the cap or the quota) keeps its cloud row and
+  its cloud mark until a newly chosen save needs the room; then the oldest such rows of this device are
+  deleted, only as many as that save needs. No bin, no pinned shelf, no special cap for pinned saves.
 - Another device's saves are NOT downloaded at start. The account is listed: device id and name, save name,
   map, kind, time, size, the content hash and the Razdor version. A save is downloaded when the player loads
   it from the «Облако» tab. It is then kept as an ordinary local save (its origin device is kept for the
@@ -54,7 +55,9 @@ saves, and other devices' saves are listed and downloaded on demand.
 - Per account: 20 MB, counted after zstd compression on the client; the server also refuses past four times
   the device cap (a safety net, 400 rows).
 - Over the limit: the upload is refused with «Облако заполнено, удалите старые сохранения»; the server never
-  deletes anything to make room. The client makes room itself: it deletes its own stale rows before it uploads.
+  deletes anything to make room. The client makes room itself, only when it uploads a newly chosen save: it
+  deletes its own rows whose content is gone from the device, then its own rows that are kept but no longer
+  chosen (oldest first, only as many as the save needs).
 - No encryption at rest (HTTPS in transit).
 
 ## When

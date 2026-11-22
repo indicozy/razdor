@@ -85,8 +85,9 @@ per route (`server/src/lib.rs`); a body over its cap is refused by the framework
 - Saves: a cap per device (`saves_per_device`, 100; the account's `saves_per_account` is 400, a safety
   net). Each row carries its device id and its raw hash. The 20 MB quota per account is counted on the
   stored (zstd, from the client) bytes; past the device cap, the account cap or the quota the server answers
-  413 «Облако заполнено, удалите старые сохранения». Nothing is deleted to make room: the client deletes its
-  own stale rows first. Rows from before device ids carry an empty id and hash.
+  413 «Облако заполнено, удалите старые сохранения». The server deletes nothing to make room; the client makes
+  room only when it uploads a newly chosen save (its own rows whose content is gone, then its kept-but-unchosen
+  rows, oldest first, only as many as needed). Rows from before device ids carry an empty id and hash.
 - Marks: per map, the better level wins (Green is best, then Grey, Yellow, Red); a tie takes the later
   date. Settings: per key, the newer `changed_at` wins. Hub: the list replaces the stored one when it
   is not older.
@@ -288,11 +289,14 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
   409 `Conflict`, 413 `Full`, 404 `NotFound`, 401 and 403 `Unauthorized`, 408, 429 and 5xx `Offline`, any other
   4xx `Refused`, a bad answer `Bad`.
 - `sync.rs`: over the `Local` trait (this device's saves and documents, implemented by the game's store).
-  - `push` (the mirror): lists the account, deletes this device's own rows whose raw hash is no longer
-    chosen (a save deleted, overwritten or pushed out of the cap; a second row of one content too), then
-    uploads the chosen saves the account lacks. Deletes come first, so the device's cap is never passed.
-    Nothing is deleted while a local save cannot be read (its hash is unknown). Rows of a newer Razdor are
-    never touched. Then marks, settings, the Hub list and the benchmark reports.
+  - `push` (the mirror): lists the account, then `sort_rows` splits this device's own rows: a row whose raw
+    hash is no longer on the device (a save deleted or overwritten here), or a second row of one content, is
+    deleted now. A row still on the device but not chosen (over the cap or the quota) is kept: it stays in the
+    cloud, with the cloud mark (`InCloud`), until a chosen save needs its room. Then the chosen saves the
+    account lacks are uploaded; before each, `select::make_room` names the oldest kept-but-unchosen rows to
+    delete, only as many as the device cap, the account's row cap or the quota needs. If it cannot make room,
+    the round stops as full. Nothing is deleted while a local save cannot be read (its hash is unknown). Rows
+    of a newer Razdor are never touched. Then marks, settings, the Hub list and the benchmark reports.
   - `refresh` (the «Облако» tab): the list only. `others` are the other devices' saves whose raw hash this
     device does not hold; `newer` are the saves of a newer Razdor (listed locked).
   - `pull`: `refresh` plus marks, settings and the Hub offer. `sync` is pull, then push.
@@ -309,7 +313,7 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
 - Tests: `cargo test --profile fasttest cloud::`. `e2e.rs` runs `razdor-server`'s router on a local port with
   two devices (linked by a code): a device's mirror and the other device's list (no download, same names kept
   apart), the download on demand (kept once, then it joins the mirror), a deleted save leaving the cloud while
-  the other device's rows stay, the device cap (the oldest stays local), a newer Razdor's save listed locked,
+  the other device's rows stay, the device cap (the oldest stays local; a row over the cap stays in the cloud until a new save needs its room, oldest evicted first), a newer Razdor's save listed locked,
   the marks and settings, the account deletion, and the background worker.
 
 The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not the lib):

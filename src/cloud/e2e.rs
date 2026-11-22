@@ -185,18 +185,55 @@ fn the_device_cap_keeps_the_newest_and_the_rest_stays_local() {
     let (mut a, _b) = linked_pair(&base, &root);
     a.local.cap = 2;
     let oldest = a.local.add("dt", "ruins", SaveKind::Manual, "один", 100, &noise(500));
-    a.local.add("dt", "ruins", SaveKind::Manual, "два", 200, &noise(500));
-    a.local.add("dt", "ruins", SaveKind::Manual, "три", 300, &noise(500));
+    let two = a.local.add("dt", "ruins", SaveKind::Manual, "два", 200, &noise(500));
+    let three = a.local.add("dt", "ruins", SaveKind::Manual, "три", 300, &noise(500));
     let round = sync::sync(&a.api(&base), &mut a.local).expect("syncs");
     assert_eq!(round.pushed, 2);
-    assert_eq!(round.states[&oldest], SaveState::LocalOnly, "over the cap: it stays local");
+    assert_eq!(round.states[&oldest], SaveState::LocalOnly, "over the cap: it stays local, never uploaded");
 
-    // A newer save pushes the oldest of the two out of the cap: its cloud row goes, the save stays here.
+    // The cap goes down to one: «два» is no longer chosen, but its row stays in the cloud (InCloud) and
+    // nothing is deleted: the room is only made when a new save needs it.
+    a.local.cap = 1;
+    let round = sync::sync(&a.api(&base), &mut a.local).expect("syncs");
+    assert_eq!((round.pushed, round.deleted), (0, 0));
+    assert_eq!(a.api(&base).list_saves().expect("lists").saves.len(), 2, "«два» stays in the cloud");
+    assert_eq!(round.states[&two], SaveState::InCloud);
+    assert_eq!(round.states[&three], SaveState::InCloud);
+    assert!(a.local.named("два").is_some());
+
+    // A newer save needs the room: the kept rows go, oldest first, and only as many as it takes.
+    a.local.add("dt", "ruins", SaveKind::Manual, "четыре", 400, &noise(500));
+    let round = sync::sync(&a.api(&base), &mut a.local).expect("syncs");
+    assert_eq!((round.pushed, round.deleted), (1, 2));
+    let names: Vec<String> = a.api(&base).list_saves().expect("lists").saves.iter().map(|e| e.meta.name.clone()).collect();
+    assert_eq!(names, vec!["четыре".to_string()]);
+    assert!(a.local.named("два").is_some(), "the saves stay on the device");
+}
+
+#[test]
+fn a_kept_row_is_evicted_only_as_far_as_the_new_save_needs() {
+    let (base, root) = server("evict");
+    let (mut a, _b) = linked_pair(&base, &root);
+    a.local.cap = 3;
+    a.local.add("dt", "ruins", SaveKind::Manual, "один", 100, &noise(500));
+    a.local.add("dt", "ruins", SaveKind::Manual, "два", 200, &noise(500));
+    a.local.add("dt", "ruins", SaveKind::Manual, "три", 300, &noise(500));
+    sync::sync(&a.api(&base), &mut a.local).expect("syncs");
+    assert_eq!(a.api(&base).list_saves().expect("lists").saves.len(), 3);
+
+    // Two rows are no longer chosen (the cap is one): both stay in the cloud.
+    a.local.cap = 1;
+    sync::sync(&a.api(&base), &mut a.local).expect("syncs");
+    assert_eq!(a.api(&base).list_saves().expect("lists").saves.len(), 3);
+
+    // The cap is back at three and a new save needs one row of room: only the oldest kept row goes.
+    a.local.cap = 3;
     a.local.add("dt", "ruins", SaveKind::Manual, "четыре", 400, &noise(500));
     let round = sync::sync(&a.api(&base), &mut a.local).expect("syncs");
     assert_eq!((round.pushed, round.deleted), (1, 1));
-    assert_eq!(a.api(&base).list_saves().expect("lists").saves.len(), 2);
-    assert!(a.local.named("два").is_some());
+    let names: Vec<String> = a.api(&base).list_saves().expect("lists").saves.iter().map(|e| e.meta.name.clone()).collect();
+    assert!(!names.contains(&"один".to_string()), "the oldest kept row goes first");
+    assert!(names.contains(&"два".to_string()) && names.contains(&"три".to_string()), "the rest stay");
 }
 
 #[test]

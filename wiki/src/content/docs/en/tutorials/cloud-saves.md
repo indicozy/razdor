@@ -34,7 +34,7 @@ The same section has these rows:
 * **The list of Hub maps and mods you have installed.** Another device uses it to offer the same maps and mods.
 * **Performance test reports.**
 
-Up to 100 saves from one device go to the cloud. Pinned saves go first, then the Continue slot, then the newest. The rest stay on the device, and they do not get the cloud mark in the load window.
+Up to 100 saves from one device go to the cloud. Pinned saves go first, then the Continue slot, then the newest. The rest stay on the device. A save that is already in the cloud stays there, with the cloud mark, until a new save needs the room. Then the oldest extra saves leave the cloud, only as many as needed. They always stay on the device.
 
 If you delete a save on the device, or overwrite it (a quick save, say), the cloud copy is deleted at the next sync.
 

@@ -74,12 +74,83 @@ pub fn choose(candidates: &[Candidate], cap: usize, budget: u64) -> Vec<String> 
     chosen
 }
 
+/// A row of this device that is still in the cloud but no longer chosen. It stays until a newly chosen
+/// save needs its room ([`make_room`]): the oldest go first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Spare {
+    /// The cloud row's id (what the delete call takes).
+    pub row: String,
+    /// The raw hash of the row's content (the key the sync keeps by).
+    pub raw: String,
+    pub saved_at: u64,
+    pub size: u64,
+}
+
+/// The room a new save meets in the account: this device's rows against its cap, every row against the
+/// account's cap, and the bytes in use against the quota.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Room {
+    pub device_rows: usize,
+    pub device_cap: usize,
+    pub account_rows: usize,
+    pub account_cap: usize,
+    pub bytes: u64,
+    pub quota: u64,
+}
+
+impl Room {
+    /// Whether one more row of `size` bytes fits.
+    pub fn fits(&self, size: u64) -> bool {
+        self.device_rows < self.device_cap && self.account_rows < self.account_cap && self.bytes + size <= self.quota
+    }
+
+    /// The room once `row` is deleted.
+    pub fn evicted(self, row: &Spare) -> Room {
+        Room {
+            device_rows: self.device_rows.saturating_sub(1),
+            account_rows: self.account_rows.saturating_sub(1),
+            bytes: self.bytes.saturating_sub(row.size),
+            ..self
+        }
+    }
+}
+
+/// The spare rows to delete, oldest first, so that a save of `size` bytes fits: an empty list when it
+/// fits already, `None` when even deleting every spare row would not make room.
+pub fn make_room(spare: &[Spare], room: Room, size: u64) -> Option<Vec<Spare>> {
+    let mut order: Vec<&Spare> = spare.iter().collect();
+    order.sort_by(|a, b| (a.saved_at, &a.row).cmp(&(b.saved_at, &b.row)));
+    let mut now = room;
+    let mut evict = Vec::new();
+    for row in order {
+        if now.fits(size) {
+            return Some(evict);
+        }
+        now = now.evicted(row);
+        evict.push(row.clone());
+    }
+    now.fits(size).then_some(evict)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn c(id: &str, kind: SaveKind, pinned: bool, saved_at: u64, size: u64) -> Candidate {
         Candidate { id: id.into(), kind, pinned, saved_at, raw_sha: format!("raw-{id}"), size }
+    }
+
+    fn spare(row: &str, saved_at: u64, size: u64) -> Spare {
+        Spare { row: row.into(), raw: format!("raw-{row}"), saved_at, size }
+    }
+
+    /// A room with `rows` of `cap` rows on the device and `bytes` of `quota` used; the account is roomy.
+    fn room(rows: usize, cap: usize, bytes: u64, quota: u64) -> Room {
+        Room { device_rows: rows, device_cap: cap, account_rows: rows, account_cap: 400, bytes, quota }
+    }
+
+    fn rows(list: &[Spare]) -> Vec<&str> {
+        list.iter().map(|s| s.row.as_str()).collect()
     }
 
     #[test]
@@ -131,5 +202,47 @@ mod tests {
         assert_eq!(state(true, false), SaveState::InCloud);
         assert_eq!(state(false, true), SaveState::WaitingUpload);
         assert_eq!(state(false, false), SaveState::LocalOnly);
+    }
+
+    #[test]
+    fn a_new_save_that_fits_evicts_nothing() {
+        let spare_rows = vec![spare("old", 10, 5)];
+        assert_eq!(make_room(&spare_rows, room(1, 2, 5, 100), 10), Some(vec![]));
+    }
+
+    #[test]
+    fn the_device_cap_evicts_the_oldest_spare_row_first() {
+        // Two spare rows, the cap is full: one eviction makes the room, and it is the oldest (saved 10).
+        let spares = vec![spare("mid", 20, 5), spare("old", 10, 5), spare("new", 30, 5)];
+        let evict = make_room(&spares, room(3, 3, 15, 100), 5).expect("room is made");
+        assert_eq!(rows(&evict), vec!["old"]);
+    }
+
+    #[test]
+    fn the_quota_evicts_oldest_first_until_the_bytes_fit() {
+        // 20 bytes in use of 24: a 10-byte save needs 6 bytes freed, so the oldest (4) is not enough and
+        // the next (in age) is taken too.
+        let spares = vec![spare("c", 30, 4), spare("a", 10, 4), spare("b", 20, 4)];
+        let evict = make_room(&spares, room(3, 10, 20, 24), 10).expect("room is made");
+        assert_eq!(rows(&evict), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn no_room_even_with_every_spare_row_gives_none() {
+        // The cap is full of rows that are still chosen: no spare row to give up.
+        assert_eq!(make_room(&[], room(2, 2, 0, 100), 1), None);
+        // The bytes are full of chosen rows; the spare one is too small to make the room.
+        let spares = vec![spare("small", 10, 1)];
+        assert_eq!(make_room(&spares, room(2, 10, 99, 100), 5), None);
+    }
+
+    #[test]
+    fn the_account_row_cap_counts_every_device() {
+        // The device has room, the account is full (of other devices' rows): a spare row of this device goes.
+        let mut full = room(1, 10, 0, 100);
+        full.account_rows = 400;
+        full.account_cap = 400;
+        let evict = make_room(&[spare("mine", 5, 1)], full, 1).expect("room is made");
+        assert_eq!(rows(&evict), vec!["mine"]);
     }
 }
