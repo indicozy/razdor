@@ -46,6 +46,8 @@ impl AppState {
         }
         let stats = Db::open(&root.join("stats.sqlite"), schema::STATS)?;
         let cloud = Db::open(&root.join("cloud.sqlite"), schema::CLOUD)?;
+        let now = clock.now();
+        cloud.setup(|c| schema::migrate_cloud(c, now))?;
         let ip_salt = load_or_create_salt(&root.join("ip_salt"))?;
         Ok(AppState(Arc::new(Inner {
             cfg,

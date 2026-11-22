@@ -82,7 +82,24 @@ async fn account_of(st: &AppState, headers: &HeaderMap) -> Result<String, ApiErr
     // The rate window is opened only for a stored account: a made-up key costs no memory.
     let id = find_account(st, key_hash.clone()).await?.ok_or(ApiError::Unauthorized("no such account"))?;
     abuse::account_gate(st, &key_hash)?;
+    touch_account(st, &id).await?;
     Ok(id)
+}
+
+/// Marks the account used now, for the expiry. One write an hour per account at most: the UPDATE
+/// only moves a `last_active` that is over an hour old.
+async fn touch_account(st: &AppState, id: &str) -> Result<(), ApiError> {
+    let now = st.clock.now();
+    let id = id.to_string();
+    st.cloud
+        .call(move |c| {
+            c.execute(
+                "UPDATE accounts SET last_active = ?1 WHERE id = ?2 AND last_active < ?1 - 3600",
+                params![now, id],
+            )?;
+            Ok(())
+        })
+        .await
 }
 
 async fn count_op(st: &AppState, op: &'static str) -> Result<(), ApiError> {
@@ -164,7 +181,7 @@ pub async fn new_account(
     st.cloud
         .call(move |c| {
             c.execute(
-                "INSERT INTO accounts (id, key_hash, created_at) VALUES (?1, ?2, ?3)",
+                "INSERT INTO accounts (id, key_hash, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
                 params![id, key_hash, now],
             )?;
             Ok(())
@@ -182,11 +199,19 @@ pub async fn delete_account(
 ) -> Result<Response, ApiError> {
     gate(&st, &headers, peer).await?;
     let id = account_of(&st, &headers).await?;
-    let dir = st.root.join(SAVES).join(&id);
-    let id2 = id.clone();
+    remove_account(&st, &id).await?;
+    count_op(&st, "account_delete").await?;
+    Ok(json(&Ack::confirmed()))
+}
+
+/// Deletes an account: its row (the links, saves, marks and the rest go with it) and its save files.
+/// Used by the owner's delete and by the retention job's expiry.
+pub async fn remove_account(st: &AppState, id: &str) -> Result<(), ApiError> {
+    let dir = st.root.join(SAVES).join(id);
+    let id = id.to_string();
     st.cloud
         .call(move |c| {
-            c.execute("DELETE FROM accounts WHERE id = ?1", params![id2])?;
+            c.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
             Ok(())
         })
         .await?;
@@ -197,9 +222,7 @@ pub async fn delete_account(
     })
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?
-    .map_err(|e| ApiError::Internal(format!("account files: {e}")))?;
-    count_op(&st, "account_delete").await?;
-    Ok(json(&Ack::confirmed()))
+    .map_err(|e| ApiError::Internal(format!("account files: {e}")))
 }
 
 /// Deletes the link codes past their expiry (their keys go with them). Run every minute.

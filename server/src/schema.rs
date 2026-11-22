@@ -151,7 +151,8 @@ pub const CLOUD: &str = "
 CREATE TABLE IF NOT EXISTS accounts (
     id TEXT PRIMARY KEY,
     key_hash TEXT NOT NULL UNIQUE,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    last_active INTEGER NOT NULL DEFAULT 0
 );
 -- A link code's key is kept here only until the code is redeemed or expires (at most 10 minutes).
 CREATE TABLE IF NOT EXISTS links (
@@ -196,3 +197,16 @@ CREATE TABLE IF NOT EXISTS bench (
 );
 CREATE INDEX IF NOT EXISTS bench_account ON bench(account_id, at);
 ";
+
+/// Start-up migration of the cloud database. A file from before `last_active` gets the column, and
+/// its accounts count as used now (the expiry clock starts at the upgrade, not years earlier).
+pub fn migrate_cloud(c: &rusqlite::Connection, now: i64) -> rusqlite::Result<()> {
+    let has: bool = c
+        .prepare("SELECT 1 FROM pragma_table_info('accounts') WHERE name = 'last_active'")?
+        .exists([])?;
+    if !has {
+        c.execute_batch("ALTER TABLE accounts ADD COLUMN last_active INTEGER NOT NULL DEFAULT 0;")?;
+    }
+    c.execute("UPDATE accounts SET last_active = ?1 WHERE last_active = 0", rusqlite::params![now])?;
+    Ok(())
+}

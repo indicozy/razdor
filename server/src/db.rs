@@ -38,6 +38,12 @@ impl Db {
         .map_err(|e| ApiError::Internal(format!("database task: {e}")))?
     }
 
+    /// Runs a start-up step (a migration) on the connection, before the service takes requests.
+    pub fn setup(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<()>) -> rusqlite::Result<()> {
+        let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
+        f(&guard)
+    }
+
     /// Folds the WAL into the file (at shutdown, so a copy of the file alone is whole).
     pub async fn checkpoint(&self) -> Result<(), ApiError> {
         self.call(|c| {

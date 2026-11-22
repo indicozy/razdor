@@ -800,3 +800,61 @@ async fn saves_per_account_zero_size_and_map_names_are_checked() {
     assert!(third.json()["error"].as_str().unwrap_or("").contains("Облако заполнено"));
     assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 2);
 }
+
+#[tokio::test]
+async fn idle_accounts_expire_with_their_saves_after_the_expiry() {
+    let h = harness("expiry", Limits::default());
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map01.dtm", "manual", b"s")).await;
+    assert_eq!(r.status, StatusCode::OK);
+    // A cloud request on day 80 marks the account used: its ninety days start again then.
+    h.st.clock.set(NOW + 80 * 86_400);
+    assert_eq!(call(&app, "GET", "/v1/hub", &key_header(&key), vec![]).await.status, StatusCode::OK);
+    h.st.clock.set(NOW + 150 * 86_400);
+    let report = retention::run_once(&h.st).await.expect("runs");
+    assert_eq!(report.accounts, 0);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM accounts").await, 1);
+    // Day 171: idle since day 80, past the ninety days. The row and its save files go.
+    h.st.clock.set(NOW + 171 * 86_400);
+    let report = retention::run_once(&h.st).await.expect("runs");
+    assert_eq!(report.accounts, 1);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM accounts").await, 0);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 0);
+    assert_eq!(std::fs::read_dir(h.st.root.join("saves")).expect("dir").count(), 0);
+}
+
+#[tokio::test]
+async fn expiry_zero_keeps_every_account() {
+    let limits = Limits { account_expiry_days: 0, ..Limits::default() };
+    let h = harness("expiry-off", limits);
+    account(&h).await;
+    h.st.clock.set(NOW + 1000 * 86_400);
+    let report = retention::run_once(&h.st).await.expect("runs");
+    assert_eq!(report.accounts, 0);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM accounts").await, 1);
+}
+
+#[tokio::test]
+async fn an_old_cloud_database_counts_its_accounts_as_used_at_the_upgrade() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("old-cloud-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let _dir = Dir(dir.clone());
+    {
+        let c = rusqlite::Connection::open(dir.join("cloud.sqlite")).expect("opens");
+        c.execute_batch(
+            "CREATE TABLE accounts (id TEXT PRIMARY KEY, key_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+             INSERT INTO accounts VALUES ('old', 'hash', 5);",
+        )
+        .expect("the old schema");
+    }
+    let cfg = Config { data_dir: dir.clone(), ..Config::default() };
+    let st = AppState::open(cfg, Clock::fixed(NOW)).expect("opens over the old file");
+    let last: i64 = st
+        .cloud
+        .call(|c| Ok(c.query_row("SELECT last_active FROM accounts WHERE id = 'old'", [], |r| r.get(0))?))
+        .await
+        .expect("reads");
+    assert_eq!(last, NOW);
+}

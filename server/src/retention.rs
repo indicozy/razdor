@@ -1,6 +1,7 @@
 //! The retention job (daily): raw pings older than 90 days and raw events and performance older than
 //! 180 days are folded into per-day aggregates and deleted; crash saves go after 90 days, crash
 //! reports after a year; expired link codes go at once. Battles and verdicts are kept forever.
+//! Cloud accounts idle for `account_expiry_days` (90; 0 is off) go with their save files.
 //! The clock is injected, so the tests run it on any day.
 
 use std::time::Duration;
@@ -26,6 +27,28 @@ pub struct Report {
     pub crash_saves: usize,
     pub crash_reports: usize,
     pub links: usize,
+    pub accounts: usize,
+}
+
+/// Deletes the accounts idle past `account_expiry_days` (0: never), with their save files.
+async fn expire_accounts(st: &AppState) -> Result<usize, ApiError> {
+    let days = i64::from(st.cfg.limits.account_expiry_days);
+    if days == 0 {
+        return Ok(0);
+    }
+    let before = st.clock.now() - days * DAY;
+    let idle: Vec<String> = st
+        .cloud
+        .call(move |c| {
+            let mut s = c.prepare("SELECT id FROM accounts WHERE last_active < ?1")?;
+            let rows = s.query_map(params![before], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
+            Ok(rows)
+        })
+        .await?;
+    for id in &idle {
+        cloud::remove_account(st, id).await?;
+    }
+    Ok(idle.len())
 }
 
 /// One pass of the job, at the clock's time.
@@ -113,6 +136,7 @@ pub async fn run_once(st: &AppState) -> Result<Report, ApiError> {
         .await?;
 
     report.links = cloud::sweep_links(st).await?;
+    report.accounts = expire_accounts(st).await?;
     st.abuse().prune(now);
     Ok(report)
 }
@@ -140,13 +164,14 @@ pub fn spawn(st: AppState) {
         loop {
             match run_once(&st).await {
                 Ok(r) => tracing::info!(
-                    "retention: {} pings, {} events, {} perf rows folded; {} crash saves, {} crash reports, {} links",
+                    "retention: {} pings, {} events, {} perf rows folded; {} crash saves, {} crash reports, {} links; {} idle accounts removed",
                     r.pings,
                     r.events,
                     r.perf,
                     r.crash_saves,
                     r.crash_reports,
-                    r.links
+                    r.links,
+                    r.accounts
                 ),
                 Err(e) => tracing::error!("retention failed: {e:?}"),
             }
