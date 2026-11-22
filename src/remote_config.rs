@@ -523,7 +523,8 @@ mod tests {
     fn the_consumer_lists_go_primary_first_within_their_order() {
         let c = Config::builtin();
         let gh = Some(mirror::Host::GitHub);
-        assert!(mirror::ordered_by(gh, &c.update_feed)[0].starts_with("https://api.github.com/"));
+        // The feed's GitHub side starts with the Pages copy (github.io), then the API.
+        assert!(mirror::ordered_by(gh, &c.update_feed)[0].starts_with("https://indicozy.github.io/"));
         assert!(mirror::ordered_by(gh, &c.hub)[0].starts_with("https://github.com/"));
         assert!(mirror::ordered_by(gh, &c.game.links)[0].starts_with("https://github.com/"));
         let gv = Some(mirror::Host::GitVerse);
