@@ -137,6 +137,7 @@ fn export_exit_png(shot: &Image, path: &str, what: &str) {
 /// closed synchronously before this, so skipping the handlers loses nothing.
 fn exit_now(app: &mut App, how: &str) -> ! {
     ui::analytics::session_end();
+    ui::cloud_store::finish_on_exit();
     razdor::diag::step("quitting");
     razdor::diag::log(&format!("exit: path: {how}"));
     // Android: the app leaves the screen first, so the slow writes below happen off the screen
@@ -279,6 +280,7 @@ async fn main() {
     // The analytics' game id (the active mod, or «dt») and language (the chosen one, else the system's),
     // now that the install and the language are set.
     razdor::telemetry::install_loaded(assets.dt.is_some());
+    ui::cloud_store::start_if_on();
     let mut app = App::new(assets, content);
     // The play events' session (a no-op without the analytics): the window's size and the settings.
     ui::analytics::session_start(&app);

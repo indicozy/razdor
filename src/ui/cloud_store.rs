@@ -79,6 +79,9 @@ pub fn state_of(id: &str) -> razdor::cloud::SaveState {
 /// Queues a request. Nothing is sent without an account: only `CreateAccount` starts the worker
 /// then. A switched-off cloud takes no sync or push. Never waits.
 pub fn request(job: Job) {
+    if !active() {
+        return;
+    }
     if !matches!(job, Job::CreateAccount | Job::Link | Job::Redeem(_)) && !on() {
         return;
     }
@@ -91,6 +94,27 @@ pub fn request(job: Job) {
     drop(queue);
     start_worker();
 }
+
+/// The push on leaving the app (the exit, minimising, the phone's pause): queued, never waited for
+/// except by [`finish_on_exit`].
+pub fn push_when_left() {
+    request(Job::Push);
+}
+
+/// The exit: pushes what is chosen, and waits up to `FINISH_WAIT` for the requests to run. Offline
+/// or slow, the game goes on: what is not pushed goes up at the next start.
+pub fn finish_on_exit() {
+    if !active() || !on() {
+        return;
+    }
+    request(Job::Push);
+    if let Some(c) = CLOUD.get() {
+        let _ = c.finish(FINISH_WAIT);
+    }
+}
+
+/// How long the exit waits for the push.
+const FINISH_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 
 /// The start-up request: a pull, when the account exists and the cloud is on. Called once the
 /// install is loaded (the save folders are known then).

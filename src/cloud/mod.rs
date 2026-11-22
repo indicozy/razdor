@@ -31,6 +31,7 @@ pub use select::SaveState;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -111,6 +112,8 @@ pub struct Shared {
 pub struct Cloud {
     tx: mpsc::Sender<Job>,
     shared: Arc<Mutex<Shared>>,
+    /// Requests queued and not yet run (see [`Cloud::finish`]).
+    queued: Arc<AtomicUsize>,
 }
 
 impl Cloud {
@@ -125,7 +128,9 @@ impl Cloud {
             ..Shared::default()
         }));
         let (tx, rx) = mpsc::channel();
+        let queued = Arc::new(AtomicUsize::new(0));
         let worker = Worker {
+            queued: queued.clone(),
             local,
             net,
             base: base.to_string(),
@@ -137,12 +142,28 @@ impl Cloud {
         };
         // A failed spawn leaves the requests unanswered: the game plays on, the cloud stays off.
         let _ = std::thread::Builder::new().name("razdor-cloud".into()).spawn(move || worker.run(rx));
-        Cloud { tx, shared }
+        Cloud { tx, shared, queued }
     }
 
     /// Queues a request. Never waits.
     pub fn request(&self, job: Job) {
-        let _ = self.tx.send(job);
+        self.queued.fetch_add(1, Ordering::SeqCst);
+        if self.tx.send(job).is_err() {
+            self.queued.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// Waits, at most `wait`, until the queued requests have run (the exit's push). True when they
+    /// all ran; a retry of an offline round is not waited for.
+    pub fn finish(&self, wait: Duration) -> bool {
+        let until = Instant::now() + wait;
+        while self.queued.load(Ordering::SeqCst) > 0 {
+            if Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        true
     }
 
     /// The state as of the last finished request.
@@ -175,6 +196,7 @@ struct Worker {
     /// The sync to retry after an offline failure, and when.
     retry: Option<(Instant, Job)>,
     backoff_secs: u64,
+    queued: Arc<AtomicUsize>,
 }
 
 impl Worker {
@@ -184,6 +206,7 @@ impl Worker {
                 Some((at, _)) if *at <= Instant::now() => self.retry.take().map(|(_, job)| job),
                 _ => None,
             };
+            let due_was_none = due.is_none();
             let job = match due {
                 Some(job) => job,
                 None => {
@@ -198,7 +221,11 @@ impl Worker {
                     }
                 }
             };
+            let requested = due_was_none;
             self.execute(job);
+            if requested {
+                self.queued.fetch_sub(1, Ordering::SeqCst);
+            }
         }
     }
 

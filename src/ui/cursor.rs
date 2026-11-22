@@ -115,6 +115,8 @@ impl miniquad::EventHandler for FocusWatch {
     fn draw(&mut self) {}
     fn window_minimized_event(&mut self) {
         self.0 = false;
+        // Minimising pushes the cloud's saves (`cloud_store`); queued, never waited for.
+        super::cloud_store::push_when_left();
     }
     fn window_restored_event(&mut self) {
         self.0 = true;

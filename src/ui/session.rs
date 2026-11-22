@@ -89,6 +89,8 @@ fn writer() -> &'static Sender<Job> {
 /// (no macroquad calls): the platform hooks call it when the app is left, and the desktop's
 /// signal watcher. A state already written does nothing; no state (the session ended) does nothing.
 pub fn flush_now() {
+    // The app is left: the cloud's saves go up too (queued; `cloud_store`).
+    super::cloud_store::push_when_left();
     let _guard = lock(&WRITE_LOCK);
     let Some(snapshot) = lock(&LATEST).clone() else { return };
     if *lock(&WRITTEN) == Some(snapshot.hash) {
