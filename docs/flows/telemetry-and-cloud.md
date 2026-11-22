@@ -106,7 +106,11 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 ### Shape
 
 - `src/telemetry/mod.rs`: `Hub` (the state, the queue, the enqueue gates, the daily ping, the delete and
-  new-id actions), `start` (called from `main.rs` after `remote_config::start`), `active` (off under
+  new-id actions), `start` (called from `main.rs` after `remote_config::start`; it opens the queue and
+  the sender only), `set_context` and `install_loaded` (called once the install and the language are
+  set: they queue the day's ping with the game id (`dt`, or the active mod's id) and the interface
+  language, and on the run's first call the last crash report with the newest save of the games'
+  folder; the frame loop sets `crash::set_screen`), `active` (off under
   `cargo test`, in the snapshots and scenes, and with `RAZDOR_TELEMETRY=off`), `WHAT_WE_SEND_URL`.
 - `src/telemetry/state.rs`: `<app data>/telemetry/state.json`: the install id (32 hex digits), the consent
   (`unknown`/`yes`/`no`), the version the question was last asked in, the last ping day, the crash
@@ -124,7 +128,7 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   (Android: `razdorPost` in `android/MainActivityInject.java`, the body through a cache file; iOS: no
   POST yet, the items stay queued).
 - `src/telemetry/crash.rs`: `note_panic` (from `diag.rs`'s panic hook, after the quiet check), `collect`
-  (at start: queues the pending report with the consent yes, with the cleaned last 200 lines of
+  (at the first `set_context` of the run: queues the pending report with the consent yes, with the cleaned last 200 lines of
   `razdor.previous.log`), `answer` and `queue_save` (the save item waits for the report's server id).
 - `src/telemetry/sanitize.rs`: `Paths` replaces the home folder, the install folder, the saves folder and
   the save names by `<home>`, `<dt>`, `<saves>`, `<save>`. The longest names go first, both separators,
@@ -158,8 +162,6 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   (reusing `rules::recording`).
 - Native crashes (signals, the Windows access violation): no pending file is written, so they are not
   reported.
-- The newest save for a crash (`collect` gets `None`), the game and mod id (`start` passes «dt»), the
-  language (the system's), `set_screen` (no caller yet, so the report's screen is «unknown»).
 - The phones' `razdorPost` is written but not compiled or run here.
 
 ### Tests

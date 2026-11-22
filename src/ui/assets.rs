@@ -210,6 +210,7 @@ impl Assets {
     /// The install found after the start (see `App::mobile_install_poll`).
     pub fn adopt_install(&mut self, dt: DtArt) {
         announce_install(&dt);
+        razdor::telemetry::install_loaded(true);
         self.dt = Some(dt);
     }
 

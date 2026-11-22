@@ -260,10 +260,17 @@ pub fn active() -> bool {
         && std::env::var_os("RAZDOR_SCENE").is_none()
 }
 
-/// Start-up: opens the analytics in the app's data folder, queues the ping (when due), queues the
-/// crash report of the last run (with the consent yes; `crash::collect`) and starts the sender thread.
-/// `dt` is the install folder (cleaned out of the report). Does nothing when [`active`] is false.
-pub fn start(game: &str, lang: &str, dt: Option<&Path>) {
+/// The install folder named at start (`RAZDOR_DT_DIR`); the crash report's clean-up names it.
+static DT_DIR: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// Set by the first [`set_context`]: the last run's crash report is looked for once per run.
+static CRASH_CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// Start-up: opens the analytics in the app's data folder and starts the sender thread. Nothing is
+/// queued here: the game id and the language are known only once the install is loaded, so the
+/// day's ping and the last run's crash report are queued by [`set_context`]. `dt` is the install
+/// folder (cleaned out of the report). Does nothing when [`active`] is false.
+pub fn start(dt: Option<&Path>) {
     if !active() {
         return;
     }
@@ -275,14 +282,7 @@ pub fn start(game: &str, lang: &str, dt: Option<&Path>) {
             return;
         }
     };
-    let today = now_secs() / 86_400;
-    if let Err(e) = opened.ping_if_due(today, game, lang) {
-        crate::diag!("telemetry: no ping: {e:?}");
-    }
-    // The crashed run's log: `diag::init` moved it aside when this run started.
-    let previous = crate::diag::log_path().map(|p| p.with_file_name("razdor.previous.log"));
-    let names = sanitize::Paths::for_this_machine(dt, None, &[]);
-    let _ = crash::collect(&opened, previous.as_deref(), &names, game, BTreeMap::new(), None);
+    let _ = DT_DIR.set(dt.map(Path::to_path_buf));
     if HUB.set(opened).is_err() {
         return;
     }
@@ -293,6 +293,37 @@ pub fn start(game: &str, lang: &str, dt: Option<&Path>) {
     if let Err(e) = spawned {
         crate::diag!("telemetry: the sender does not start: {e}");
     }
+}
+
+/// Called once the install is loaded (or known to be missing) and the interface language is set:
+/// `game` is the install's game id (`dt`, or the active mod's id) and `lang` the language code
+/// (`ru` or `en`). Queues the day's ping (once a UTC day: a second call that day queues nothing,
+/// so a phone that finds its install later keeps the first call's id for that day) and, on the
+/// first call of the run, the last run's crash report with the newest save. Nothing happens before
+/// [`start`].
+pub fn set_context(game: &str, lang: &str) {
+    let Some(hub) = hub() else { return };
+    if let Err(e) = hub.ping_if_due(now_secs() / 86_400, game, lang) {
+        crate::diag!("telemetry: no ping: {e:?}");
+    }
+    if CRASH_CHECKED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    // The crashed run's log: `diag::init` moved it aside when this run started.
+    let previous = crate::diag::log_path().map(|p| p.with_file_name("razdor.previous.log"));
+    let saves = crate::rules::save::games_dir();
+    let dt = DT_DIR.get().and_then(|d| d.as_deref());
+    let names = sanitize::Paths::for_this_machine(dt, saves.as_deref(), &[]);
+    let newest = saves.as_deref().and_then(crash::newest_save);
+    let _ = crash::collect(hub, previous.as_deref(), &names, game, BTreeMap::new(), newest);
+}
+
+/// The install is loaded (`installed`: a game install was found) and the language is set: the game
+/// id is the active mod's id when a mod is the one played, else `dt`. Calls [`set_context`].
+pub fn install_loaded(installed: bool) {
+    let mod_id = if installed { crate::hub::local_dir().and_then(|l| crate::hub::active_mod(&l)) } else { None };
+    let game = mod_id.unwrap_or_else(|| "dt".to_string());
+    set_context(&game, crate::i18n::lang().code());
 }
 
 /// Unix seconds now.
@@ -347,6 +378,20 @@ mod tests {
         // The next UTC day: one more.
         assert_eq!(restarted.ping_if_due(20_001, "dt", "ru"), Ok(true));
         assert_eq!(restarted.queue().len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_ping_carries_the_game_id_and_language_it_was_queued_with() {
+        let (hub, dir) = hub("game");
+        assert_eq!(hub.ping_if_due(20_000, "evolution", "ru"), Ok(true));
+        // A later call the same day (the install found later, another language) queues nothing.
+        assert_eq!(hub.ping_if_due(20_000, "dt", "en"), Ok(false));
+        let seq = hub.queue().metas().next().map(|m| m.seq).expect("the ping");
+        let body = hub.queue().body(seq).unwrap();
+        let ping: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(ping["game"], "evolution");
+        assert_eq!(ping["lang"], "ru");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -237,10 +237,9 @@ async fn main() {
     ui::saves_move::decide_at_start(razdor::platform::cache_dir().as_deref());
     // The phones' folders are tidied off the main thread (the old picture cache goes, `.nomedia`).
     razdor::remote_config::start();
-    // The analytics (`telemetry`): today's ping, and the last run's crash report with the player's yes.
-    // The game id is «dt» until the loaded install names its mod; the language is the system's.
-    let lang = if matches!(ui::language::system_lang(), razdor::i18n::Lang::Ru) { "ru" } else { "en" };
-    razdor::telemetry::start("dt", lang, std::env::var_os("RAZDOR_DT_DIR").map(std::path::PathBuf::from).as_deref());
+    // The analytics (`telemetry`) open here; the day's ping and the last run's crash report are queued
+    // once the install is loaded (`telemetry::install_loaded`, below), when the game id is known.
+    razdor::telemetry::start(std::env::var_os("RAZDOR_DT_DIR").map(std::path::PathBuf::from).as_deref());
     std::thread::spawn(razdor::platform::tidy_app_dir);
     // The picture cache's folders of other releases, its old flat files and stale temporary files
     // go too (off the main thread; the current folder's entries are never touched).
@@ -276,6 +275,9 @@ async fn main() {
             ui::chrome::set_install(dir);
         }
     }
+    // The analytics' game id (the active mod, or «dt») and language (the chosen one, else the system's),
+    // now that the install and the language are set.
+    razdor::telemetry::install_loaded(assets.dt.is_some());
     let mut app = App::new(assets, content);
     // The hub's catalog, read once for the launch (the promo ad and the game check; `ui::launch`).
     ui::launch::start();
@@ -441,6 +443,8 @@ async fn main() {
             ui::perf_log::profile_once();
             // The screen the frame drew (after its input): the other screens' lines are per screen.
             razdor::frame_probe::set_screen(app.screen_name());
+            // The screen a crash report names (cheap: the store is skipped when the name is the same).
+            razdor::telemetry::crash::set_screen(app.screen_name());
             razdor::frame_probe::end_frame(work, total);
             if total.as_millis() > razdor::diag::slow_frame_ms() || opened > 0 {
                 opened = opened.saturating_sub(1);
