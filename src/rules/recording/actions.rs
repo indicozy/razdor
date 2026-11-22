@@ -4,7 +4,7 @@
 //! the first such call on the stack records, nested calls do not, and nothing is recorded inside
 //! an engine scope (a tick, a script run, a restore), so only what the player did is recorded.
 
-use super::super::battle::{Battle, Team, MAX_QUICK_BUDGET};
+use super::super::battle::{Battle, Outcome, Team, MAX_QUICK_BUDGET};
 use super::super::content::UnitId;
 use super::super::formation::{Formation, Row, Slot};
 use super::super::game::{Event, Game};
@@ -344,6 +344,92 @@ pub fn apply_battle(b: &mut Battle, a: &BattleAct) {
             let _ = b.sit_out(*squad as usize, *out);
         }
     }
+}
+
+/// [`apply_battle`] with the legality checked: an act the battle refuses at its moment is an `Err`
+/// and changes nothing. The same engine calls run in the same order, so an accepted act leaves the
+/// battle as `apply_battle` leaves it. The game's replay and the screens keep `apply_battle`; the
+/// battle verifier (`telemetry::verify`) uses this one.
+pub fn try_apply_battle(b: &mut Battle, a: &BattleAct) -> Result<(), String> {
+    fn refused<E: std::fmt::Debug>(e: E) -> String {
+        format!("refused: {e:?}")
+    }
+    fn ongoing(b: &Battle) -> Result<(), String> {
+        if b.outcome() != Outcome::Ongoing {
+            return Err("the battle is over".into());
+        }
+        Ok(())
+    }
+    fn player_turn(b: &Battle) -> Result<(), String> {
+        ongoing(b)?;
+        let id = b.active().ok_or("no unit is to act")?;
+        if b.fighters[id].team != Team::Player {
+            return Err("not the player's turn".into());
+        }
+        Ok(())
+    }
+    fn target_in_battle(b: &Battle, target: u32) -> Result<(), String> {
+        if target as usize >= b.fighters.len() {
+            return Err(format!("no unit {target} in the battle"));
+        }
+        Ok(())
+    }
+    match a {
+        BattleAct::MoveCard { from, to } => b.move_card(*from, *to).map_err(refused)?,
+        BattleAct::MoveActive { to } => b.move_active(*to).map_err(refused)?,
+        BattleAct::Pass => {
+            player_turn(b)?;
+            b.pass();
+        }
+        BattleAct::Act { target } => {
+            player_turn(b)?;
+            target_in_battle(b, *target)?;
+            b.act(*target as usize).map_err(refused).map(drop)?;
+        }
+        BattleAct::ActWith { target, kind } => {
+            player_turn(b)?;
+            target_in_battle(b, *target)?;
+            let kind = crate::rules::battle::ActionKind::from_code(*kind).ok_or("an unknown action kind")?;
+            b.act_with(*target as usize, kind).map_err(refused).map(drop)?;
+        }
+        BattleAct::AutoStep => {
+            ongoing(b)?;
+            b.active().ok_or("no unit is to act")?;
+            b.auto_step();
+        }
+        BattleAct::HeroAutoStep => {
+            player_turn(b)?;
+            b.hero_auto_step();
+        }
+        BattleAct::HeroAutoPlay => {
+            ongoing(b)?;
+            b.hero_auto_play_to_end();
+        }
+        BattleAct::MaxPlay => {
+            ongoing(b)?;
+            b.max_play_to_end(MAX_QUICK_BUDGET);
+        }
+        BattleAct::ForceEnd { enemy_wins } => {
+            ongoing(b)?;
+            b.force_end(if *enemy_wins { Team::Enemy } else { Team::Player });
+        }
+        BattleAct::OwnCell => {
+            player_turn(b)?;
+            b.own_cell();
+        }
+        BattleAct::Begin => {
+            if !b.is_deploying() {
+                return Err("the battle has begun".into());
+            }
+            b.begin();
+        }
+        BattleAct::SitOut { squad, out } => {
+            if !b.sit_out(*squad as usize, *out) {
+                return Err("the unit cannot sit out now".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `Row`'s number in the stream (front 0, back 1, reserve 2).

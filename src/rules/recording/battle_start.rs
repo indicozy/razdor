@@ -131,7 +131,7 @@ impl BattleStart {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::cell::RefCell;
     use std::path::Path;
     use std::rc::Rc;
@@ -147,14 +147,14 @@ mod tests {
     use crate::rules::content::HeroClass;
     use crate::rules::save;
 
-    fn base() -> Option<DtInstall> {
+    pub(crate) fn base() -> Option<DtInstall> {
         crate::dt::install::load_dotenv();
         let dir = std::env::var_os(crate::dt::install::ENV_VAR)?;
         DtInstall::load(Path::new(&dir)).ok()
     }
 
     /// The map of `dt` with the largest area (and its scenario).
-    fn biggest(dt: &DtInstall) -> (crate::dt::install::MapEntry, Scenario) {
+    pub(crate) fn biggest(dt: &DtInstall) -> (crate::dt::install::MapEntry, Scenario) {
         let mut best: Option<(u64, crate::dt::install::MapEntry, Scenario)> = None;
         for m in &dt.maps {
             let Ok(s) = m.load() else { continue };
@@ -168,7 +168,7 @@ mod tests {
     }
 
     /// A new game on the map, its event generator and patch globals fixed (a playback's start).
-    fn fresh(c: &Arc<Content>, m: &crate::dt::install::MapEntry, s: &Scenario) -> Game {
+    pub(crate) fn fresh(c: &Arc<Content>, m: &crate::dt::install::MapEntry, s: &Scenario) -> Game {
         let start = Entry {
             at: Stamp::default(),
             input: Input::Engine(EngineInput::GameStart { load: false, seed: 5, patch: PatchRecord { battle: 0, hunger_counter: 3, hunger_seen: 3, screen_living: 0, side_blocks: [0, 0] } }),

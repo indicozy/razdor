@@ -15,6 +15,7 @@ pub mod queue;
 pub mod sanitize;
 pub mod state;
 pub mod transport;
+pub mod verify;
 pub mod worker;
 
 use std::collections::BTreeMap;
@@ -295,8 +296,8 @@ pub fn platform() -> String {
     format!("{} {} {}", std::env::consts::OS, std::env::consts::ARCH, usize::BITS)
 }
 
-/// The page that says what is sent (the site's and the wiki's «what we send» page). A placeholder
-/// until the owner sets the domain: change it here, the one place in the game.
+/// The wiki's «what we send» page (ru; the English one is the same page under `/en/`). The one
+/// place in the game that holds the link, so a move of the wiki changes one line.
 pub const WHAT_WE_SEND_URL: &str = "https://indicozy.github.io/razdor/wiki/faq/what-we-send/";
 
 static HUB: OnceLock<Arc<Hub>> = OnceLock::new();
