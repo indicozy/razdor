@@ -22,10 +22,11 @@ pub const ADDRESSES: [&str; 2] = [
     "https://indicozy.gitverse.site/razdor-community/config.json",
 ];
 
-/// The analytics and cloud API's built-in address (`telemetry`, cloud saves). A placeholder until the
-/// owner sets the domain: change it here, the one place in the game, or set `api` in the remote config
-/// so it can move without a release.
-pub const API_BUILTIN: &str = "https://api.razdor.invalid";
+/// The analytics and cloud API's built-in address: the owner's site at `/api` (one domain and a path).
+/// The server's routes are `/v1/...`, so the reverse proxy strips `/api`. The address has no trailing
+/// slash: the sender joins it with a path that starts with `/`. The remote config's `api` list can move
+/// it without a release.
+pub const API_BUILTIN: &str = "https://razdor.indicozy.dev/api";
 
 /// The fetch's stall limit in seconds (the update feed's).
 const SECONDS: u32 = 20;
@@ -51,8 +52,9 @@ pub struct Config {
     pub game: Game,
     /// The API's addresses, in the order they are tried (`telemetry`).
     pub api: Vec<String>,
-    /// The kill switch: `false` stops every send of the analytics. Only the config turns it off; a
-    /// config that leaves it out keeps it on.
+    /// The send switch: `false` stops every send of the analytics. Off by default: the built-in config
+    /// and a config without the key both say `false`, so nothing is sent until the remote config says
+    /// `"telemetry": true` (the owner turns it on after the server has run stably for 2-3 days).
     pub telemetry: bool,
 }
 
@@ -107,7 +109,7 @@ impl Config {
                 name: "discord-times-cu.zip".into(),
             },
             api: vec![API_BUILTIN.to_string()],
-            telemetry: true,
+            telemetry: false,
         }
     }
 
@@ -134,7 +136,7 @@ impl Config {
             None => built.game,
         };
         let api = addresses("api", raw.api).unwrap_or(built.api);
-        let telemetry = raw.telemetry.unwrap_or(true);
+        let telemetry = raw.telemetry.unwrap_or(false);
         Ok(Config { update_feed, hub, game, api, telemetry })
     }
 }
@@ -423,6 +425,8 @@ mod tests {
     #[test]
     fn the_api_list_comes_from_the_config_and_the_built_in_is_the_placeholder() {
         assert_eq!(Config::builtin().api, vec![API_BUILTIN.to_string()]);
+        assert_eq!(API_BUILTIN, "https://razdor.indicozy.dev/api");
+        assert!(!API_BUILTIN.ends_with('/'), "the sender joins a path that starts with /");
         let text = r#"{"schema":1,"api":["https://api2.example","http://no.example"]}"#;
         let c = Config::parse(text.as_bytes()).unwrap();
         assert_eq!(c.api, vec!["https://api2.example".to_string()]);
@@ -432,9 +436,10 @@ mod tests {
 
     #[test]
     fn the_kill_switch_is_read_and_defaults_to_on() {
-        assert!(Config::builtin().telemetry);
-        assert!(Config::parse(br#"{"schema":1}"#).unwrap().telemetry);
+        assert!(!Config::builtin().telemetry, "sending stays off until the remote config turns it on");
+        assert!(!Config::parse(br#"{"schema":1}"#).unwrap().telemetry);
         assert!(!Config::parse(br#"{"schema":1,"telemetry":false}"#).unwrap().telemetry);
+        assert!(Config::parse(br#"{"schema":1,"telemetry":true}"#).unwrap().telemetry);
     }
 
     #[test]

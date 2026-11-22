@@ -25,6 +25,9 @@ Specs: `docs/superpowers/specs/2026-11-22-analytics-design.md`, `…-cloud-saves
 - Nightly battle verifier: `tools/stats/verify_battles.py` + a Rust bin or test hook in the game crate that
   replays a battle record and prints the verdict; posts verdicts with an admin token.
 - Weekly digest: `tools/stats/digest.py` (reads the dashboard's JSON with the admin token, sends via tg-notify).
+- API address: `https://razdor.indicozy.dev/api` (the owner's decision, 2026-11-22; `API_BUILTIN`). The
+  send switch is the remote config's `telemetry` flag, off by default (`remote_config.rs`): nothing is sent
+  until the config says `"telemetry": true`, after the server has run stably for 2-3 days.
 - Docs: `docs/flows/telemetry-and-cloud.md`; privacy page on the site and the wiki (ru + en, humanizer);
   changelog line(s) in Russian.
 

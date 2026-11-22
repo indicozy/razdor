@@ -62,8 +62,8 @@ Never sent: hero or save names, chat, typed text, anything outside the game.
 
 ## Server
 - Rust: one binary (axum + tokio), SQLite in WAL mode for pings, events, performance and indexes; battles and
-  crash reports as zstd files on disk. One systemd service with a memory limit, behind the owner's nginx on
-  `api.<domain>` (shared with cloud saves, `2026-11-22-cloud-saves-design.md`) (Let's Encrypt). The address is built in and also in `config.json` (remote config), so it can
+  crash reports as zstd files on disk. One systemd service with a memory limit, behind the owner's nginx at
+  `https://razdor.indicozy.dev/api` (one domain, a path; the prefix is stripped, so the routes are `/v1/...`; shared with cloud saves, `2026-11-22-cloud-saves-design.md`) (Let's Encrypt). The address is built in and also in `config.json` (remote config), so it can
   move without a release.
 - Host: the owner's shared VPS in Kazakhstan (2 vCPU, 4 GB). The owner sets up DNS, the certificate and SSH access.
 - Code: `server/` in this repo plus a shared format crate used by the game and the server, so the formats can't

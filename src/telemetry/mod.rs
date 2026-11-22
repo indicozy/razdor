@@ -297,7 +297,7 @@ pub fn platform() -> String {
 
 /// The page that says what is sent (the site's and the wiki's «what we send» page). A placeholder
 /// until the owner sets the domain: change it here, the one place in the game.
-pub const WHAT_WE_SEND_URL: &str = "https://razdor.invalid/what-we-send";
+pub const WHAT_WE_SEND_URL: &str = "https://indicozy.github.io/razdor/wiki/faq/what-we-send/";
 
 static HUB: OnceLock<Arc<Hub>> = OnceLock::new();
 

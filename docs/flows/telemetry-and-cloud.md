@@ -9,7 +9,8 @@ crate (`crates/wire`): every body, path and limit is there, and both sides call 
 
 The API is `server/` (package `razdor-server`): one binary, axum and tokio, SQLite (`stats.sqlite`,
 `cloud.sqlite`, WAL) and zstd files (`battles/`, `crashes/`, and the cloud's `saves/<account>/`).
-It runs behind nginx on `api.<domain>` and listens on 127.0.0.1. Deploy and operation:
+It runs behind nginx on `https://razdor.indicozy.dev/api` (one domain, a path; nginx strips `/api`, so the
+routes are `/v1/...` on the service) and listens on 127.0.0.1. Deploy and operation:
 `server/deploy/README.md`.
 
 ### Endpoints
@@ -134,7 +135,11 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   the save names by `<home>`, `<dt>`, `<saves>`, `<save>`. The longest names go first, both separators,
   ASCII case ignored.
 - `src/remote_config.rs`: `API_BUILTIN` (the one const for the API address, a placeholder), the `api`
-  list and the `telemetry` kill switch (`false` stops every send). Both come from the config.
+  list and the `telemetry` send switch (`false` stops every send). Both come from the config. The built-in
+  address is `remote_config::API_BUILTIN` = `https://razdor.indicozy.dev/api`; the switch is off by default
+  (the built-in config and a config without the key both say `false`), so nothing is sent until the remote
+  config says `"telemetry": true`. Consent can be given before that: the queue holds the items (5 MB cap) until
+  the send is on.
 - `src/telemetry/perf.rs`: the performance numbers (pure, time passed in). `Collector` keeps per screen a
   histogram of frame times (0.5 ms bins up to 100 ms, then an overflow bin: median, p99, p99.9 within half a
   bin) and the seconds there (a gap between frames counts at most 1 s); at most 16 screens, the rest fold into
