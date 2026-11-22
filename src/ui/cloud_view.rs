@@ -349,7 +349,8 @@ fn phrase_step() {
         Some(Ok(p)) => phrase_lines(&p),
         _ => vec![tr("No account on this device.").to_string()],
     };
-    let mut lines = vec![tr("Write it down. On a new device it brings the account back.").to_string()];
+    // Two short lines, so the frame wraps nothing and the field below them is where it is drawn.
+    let mut lines = vec![tr("Write it down.").to_string(), tr("On a new device it brings the account back.").to_string()];
     lines.extend(words);
     lines.push(String::new());
     let (inner, closed) = map_import::frame(tr("Recovery phrase"), &lines, true);
