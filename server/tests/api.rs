@@ -9,10 +9,11 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
 use razdor_server::clock::Clock;
+use razdor_server::cloud;
 use razdor_server::config::{Config, Limits};
 use razdor_server::state::{sha256_hex, AppState};
 use razdor_server::{admin, retention, router, summary};
-use razdor_wire::frame;
+use razdor_wire::{frame, paths};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -718,4 +719,24 @@ async fn healthz_answers_ok() {
     let r = call(&router(h.st.clone()), "GET", "/healthz", &[], vec![]).await;
     assert_eq!(r.status, StatusCode::OK);
     assert_eq!(r.body, b"ok");
+}
+
+#[tokio::test]
+async fn a_redeemed_or_expired_link_row_is_gone() {
+    let h = harness("links-sweep", Limits::default());
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    let issued = call(&app, "POST", paths::LINK, &key_header(&key), vec![]).await.json();
+    let code = issued["code"].as_str().expect("code").to_string();
+    let body = json!({ "schema": 1, "code": code }).to_string().into_bytes();
+    assert_eq!(call(&app, "POST", paths::LINK_REDEEM, &[], body).await.status, StatusCode::OK);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM links").await, 0, "a redeemed code is deleted");
+
+    // An expired code that nobody redeems is swept by the minute job (its key goes with it).
+    call(&app, "POST", paths::LINK, &key_header(&key), vec![]).await;
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM links").await, 1);
+    assert_eq!(cloud::sweep_links(&h.st).await.expect("sweeps"), 0, "a live code stays");
+    h.st.clock.set(NOW + 601);
+    assert_eq!(cloud::sweep_links(&h.st).await.expect("sweeps"), 1);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM links").await, 0);
 }

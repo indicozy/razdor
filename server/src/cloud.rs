@@ -202,6 +202,12 @@ pub async fn delete_account(
     Ok(json(&Ack::confirmed()))
 }
 
+/// Deletes the link codes past their expiry (their keys go with them). Run every minute.
+pub async fn sweep_links(st: &AppState) -> Result<usize, ApiError> {
+    let now = st.clock.now();
+    st.cloud.call(move |c| Ok(c.execute("DELETE FROM links WHERE expires_at <= ?1", params![now])?)).await
+}
+
 /// `POST /v1/link`: a code another device types within ten minutes, once.
 pub async fn link_issue(
     State(st): State<AppState>,
@@ -221,7 +227,6 @@ pub async fn link_issue(
     let stored_code = code.clone();
     st.cloud
         .call(move |c| {
-            c.execute("DELETE FROM links WHERE expires_at <= ?1", params![now])?;
             c.execute(
                 "INSERT INTO links (code, account_id, key, expires_at) VALUES (?1, ?2, ?3, ?4)",
                 params![stored_code, id, raw_key, expires_at],
@@ -283,12 +288,13 @@ pub async fn link_redeem(
                     Ok((r.get(0)?, r.get(1)?))
                 })
                 .optional()?;
+            // A code is used up by its first redeem, and an expired one is dropped with its key.
             let key = match row {
-                Some((key, expires_at)) if expires_at > now => {
+                Some((key, expires_at)) => {
                     tx.execute("DELETE FROM links WHERE code = ?1", params![code.as_str()])?;
-                    Some(key)
+                    (expires_at > now).then_some(key)
                 }
-                _ => None,
+                None => None,
             };
             tx.commit()?;
             Ok(key)

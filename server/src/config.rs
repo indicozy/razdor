@@ -35,6 +35,19 @@ pub struct Limits {
     pub invalid_percent: u32,
     /// Bad requests in a row that ban an install.
     pub bad_in_a_row: u32,
+    /// Saves an account may keep (all maps and kinds); a save past it is a 409, nothing is deleted.
+    pub saves_per_account: u32,
+    /// Crash reports per install per UTC day; past it a 429 (no ban).
+    pub crash_per_day: u32,
+    /// Performance reports per install per UTC day; past it a 429 (no ban).
+    pub perf_per_day: u32,
+    /// Bytes of the stored files (battles, crash reports and saves, the cloud's saves). Past it: no new
+    /// uploads (507 for saves and accounts, 429 for the analytics writes). The databases are not counted.
+    pub max_data_bytes: u64,
+    /// Free bytes the disk must keep (statvfs). Under it: the same refusals as `max_data_bytes`.
+    pub min_free_bytes: u64,
+    /// Accounts idle for this many days are deleted with their files (0: never).
+    pub account_expiry_days: u32,
 }
 
 impl Default for Limits {
@@ -53,6 +66,12 @@ impl Default for Limits {
             battles_per_hour: limits::BATTLES_PER_HOUR,
             invalid_percent: limits::INVALID_PERCENT,
             bad_in_a_row: limits::BAD_REQUESTS_IN_A_ROW,
+            saves_per_account: 400,
+            crash_per_day: 10,
+            perf_per_day: 48,
+            max_data_bytes: 20 << 30,
+            min_free_bytes: 2 << 30,
+            account_expiry_days: 365,
         }
     }
 }

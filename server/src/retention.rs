@@ -8,6 +8,7 @@ use std::time::Duration;
 use rusqlite::params;
 
 use crate::civil::{day_of, DAY};
+use crate::cloud;
 use crate::files::{self, CRASHES};
 use crate::http::ApiError;
 use crate::state::AppState;
@@ -111,12 +112,25 @@ pub async fn run_once(st: &AppState) -> Result<Report, ApiError> {
         })
         .await?;
 
-    report.links = st
-        .cloud
-        .call(move |c| Ok(c.execute("DELETE FROM links WHERE expires_at <= ?1", params![now])?))
-        .await?;
+    report.links = cloud::sweep_links(st).await?;
     st.abuse().prune(now);
     Ok(report)
+}
+
+/// Every minute, whether or not requests come: the expired link codes go (their keys are not kept
+/// longer than the code), and the abuse windows are pruned (the request path only does it under traffic).
+pub fn spawn_minutely(st: AppState) {
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            match cloud::sweep_links(&st).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("links: {n} expired codes removed"),
+                Err(e) => tracing::error!("link sweep failed: {e:?}"),
+            }
+            st.abuse().maybe_prune(st.clock.now());
+        }
+    });
 }
 
 /// Runs the job once a day, starting five minutes after the service starts.

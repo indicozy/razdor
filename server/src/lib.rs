@@ -87,6 +87,7 @@ pub async fn serve(state: AppState) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(state.cfg.bind).await?;
     tracing::info!("listening on {}", state.cfg.bind);
     retention::spawn(state.clone());
+    retention::spawn_minutely(state.clone());
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     for db in [&state.stats, &state.cloud] {
