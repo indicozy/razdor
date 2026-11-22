@@ -5,9 +5,6 @@
 //! window). Each effect reads [`on`] / [`cheap`] in the module that draws it. The main menu asks once
 //! per season (from 1 December to 15 January), and the season of a January date is the year before.
 
-// The look's readers come in Tasks 2-8; until they land, nothing here is called outside the tests.
-#![allow(dead_code)]
-
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,26 +18,67 @@ use super::living;
 use razdor::dt::lights::Kind;
 
 local! {
-    /// The setting, taken in every frame (`set_pref`).
+    /// The setting «Новогодний вид» as the game sees it, taken in every frame (`set_pref`): the setting, or
+    /// `RAZDOR_HOLIDAY=1`.
     static ON: Cell<bool> = Cell::new(false);
     /// The cheap path (the light quality is «Низкое» or the battery saver is on), taken in with `set_pref`.
     static CHEAP: Cell<bool> = Cell::new(false);
-    /// `RAZDOR_HOLIDAY=1` turns the look on whatever the setting says (read once).
+    /// `RAZDOR_HOLIDAY=1` turns the setting on whatever it says (read once).
     static ENV_ON: bool = std::env::var("RAZDOR_HOLIDAY").is_ok_and(|v| v.trim() == "1");
     /// Whether the game plays the Christmas mod, taken in on each mod change (`set_running_mod`).
     static MOD_RUNNING: Cell<bool> = Cell::new(false);
+    /// The mod the game plays (`set_running_mod`), to tell a change of game apart.
+    static PLAYED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// Counts up on each change of the game played or of the look: the main menu reloads when it moves
+    /// (`game_generation`).
+    static GENERATION: Cell<u64> = Cell::new(0);
 }
 
-/// Takes the setting «Новогодний вид» in, and whether the cheap path applies (every frame, from
-/// `display::follow_settings`).
-pub fn set_pref(on: bool, cheap: bool) {
-    ON.set(on || ENV_ON.with(|e| *e));
+/// Whether `RAZDOR_HOLIDAY=1` forces the setting on (test builds and screenshots).
+pub fn env_forced() -> bool {
+    ENV_ON.with(|e| *e)
+}
+
+/// Whether the setting is on as the game sees it: `map_holiday`, or `RAZDOR_HOLIDAY=1`.
+pub fn wanted(map_holiday: bool) -> bool {
+    map_holiday || env_forced()
+}
+
+/// Takes the setting «Новогодний вид» in (`wanted`), and whether the cheap path applies (every frame, from
+/// `display::follow_settings`). The setting alone does not show the look: see [`on`].
+pub fn set_pref(setting: bool, cheap: bool) {
+    let before = on();
+    ON.set(wanted(setting));
     CHEAP.set(cheap);
+    bump_if_changed(before, on());
 }
 
-/// Whether the look is on this frame (the setting, or `RAZDOR_HOLIDAY=1`).
-pub fn on() -> bool {
+/// The setting as the game sees it (`wanted`), this frame.
+pub fn setting() -> bool {
     ON.get()
+}
+
+/// The look is on this frame: the setting is on and the Christmas mod is the game played (`look_active`).
+/// Every effect reads this, never the setting.
+pub fn on() -> bool {
+    look_active(ON.get(), MOD_RUNNING.get())
+}
+
+/// The look is active: the setting is on and the Christmas mod is the game played (pure).
+pub fn look_active(setting: bool, mod_running: bool) -> bool {
+    setting && mod_running
+}
+
+/// Counts up on each change of the game played and of the look's state (`on`). The main menu compares it
+/// with the value it last drew: a change reloads its art, music and snow.
+pub fn game_generation() -> u64 {
+    GENERATION.get()
+}
+
+fn bump_if_changed(before: bool, after: bool) {
+    if before != after {
+        GENERATION.set(GENERATION.get() + 1);
+    }
 }
 
 /// Whether the game plays the Christmas mod: the mod it plays (`active`, None for the base game) is the
@@ -56,17 +94,55 @@ pub fn set_running_mod(active: Option<&str>) {
         .and_then(|local| razdor::hub::Hub { source: razdor::hub::Source::from_env(), local }.cached_catalog())
         .and_then(|c| c.holiday)
         .and_then(|h| h.mod_id);
+    let before = on();
     MOD_RUNNING.set(is_christmas_mod(active, christmas.as_deref()));
+    if PLAYED.with(|p| p.borrow().as_deref() != active) {
+        PLAYED.with(|p| *p.borrow_mut() = active.map(str::to_owned));
+        GENERATION.set(GENERATION.get() + 1);
+    }
+    bump_if_changed(before, on());
 }
 
-/// Whether the game plays the Christmas mod (the main menu's snow shows only then).
+/// Whether the game plays the Christmas mod (the look needs it, see [`on`]).
 pub fn mod_running() -> bool {
     MOD_RUNNING.get()
+}
+
+/// Test hook: the game plays (or not) the Christmas mod, without the hub's catalog.
+#[cfg(test)]
+pub fn set_mod_running_for_tests(running: bool) {
+    MOD_RUNNING.set(running);
 }
 
 /// Whether the look runs its cheap path: on, and the light quality is «Низкое» or the battery saver is on.
 pub fn cheap() -> bool {
     on() && CHEAP.get()
+}
+
+/// The setting's change since the last frame (pure): `Some(true)` when it turned on, `Some(false)` when it
+/// turned off, None when it did not change.
+pub fn edge(seen: bool, setting: bool) -> Option<bool> {
+    (seen != setting).then_some(setting)
+}
+
+/// What the switch-on path must do (pure): the Christmas mod's download (`download`: not on the disk) and the
+/// switch of the game to it (`switch`: not the one played). A switch remembers the game played first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OnSteps {
+    pub download: bool,
+    pub switch: bool,
+}
+
+/// The switch-on steps from what is in place: `installed` (the mod is in the hub folder), `active_is_christmas`
+/// (the game played is the Christmas mod).
+pub fn on_steps(installed: bool, active_is_christmas: bool) -> OnSteps {
+    OnSteps { download: !installed, switch: !active_is_christmas }
+}
+
+/// What the switch-off path does (pure): when the Christmas mod is the game played, the game goes back to the
+/// one remembered (`previous`, None: the base game); otherwise the game stays as it is.
+pub fn off_target(christmas_played: bool, previous: Option<String>) -> Option<Option<String>> {
+    christmas_played.then_some(previous)
 }
 
 /// The season a date falls in, named by its year: 1 December to 31 December of `y` is `Some(y)`,
@@ -91,21 +167,6 @@ pub fn due(asked: Option<i64>, today: (i64, u32, u32)) -> bool {
 /// Whether the season start is due now (the settings and today's date, see [`today`]).
 pub fn start_due(s: &Settings, today: (i64, u32, u32)) -> bool {
     due(s.holiday_asked, today)
-}
-
-/// The steps of the season start still to take: the Christmas mod is not on the disk (`download`),
-/// it is not the one played (`switch`), the look is not on (`look`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Steps {
-    pub download: bool,
-    pub switch: bool,
-    pub look: bool,
-}
-
-/// The steps the season start takes, from what is in place: `installed` (the mod is in the hub folder),
-/// `active` (it is the mod played), `look_on` (the setting is on).
-pub fn steps(installed: bool, active: bool, look_on: bool) -> Steps {
-    Steps { download: !installed, switch: !active, look: !look_on }
 }
 
 /// A date `YYYY-MM-DD` (the test override `RAZDOR_TODAY`), or None when it is not one.
@@ -175,8 +236,6 @@ pub const GARLAND_MODE_SECS: f64 = 8.0;
 pub const GARLAND_FADE_SECS: f64 = 0.3;
 /// The brightness of a light that is off: a warm dim glow, not black.
 pub const GARLAND_DIM: f32 = 0.25;
-/// The show repeats every this many seconds (a multiple of every pattern's period); the shaders' clock wraps here.
-pub const GARLAND_CYCLE: f64 = 1200.0;
 /// The chase wave's length in screen pixels.
 pub const CHASE_PX: f64 = 600.0;
 
@@ -373,10 +432,62 @@ mod tests {
     }
 
     #[test]
-    fn the_steps_are_what_is_still_missing() {
-        assert_eq!(steps(false, false, false), Steps { download: true, switch: true, look: true }, "a fresh install");
-        assert_eq!(steps(true, true, true), Steps { download: false, switch: false, look: false }, "all in place");
-        assert_eq!(steps(true, false, true), Steps { download: false, switch: true, look: false }, "installed, not played");
+    fn the_switch_on_steps_are_what_is_still_missing() {
+        assert_eq!(on_steps(false, false), OnSteps { download: true, switch: true }, "a fresh install");
+        assert_eq!(on_steps(true, true), OnSteps { download: false, switch: false }, "all in place");
+        assert_eq!(on_steps(true, false), OnSteps { download: false, switch: true }, "installed, not played");
+        assert_eq!(on_steps(false, true), OnSteps { download: true, switch: false }, "played but not on the disk");
+    }
+
+    #[test]
+    fn the_look_needs_the_setting_and_the_christmas_mod_played() {
+        assert!(look_active(true, true));
+        assert!(!look_active(true, false), "the setting on, another game played: vanilla");
+        assert!(!look_active(false, true), "the Christmas mod played, the setting off: vanilla");
+        assert!(!look_active(false, false));
+    }
+
+    #[test]
+    fn the_effects_follow_the_setting_and_the_game_played() {
+        set_mod_running_for_tests(false);
+        set_pref(true, false);
+        assert!(!on(), "the setting on alone is not the look");
+        assert!(!cheap());
+        set_mod_running_for_tests(true);
+        assert!(on(), "the setting on and the Christmas mod played");
+        set_pref(false, false);
+        assert!(!on(), "the setting off: vanilla even with the mod");
+        set_mod_running_for_tests(false);
+    }
+
+    #[test]
+    fn a_switch_on_or_off_of_the_look_or_a_change_of_game_moves_the_generation() {
+        set_mod_running_for_tests(false);
+        set_pref(false, false);
+        let g0 = game_generation();
+        set_pref(false, false);
+        assert_eq!(game_generation(), g0, "no change, no reload");
+        set_pref(true, false);
+        assert_eq!(game_generation(), g0, "the setting alone does not move the look: the game must");
+        set_mod_running_for_tests(true);
+        assert_eq!(game_generation(), g0, "the test hook does not count (set_running_mod does)");
+        set_pref(false, false);
+        set_mod_running_for_tests(false);
+    }
+
+    #[test]
+    fn the_switch_is_an_edge_of_the_setting() {
+        assert_eq!(edge(false, true), Some(true), "turned on");
+        assert_eq!(edge(true, false), Some(false), "turned off");
+        assert_eq!(edge(true, true), None);
+        assert_eq!(edge(false, false), None);
+    }
+
+    #[test]
+    fn switching_off_goes_back_to_the_remembered_game_only_from_the_christmas_mod() {
+        assert_eq!(off_target(true, Some("evolution".into())), Some(Some("evolution".into())), "back to the mod before");
+        assert_eq!(off_target(true, None), Some(None), "the base game was played before");
+        assert_eq!(off_target(false, Some("evolution".into())), None, "another game played: it stays");
     }
 
     #[test]
@@ -506,6 +617,7 @@ mod tests {
 
     #[test]
     fn the_cheap_path_needs_the_look_on() {
+        set_mod_running_for_tests(true);
         set_pref(false, true);
         assert!(!cheap(), "the look off: no cheap path to take");
         set_pref(true, true);
@@ -513,6 +625,7 @@ mod tests {
         set_pref(true, false);
         assert!(!cheap());
         set_pref(false, false);
+        set_mod_running_for_tests(false);
     }
 
     #[test]

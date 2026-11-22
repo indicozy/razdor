@@ -446,8 +446,10 @@ mod tests {
         set_prefs(false);
         assert!(!on());
         crate::ui::holiday::set_pref(true, false);
+        crate::ui::holiday::set_mod_running_for_tests(true);
         assert!(on(), "the look's smoke, flags and birds");
         crate::ui::holiday::set_pref(false, false);
+        crate::ui::holiday::set_mod_running_for_tests(false);
         assert!(!on());
     }
 

@@ -420,6 +420,14 @@ pub struct Settings {
     /// last done for; `None` until it is done. The look or the mod switched off later is not redone this season.
     #[serde(default)]
     pub holiday_asked: Option<i64>,
+    /// The holiday switch still owes its work: the Christmas mod's download and the switch of the game to it
+    /// (`holiday_start`). Set on the turn-on, cleared when it is done; a failure leaves it for the next launch.
+    #[serde(default)]
+    pub holiday_pending: bool,
+    /// The game played before the switch turned it to the Christmas mod (`None`: the base game). The switch
+    /// off goes back to it (`holiday::off_target`).
+    #[serde(default)]
+    pub holiday_previous: Option<String>,
     /// Advanced, Razdor's: «Частота анимации воды» (every other frame on a phone, every frame elsewhere, by
     /// default: `default_water_rate`), with «Живая вода» on: the moving water is redrawn every frame, every
     /// other or every third (`water::FrameRate`). Style only; flat map.
@@ -502,7 +510,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), crt: super::crt::Strength::Off, crt_quality: None, crt_curve: false, map_weather: false, map_living: false, map_holiday: false, holiday_asked: None, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), crt: super::crt::Strength::Off, crt_quality: None, crt_curve: false, map_weather: false, map_living: false, map_holiday: false, holiday_asked: None, holiday_pending: false, holiday_previous: None, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
     }
 }
 
@@ -1613,6 +1621,11 @@ mod tests {
         assert!(!old.map_holiday, "an older file: the look stays off");
         assert_eq!(old.holiday_asked, None, "an older file: the question is not answered yet");
         assert!(!Settings::default().map_holiday);
+        assert!(!old.holiday_pending && old.holiday_previous.is_none(), "an older file: nothing pending, nothing remembered");
+        let kept = Settings { holiday_pending: true, holiday_previous: Some("evolution".into()), ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&kept).unwrap()).unwrap();
+        assert!(back.holiday_pending);
+        assert_eq!(back.holiday_previous.as_deref(), Some("evolution"), "the game played before the switch is remembered");
         let on = Settings { map_holiday: true, holiday_asked: Some(2026), ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
         assert!(back.map_holiday);

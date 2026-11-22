@@ -3197,6 +3197,14 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[test]
+    fn the_holiday_switch_plans_a_mod_its_listing_hides() {
+        let listed = listed_catalog(r#","visible_from":"2026-12-01""#).unwrap().listed_on((2026, 11, 22));
+        assert!(listed.entry("xmas").is_none(), "the listing hides it until 1 December");
+        let whole = listed_catalog(r#","visible_from":"2026-12-01""#).unwrap();
+        assert!(plan_install(&whole, &Installed::default(), "xmas").is_ok(), "the switch's install reads the whole catalog");
+    }
+
     /// A catalog with one mod whose `visible_from` is `extra` (a JSON fragment, `,"visible_from":…` or empty).
     fn listed_catalog(extra: &str) -> Result<Catalog, String> {
         Catalog::parse(format!(

@@ -373,9 +373,14 @@ pub struct App {
     pub screen: Screen,
     /// One-line notice shown on the world map / town screens.
     pub message: Option<String>,
-    /// The season start's worker (`holiday_start`), and whether it was tried this session.
+    /// The holiday switch's worker (`holiday_start`), and whether it was tried since the last turn-on.
     holiday_job: Option<std::sync::mpsc::Receiver<Result<holiday_start::Start, String>>>,
     holiday_tried: bool,
+    /// The switch as the App last acted on it (`holiday::edge`), and whether the welcome opens on success.
+    holiday_seen: bool,
+    holiday_greet: bool,
+    /// The last `holiday::game_generation` the App took notice of (the live reload hook).
+    holiday_generation: u64,
     /// Modal windows waiting to be read (noon reports, victories), first on top.
     pub dialogs: VecDeque<Dialog>,
     pub map_view: MapView,
@@ -500,6 +505,9 @@ impl App {
             message: None,
             holiday_job: None,
             holiday_tried: false,
+            holiday_seen: false,
+            holiday_greet: false,
+            holiday_generation: 0,
             dialogs: VecDeque::new(),
             map_view: MapView::default(),
             pending_load: None,
@@ -535,6 +543,9 @@ impl App {
         app.follow_row_setting();
         app.record_played_mod();
         holiday::set_running_mod(app.active_mod.as_deref());
+        // The switch as it stands at launch is not an edge: a switch left on (or RAZDOR_HOLIDAY=1) is
+        // acted on only when it is pending (`holiday_switch_tick`).
+        app.holiday_seen = holiday::wanted(app.audio.settings.map_holiday);
         app
     }
 
@@ -1698,7 +1709,7 @@ impl App {
         widgets::set_outside_tap(outside);
         // The season start (once a season, on the main menu only; nothing is loaded yet).
         if matches!(self.screen, Screen::MainMenu) {
-            self.holiday_start_tick();
+            self.holiday_switch_tick();
         }
         // The «Итоги» page's exit, taken after the match (it may start the next map, which needs the app).
         let mut summary_exit = None;

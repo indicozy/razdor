@@ -1173,6 +1173,7 @@ mod tests {
     #[test]
     fn the_look_turns_the_weather_on_and_snows_every_day() {
         holiday::set_pref(true, false);
+        holiday::set_mod_running_for_tests(true);
         assert!(on());
         for day in 0..30 {
             let levels = frame_levels(&schedule(1), day as f64 + 0.5, 0.0).expect("winter: always some snow");
@@ -1180,5 +1181,6 @@ mod tests {
             assert_eq!((levels.heat, levels.ash), (0.0, 0.0), "day {day}");
         }
         holiday::set_pref(false, false);
+        holiday::set_mod_running_for_tests(false);
     }
 }
