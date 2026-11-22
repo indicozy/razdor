@@ -873,6 +873,12 @@ local! {
     static MENU_NO_LOWLAND: Texture2D = Texture2D::from_rgba8(1, 1, &[0, 0, 0, 0]);
 }
 
+/// The main menu's snowfall: lighter than the map's (the owner, 2026-11-22: the map's level filled the whole
+/// menu). The level and the flake depths with the look on; the cheap path keeps one depth at a lower level.
+const MENU_SNOW_LEVEL: f32 = 0.3;
+const MENU_SNOW_LAYERS: f32 = 2.0;
+const MENU_SNOW_CHEAP: f32 = 0.2;
+
 /// The holiday look's snow over the main menu (`holiday`): the map's own snow pass, with the window's
 /// pixels as the ground (an identity projection, one cell a pixel), every pixel snowy, no fog and no other
 /// weather. `w` × `h` is the screen in pixels; `cheap` keeps only the nearest depth of flakes (the cheap path).
@@ -889,10 +895,10 @@ pub fn draw_menu_snow(w: f32, h: f32, cheap: bool, t: f64) {
         map: [w, h],
         draw: [0.0, 0.0, w, h],
         projection: Projection::Flat { scale: 1.0, offset: [0.0, 0.0] },
-        levels: Levels { snow: if cheap { 0.4 } else { HOLIDAY_SNOW }, ..Default::default() },
+        levels: Levels { snow: if cheap { MENU_SNOW_CHEAP } else { MENU_SNOW_LEVEL }, ..Default::default() },
         phase: (t.rem_euclid(PERIOD as f64)) as f32,
         tint: [1.0, 1.0, 1.0],
-        layers: if cheap { 1.0 } else { 3.0 },
+        layers: if cheap { 1.0 } else { MENU_SNOW_LAYERS },
         zoom: 1.0,
         sun: 0.0,
         row_height: 1.0,
