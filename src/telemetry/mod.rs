@@ -7,6 +7,7 @@
 //! `worker::step` sends it only while the consent is yes. Turning the consent off purges the queued
 //! consent items. The ping and the delete request are the `Always` class.
 
+pub mod battles;
 pub mod crash;
 pub mod events;
 pub mod perf;
@@ -18,7 +19,7 @@ pub mod worker;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use queue::{Class, Meta, PushError, Queue};
@@ -37,6 +38,9 @@ pub enum Refused {
     /// The body does not pass its own checks (`razdor_wire::Validate`); nothing is sent.
     Invalid(String),
     Queue(PushError),
+    /// The hour's battle records are full (`razdor_wire::limits::BATTLES_PER_HOUR`): the record is dropped
+    /// and counted (`Hub::battles_dropped`), never queued.
+    BattleCap,
 }
 
 /// The analytics' state and queue. One per process (`start`); tests make their own in a folder.
@@ -48,6 +52,8 @@ pub struct Hub {
     state: Mutex<()>,
     /// Set when an item is queued: the sender wakes up at once.
     kick: AtomicBool,
+    /// Battle records refused for the hour's cap, since the start (`enqueue_frame_at`'s callers count them).
+    battles_dropped: AtomicU64,
 }
 
 impl Hub {
@@ -57,7 +63,23 @@ impl Hub {
         if state::load(dir).consent != Consent::Yes {
             queue.purge_consent();
         }
-        Ok(Hub { dir: dir.to_path_buf(), queue: Mutex::new(queue), state: Mutex::new(()), kick: AtomicBool::new(false) })
+        Ok(Hub {
+            dir: dir.to_path_buf(),
+            queue: Mutex::new(queue),
+            state: Mutex::new(()),
+            kick: AtomicBool::new(false),
+            battles_dropped: AtomicU64::new(0),
+        })
+    }
+
+    /// How many battle records the hour's cap refused since the start.
+    pub fn battles_dropped(&self) -> u64 {
+        self.battles_dropped.load(Ordering::SeqCst)
+    }
+
+    /// Counts a battle record the cap refused.
+    pub fn count_battle_dropped(&self) {
+        self.battles_dropped.fetch_add(1, Ordering::SeqCst);
     }
 
     /// The queue, for the sender and the tests. A poisoned lock is used anyway (the queue's files are the truth).
@@ -192,7 +214,7 @@ impl Hub {
     pub fn enqueue_token<T: serde::Serialize + Validate>(&self, path: &str, class: Class, body: &T, token: Option<String>) -> Result<u64, Refused> {
         body.validate().map_err(|e| Refused::Invalid(e.to_string()))?;
         let json = serde_json::to_vec(body).map_err(|e| Refused::Invalid(e.to_string()))?;
-        self.enqueue_bytes(path, class, json, None, token, None)
+        self.enqueue_bytes(path, class, json, None, token, None, 0)
     }
 
     /// Queues a framed body: `header` (JSON) and the raw `body`. `token` names this item (a crash
@@ -206,14 +228,31 @@ impl Hub {
         token: Option<String>,
         after: Option<String>,
     ) -> Result<u64, Refused> {
-        self.enqueue_bytes(path, class, body, Some(header), token, after)
+        self.enqueue_frame_at(path, class, header, body, token, after, 0)
+    }
+
+    /// As [`Hub::enqueue_frame`], and the item is not tried before the unix second `not_before` (0:
+    /// at once). The battle records wait for their hour's boundary this way.
+    #[allow(clippy::too_many_arguments)]
+    pub fn enqueue_frame_at(
+        &self,
+        path: &str,
+        class: Class,
+        header: serde_json::Value,
+        body: Vec<u8>,
+        token: Option<String>,
+        after: Option<String>,
+        not_before: u64,
+    ) -> Result<u64, Refused> {
+        self.enqueue_bytes(path, class, body, Some(header), token, after, not_before)
     }
 
     /// Queues a JSON body that was checked by the caller (the tests, and the events' batches).
     pub fn enqueue_json(&self, path: &str, class: Class, json: Vec<u8>) -> Result<u64, Refused> {
-        self.enqueue_bytes(path, class, json, None, None, None)
+        self.enqueue_bytes(path, class, json, None, None, None, 0)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn enqueue_bytes(
         &self,
         path: &str,
@@ -222,11 +261,12 @@ impl Hub {
         header: Option<serde_json::Value>,
         token: Option<String>,
         after: Option<String>,
+        not_before: u64,
     ) -> Result<u64, Refused> {
         if class == Class::Consent && self.consent() != Consent::Yes {
             return Err(Refused::NoConsent);
         }
-        let meta = Meta { seq: 0, path: path.to_string(), class, header, token, after, tries: 0, not_before: 0 };
+        let meta = Meta { seq: 0, path: path.to_string(), class, header, token, after, tries: 0, not_before };
         let seq = self.queue().push(meta, &body).map_err(Refused::Queue)?;
         self.kick();
         Ok(seq)
@@ -240,6 +280,14 @@ impl Hub {
     pub fn take_kick(&self) -> bool {
         self.kick.swap(false, Ordering::SeqCst)
     }
+}
+
+/// The game id the analytics name (`dt`, or the active mod's id), as the last `set_context` gave it.
+static GAME_ID: Mutex<Option<String>> = Mutex::new(None);
+
+/// The game id of this run (`dt` until a context is set).
+pub fn game_id() -> String {
+    GAME_ID.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| "dt".to_string())
 }
 
 /// The platform as the replay header writes it: `os arch bits`.
@@ -309,6 +357,9 @@ pub fn start(dt: Option<&Path>) {
 /// first call of the run, the last run's crash report with the newest save. Nothing happens before
 /// [`start`].
 pub fn set_context(game: &str, lang: &str) {
+    if let Ok(mut g) = GAME_ID.lock() {
+        *g = Some(game.to_string());
+    }
     let Some(hub) = hub() else { return };
     if let Err(e) = hub.ping_if_due(now_secs() / 86_400, game, lang) {
         crate::diag!("telemetry: no ping: {e:?}");
