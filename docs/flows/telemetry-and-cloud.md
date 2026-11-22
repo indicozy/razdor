@@ -300,9 +300,17 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
 - Load list: a cloud, an hourglass (waiting to upload) or a floppy (local only), drawn with shapes at the
   row's left edge (the selected row's, left of its pin); a cloud copy from another device names its
   device in the scenario line («Начало пути — телефон, 21:46»), not the name line (the name is cut on phones).
+- «Нужна новая версия»: the worker's `newer` saves (`cloud_store::newer_saves`) are listed in their tab
+  (a «Продолжить» slot in the autosaves) as rows with the cloud mark and the label in the scenario line.
+  `saves::newer_row` marks them `locked`: no load sign, no pin, no delete sign, never deleted from the list.
+- Hub offer (`cloud_view`): the worker's installed Hub list (`cloud_store::HUB_OFFER`) is checked once per
+  set (`check_offer`, each frame). The items this device lacks (`missing_items`, by `installed.json`) make
+  the window «Установить то же самое?» (`should_ask`: not when the set's fingerprint is already in
+  `cloud/hub_offer.txt`). «Установить» installs them on a thread through the Hub's cached catalog (as the
+  lacking-mod download); «Нет», the cross or Esc only records the set. Snapshot `RAZDOR_SCENE_CLOUD=hub-offer`.
 - Snapshots: `RAZDOR_SNAPSHOT` with `RAZDOR_SCENE_CLOUD=off|synced|offline|full|working|link|enter|phrase|
-  delete|saves` shows made-up states (no worker, no key); `saves` also marks the save files by name.
+  delete|saves|hub-offer` shows made-up states (no worker, no key); `saves` also marks the save files by name
+  and lists one made-up newer save.
 
-Not built (approximated or left for later): the Hub offer «Установить то же самое?» (the list is stored
-in `cloud_store::HUB_OFFER`, no window); «Нужна новая версия» in the load list (the worker's `newer`
-list is not shown); the benchmark reports; the running game's settings apply at the next start.
+Not built (approximated or left for later): the benchmark reports; the running game's settings apply at the
+next start.

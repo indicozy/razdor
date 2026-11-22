@@ -32,3 +32,6 @@ Link = Привязать
 Write it down. On a new device it brings the account back. = Запишите её. На новом устройстве она вернёт аккаунт.
 No account on this device. = На этом устройстве нет аккаунта.
 Restore = Восстановить
+Needs a newer version = Нужна новая версия
+Install the same? = Установить то же самое?
+Your other devices have Hub items not installed here: {names} = На других ваших устройствах есть элементы хаба, которых здесь нет: {names}

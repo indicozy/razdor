@@ -13,6 +13,7 @@ use razdor::i18n::{n_, tr};
 use razdor::rules::content::Content;
 use razdor::rules::game::{Foe, Game};
 use razdor::rules::save::{self, ListedSave, MetaState, SaveKind};
+use razdor_wire::cloud::SaveEntry;
 
 use super::assets::Assets;
 use super::battle_view::BattleView;
@@ -381,6 +382,8 @@ struct Row {
     /// The caret's character in `name` while a name is typed: a name too long for its
     /// column keeps the caret's side in sight.
     caret: Option<usize>,
+    /// A save of a newer Razdor: listed with its cloud mark, never loaded or deleted here.
+    locked: bool,
 }
 
 /// The time text of a row (saved rows and the new save's row alike): the computer's date and
@@ -389,9 +392,42 @@ fn time_line(secs: u64) -> String {
     razdor::trf!("Time: {date}", date = saved_label(secs))
 }
 
+/// The row of a save of a newer Razdor the account holds (`cloud_store::newer_saves`): its label
+/// in the scenario's place, its device and time, the cloud mark; nothing to load or delete.
+fn newer_row(e: &SaveEntry) -> Row {
+    let label = tr("Needs a newer version");
+    let name = if e.meta.kind == razdor_wire::cloud::SaveKind::Session {
+        tr(save::SESSION).to_string()
+    } else {
+        e.meta.name.clone()
+    };
+    let scenario = if e.meta.device.is_empty() { label.to_string() } else { format!("{} — {label}", e.meta.device) };
+    Row {
+        name,
+        scenario,
+        time: time_line(e.meta.saved_at),
+        pinned: false,
+        waiting: false,
+        mark: None,
+        placeholder: false,
+        caret: None,
+        cloud: Some(razdor::cloud::SaveState::InCloud),
+        locked: true,
+    }
+}
+
+/// The load tab a cloud save of `kind` is listed under: a «Продолжить» slot is an autosave, the
+/// rest are the player's own saves.
+fn tab_of_cloud(kind: razdor_wire::cloud::SaveKind) -> SaveKind {
+    match kind {
+        razdor_wire::cloud::SaveKind::Session => SaveKind::Auto,
+        _ => SaveKind::Manual,
+    }
+}
+
 fn row_of(e: &ListedSave) -> Row {
     let Some(m) = &e.meta else {
-        return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None, cloud: None };
+        return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None, cloud: None, locked: false };
     };
     let name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
     // A game in which the cheat console worked says so after its scenario.
@@ -402,7 +438,7 @@ fn row_of(e: &ListedSave) -> Row {
         scenario = format!("{scenario} — {device}, {}", super::cloud_view::hhmm(m.saved_at));
     }
     let cloud = Some(super::cloud_store::state_of(&e.path.to_string_lossy()));
-    Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud }
+    Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud, locked: false }
 }
 
 /// The save lists' fonts (0x4b61bc, 0x4b6338): the save's name in ae24a0 (Benguiat less
@@ -766,6 +802,7 @@ impl Book {
             let hover = !input_blocked() && r.contains(crate::ui::widgets::pointer().into());
             // The signs grow with the row (`button_grow`).
             let sign = 22.0 * k * self.grow;
+            let deletable = deletable && !row.locked;
             let row_hit = if deletable && selected == Some(i) {
                 Rect::new(r.x, r.y, r.w - 2.0 * sign - 10.0 * k, r.h)
             } else {
@@ -888,7 +925,7 @@ impl Book {
                 super::dt_font::legacy_metrics_if(grown, || super::chrome::shadow_centered(&ellipsize(&row.time, time_room, size), time_centre, r.y + lh * 0.9, size, lit(TIME_INK)));
             });
             // Keep the play mark above long save names and the selected row highlight.
-            if selected == Some(i) {
+            if selected == Some(i) && !row.locked {
                 if let Some(t) = super::chrome::win("LSign-Load") {
                     super::chrome::tex(&t, Rect::new(r.x + 4.0 * k, r.y + (r.h - sign) / 2.0, sign, sign), WHITE);
                 }
@@ -1003,12 +1040,12 @@ fn typed_name(name: &str, edit: super::text_edit::TextEdit, caret_on: bool) -> (
 fn new_save_row(name: &str, edit: super::text_edit::TextEdit, caret_on: bool, title: &str, now: u64) -> Row {
     let time = time_line(now);
     if name.is_empty() {
-        return Row { name: own("Buttons", "NewSave", n_("(save anew)")), scenario: title.to_string(), time, pinned: false, waiting: false, mark: None, placeholder: true, caret: None, cloud: None };
+        return Row { name: own("Buttons", "NewSave", n_("(save anew)")), scenario: title.to_string(), time, pinned: false, waiting: false, mark: None, placeholder: true, caret: None, cloud: None, locked: false };
     }
     let (typed, mark) = typed_name(name, edit, caret_on);
     let mut edit = edit;
     edit.fit(name);
-    Row { name: typed, scenario: title.to_string(), time, pinned: false, waiting: false, mark, placeholder: false, caret: Some(edit.caret), cloud: None }
+    Row { name: typed, scenario: title.to_string(), time, pinned: false, waiting: false, mark, placeholder: false, caret: Some(edit.caret), cloud: None, locked: false }
 }
 
 /// The part of `name` (`caret`: the caret's character, drawn as its own glyph) that fits
@@ -1346,7 +1383,9 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map, false, true);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
-    let rows: Vec<Row> = view.entries.iter().map(row_of).collect();
+    let mut rows: Vec<Row> = view.entries.iter().map(row_of).collect();
+    // The account's saves of a newer Razdor follow this tab's own saves (listed only).
+    rows.extend(super::cloud_store::newer_saves().iter().filter(|e| tab_of_cloud(e.meta.kind) == view.tab).map(newer_row));
     if rows.is_empty() {
         let p = book.p(297.0, 230.0 + (book.page - 350.0) / 2.0);
         let size = book.upright.map_or(16.0 * book.k, |u| u.sp(14.0));
@@ -2550,5 +2589,43 @@ mod tests {
                 assert!(last.0 + last.1 <= 634.0 - 10.0 + 0.01, "«Отмена» within the window: {row:?}");
             }
         }
+    }
+
+    fn cloud_save(kind: razdor_wire::cloud::SaveKind, device: &str) -> SaveEntry {
+        SaveEntry {
+            id: "newer".to_string(),
+            meta: razdor_wire::cloud::SaveMeta {
+                schema: razdor_wire::SCHEMA,
+                game: "demo".to_string(),
+                map: "demo".to_string(),
+                kind,
+                device: device.to_string(),
+                name: "Game".to_string(),
+                saved_at: 1_700_000_000,
+                razdor: "9.9.9".to_string(),
+                size: 0,
+                sha256: String::new(),
+                pinned: false,
+            },
+        }
+    }
+
+    #[test]
+    fn a_newer_save_is_listed_with_its_label_and_nothing_to_load_or_delete() {
+        let row = newer_row(&cloud_save(razdor_wire::cloud::SaveKind::Manual, "ПК"));
+        assert!(row.locked, "a newer save is never loaded or deleted here");
+        assert_eq!(row.scenario, format!("ПК — {}", tr("Needs a newer version")));
+        assert_eq!(row.name, "Game");
+        assert_eq!(row.cloud, Some(razdor::cloud::SaveState::InCloud));
+        assert!(!row.pinned);
+        let own = newer_row(&cloud_save(razdor_wire::cloud::SaveKind::Quick, ""));
+        assert_eq!(own.scenario, tr("Needs a newer version"));
+    }
+
+    #[test]
+    fn a_newer_continue_slot_goes_to_the_autosave_tab_and_the_rest_to_private() {
+        assert_eq!(tab_of_cloud(razdor_wire::cloud::SaveKind::Session), SaveKind::Auto);
+        assert_eq!(tab_of_cloud(razdor_wire::cloud::SaveKind::Manual), SaveKind::Manual);
+        assert_eq!(tab_of_cloud(razdor_wire::cloud::SaveKind::Quick), SaveKind::Manual);
     }
 }

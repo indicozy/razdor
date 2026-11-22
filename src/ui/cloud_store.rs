@@ -18,7 +18,7 @@ use razdor::cloud::{Cloud, Job};
 use razdor::rules::marks::{Level, Record, RunMark, Records};
 use razdor::rules::save::{self, ScenarioRef, SaveMeta};
 use razdor_wire::cloud::{
-    BenchReport, HubItem, HubKind, HubList, MarkLevel, MarkRecord, Marks, SaveKind, SettingValue, SyncedSettings,
+    BenchReport, HubItem, HubKind, HubList, MarkLevel, MarkRecord, Marks, SaveEntry, SaveKind, SettingValue, SyncedSettings,
 };
 use razdor_wire::SCHEMA;
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,34 @@ pub fn has_account() -> bool {
 /// The worker's state for the settings rows (a copy); `None` until it starts.
 pub fn shared() -> Option<razdor::cloud::Shared> {
     CLOUD.get().map(|c| c.snapshot())
+}
+
+/// The account's saves made by a newer Razdor: listed in the load list, never loaded or deleted
+/// there. The snapshot's `saves` scene shows one made-up save.
+pub fn newer_saves() -> Vec<SaveEntry> {
+    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
+        return if std::env::var("RAZDOR_SCENE_CLOUD").is_ok_and(|s| s == "saves") {
+            vec![SaveEntry {
+                id: "newer-save".to_string(),
+                meta: razdor_wire::cloud::SaveMeta {
+                    schema: SCHEMA,
+                    game: "demo".to_string(),
+                    map: "demo".to_string(),
+                    kind: SaveKind::Manual,
+                    device: device_name().to_string(),
+                    name: "Newer save".to_string(),
+                    saved_at: 1_700_000_000,
+                    razdor: String::new(),
+                    size: 0,
+                    sha256: String::new(),
+                    pinned: false,
+                },
+            }]
+        } else {
+            Vec::new()
+        };
+    }
+    shared().map(|s| s.newer).unwrap_or_default()
 }
 
 /// The load list's state of a local save (`LocalOnly` without a worker).
@@ -432,7 +460,8 @@ pub fn bench_finished(report: &BenchReport) {
 /// How many benchmark reports wait for the cloud at most.
 const BENCH_KEEP: usize = 20;
 
-/// Another device's installed Hub list, kept for «Установить то же самое?» (the offer is not shown yet).
+/// The account's installed Hub list, as the worker last got it: `cloud_view` offers its missing items
+/// («Установить то же самое?») once per set.
 pub static HUB_OFFER: Mutex<Option<HubList>> = Mutex::new(None);
 
 fn empty_hub() -> HubList {

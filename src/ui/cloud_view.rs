@@ -2,14 +2,21 @@
 //! rows and the four windows they open (the link code, the code from another device, the recovery
 //! phrase, the delete question). The windows use the map import's frame and buttons, as the
 //! analytics' panels do. Off-screen, `RAZDOR_SNAPSHOT` with `RAZDOR_SCENE_CLOUD=off|synced|offline|
-//! full|working|link|enter|phrase|delete` shows a made-up state instead of the worker's.
+//! full|working|link|enter|phrase|delete` shows a made-up state instead of the worker's, and
+//! `hub-offer` the «Установить то же самое?» window with made-up items.
+//!
+//! The Hub offer: the account's installed Hub items (the worker's `HUB_OFFER`) that this device lacks
+//! are offered once per set, in a window with «Установить» and «Нет». The answered set's fingerprint
+//! is kept in `hub_offer.txt` in the cloud folder.
 
 use std::sync::Mutex;
 
 use macroquad::miniquad::window::clipboard_set;
 use razdor::cloud::{account, Job, Phase};
+use razdor::hub::Installed;
 use razdor::i18n::tr;
 use razdor::telemetry;
+use razdor_wire::cloud::HubList;
 
 use super::cloud_store;
 use super::map_import;
@@ -153,6 +160,16 @@ pub fn sync_now() {
 
 /// Draws the window that is open, over the screen (called from `App::frame`).
 pub fn modal() {
+    match canned().as_deref() {
+        Some("hub-offer") => {
+            let _ = offer_window(&["demo-map".to_string(), "demo-mod".to_string()]);
+        }
+        Some(_) => {}
+        None => {
+            check_offer();
+            offer_step();
+        }
+    }
     let panel = match canned() {
         Some(scene) if scene == "link" => Some(Panel::Link),
         Some(scene) if scene == "enter" => Some(Panel::Enter),
@@ -167,6 +184,114 @@ pub fn modal() {
         Panel::Enter => enter_step(),
         Panel::Phrase => phrase_step(),
         Panel::Delete => delete_step(),
+    }
+}
+
+/// The offer's set last checked (its fingerprint), so a set is checked once.
+static OFFER_CHECKED: Mutex<Option<String>> = Mutex::new(None);
+/// The set whose window is up, with the items this device lacks.
+static OFFER_ASKING: Mutex<Option<Offer>> = Mutex::new(None);
+/// The answered set's fingerprint, in the cloud folder.
+const OFFER_FILE: &str = "hub_offer.txt";
+
+/// A set of Hub items the window offers: the items this device lacks, and the set's fingerprint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Offer {
+    missing: Vec<String>,
+    fingerprint: String,
+}
+
+/// The set's fingerprint: its items as «id version», sorted, one per line. The same set, in any
+/// order, gives the same fingerprint.
+pub fn fingerprint(list: &HubList) -> String {
+    let mut lines: Vec<String> = list.items.iter().map(|i| format!("{} {}", i.id, i.version)).collect();
+    lines.sort();
+    lines.join("\n")
+}
+
+/// The offered items this device lacks, in the account's order.
+pub fn missing_items(list: &HubList, installed: &Installed) -> Vec<String> {
+    list.items.iter().filter(|i| !installed.has(&i.id)).map(|i| i.id.clone()).collect()
+}
+
+/// Whether to ask: something is missing here, and this set (`fingerprint`) was not answered before
+/// (`answered`: the fingerprint kept in the cloud folder).
+pub fn should_ask(missing: &[String], fingerprint: &str, answered: Option<&str>) -> bool {
+    !missing.is_empty() && answered.map(str::trim_end) != Some(fingerprint)
+}
+
+/// Looks at the worker's set once per change: when it is new and asks, the window is queued.
+fn check_offer() {
+    let Some(list) = cloud_store::HUB_OFFER.lock().ok().and_then(|o| o.clone()) else { return };
+    let fingerprint = fingerprint(&list);
+    {
+        let Ok(mut checked) = OFFER_CHECKED.lock() else { return };
+        if checked.as_deref() == Some(fingerprint.as_str()) {
+            return;
+        }
+        *checked = Some(fingerprint.clone());
+    }
+    let Some(local) = razdor::hub::local_dir() else { return };
+    let missing = missing_items(&list, &razdor::hub::read_installed(&local));
+    let answered = cloud_store::cloud_dir().and_then(|d| std::fs::read_to_string(d.join(OFFER_FILE)).ok());
+    if should_ask(&missing, &fingerprint, answered.as_deref()) {
+        if let Ok(mut asking) = OFFER_ASKING.lock() {
+            *asking = Some(Offer { missing, fingerprint });
+        }
+    }
+}
+
+/// The queued offer's window: «Установить» starts the install, «Нет» (or the cross, Esc) only
+/// records the set as answered.
+fn offer_step() {
+    let Some(offer) = OFFER_ASKING.lock().ok().and_then(|o| o.clone()) else { return };
+    let Some(install) = offer_window(&offer.missing) else { return };
+    if let Ok(mut asking) = OFFER_ASKING.lock() {
+        *asking = None;
+    }
+    if let Some(dir) = cloud_store::cloud_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if let Err(why) = std::fs::write(dir.join(OFFER_FILE), &offer.fingerprint) {
+            razdor::diag!("cloud: the Hub offer is not remembered: {why}");
+        }
+    }
+    if install {
+        start_install(offer.missing);
+    }
+}
+
+/// The offer's window this frame: `Some(true)` on «Установить», `Some(false)` on «Нет» or a close.
+fn offer_window(missing: &[String]) -> Option<bool> {
+    let names = missing.join(", ");
+    let line = razdor::trf!("Your other devices have Hub items not installed here: {names}", names = names).to_string();
+    let (inner, closed) = map_import::frame(tr("Install the same?"), &[line], true);
+    match map_import::buttons(inner, &[tr("Install"), tr("No")]) {
+        Some(0) => Some(true),
+        Some(_) => Some(false),
+        None if closed || esc_pressed() => Some(false),
+        None => None,
+    }
+}
+
+/// Installs each item through the Hub, on a thread of its own (as the lacking-mod download does).
+/// The items come from the Hub's own catalog, never from the cloud.
+fn start_install(ids: Vec<String>) {
+    let Some(local) = razdor::hub::local_dir() else { return };
+    let lang = razdor::i18n::lang();
+    let spawned = std::thread::Builder::new().name("hub-offer".into()).spawn(move || {
+        let hub = razdor::hub::Hub { source: razdor::hub::Source::from_env(), local };
+        let Some(catalog) = hub.cached_catalog() else {
+            razdor::diag!("hub offer: the catalog is not loaded");
+            return;
+        };
+        for id in ids {
+            if let Err(why) = hub.install(&catalog, &id, lang) {
+                razdor::diag!("hub offer: {id}: {why}");
+            }
+        }
+    });
+    if spawned.is_err() {
+        razdor::diag!("hub offer: the install thread did not start");
     }
 }
 
@@ -317,5 +442,38 @@ mod tests {
     #[test]
     fn a_cloud_without_a_worker_has_no_sync_state() {
         assert_eq!(state_line(true, None), tr("Not synced yet"));
+    }
+
+    fn hub(items: &[(&str, &str)]) -> HubList {
+        let items = items
+            .iter()
+            .map(|(id, version)| razdor_wire::cloud::HubItem { id: id.to_string(), kind: razdor_wire::cloud::HubKind::Map, version: version.to_string() })
+            .collect();
+        HubList { schema: razdor_wire::SCHEMA, updated_at: 0, items }
+    }
+
+    #[test]
+    fn the_same_set_in_any_order_has_one_fingerprint_and_a_new_version_another() {
+        let a = hub(&[("b", "1"), ("a", "2")]);
+        let b = hub(&[("a", "2"), ("b", "1")]);
+        assert_eq!(fingerprint(&a), fingerprint(&b));
+        assert_ne!(fingerprint(&a), fingerprint(&hub(&[("a", "3"), ("b", "1")])));
+    }
+
+    #[test]
+    fn only_the_items_this_device_lacks_are_offered_in_the_account_order() {
+        let installed: Installed = serde_json::from_str(r#"{"entries":{"a":{"version":"2","kind":"map","files":[]}}}"#).expect("installed.json");
+        let list = hub(&[("b", "1"), ("a", "2"), ("c", "1")]);
+        assert_eq!(missing_items(&list, &installed), ["b", "c"]);
+        assert!(missing_items(&hub(&[("a", "2")]), &installed).is_empty());
+    }
+
+    #[test]
+    fn a_set_with_missing_items_is_asked_once_and_nothing_is_asked_when_all_are_here() {
+        let missing = ["b".to_string()];
+        assert!(should_ask(&missing, "b 1", None));
+        assert!(!should_ask(&missing, "b 1", Some("b 1\n")), "the answered set is not asked again");
+        assert!(should_ask(&missing, "b 2", Some("b 1")), "a changed set is asked anew");
+        assert!(!should_ask(&[], "b 1", None), "nothing missing, nothing asked");
     }
 }
