@@ -1,0 +1,44 @@
+# systemd unit for the Razdor API (analytics and cloud saves). Install with server/deploy/README.md.
+# The service runs as its own user, with its data in /var/lib/razdor-api (StateDirectory).
+[Unit]
+Description=Razdor API (analytics, crash reports, cloud saves)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=razdor-api
+Group=razdor-api
+DynamicUser=no
+ExecStart=/usr/local/bin/razdor-server --config /etc/razdor-api/config.toml
+Environment=RUST_LOG=info
+WorkingDirectory=/var/lib/razdor-api
+StateDirectory=razdor-api
+StateDirectoryMode=0750
+# The config holds the admin password hash and token hash only; keep it readable by the service alone.
+ConfigurationDirectory=razdor-api
+Restart=always
+RestartSec=3
+
+# The VPS is shared (2 vCPU, 4 GB): cap the memory and keep the service at low priority.
+MemoryMax=256M
+MemoryHigh=200M
+CPUWeight=50
+Nice=5
+
+# Sandbox: the service reads its config and writes its data folder, nothing else.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/razdor-api
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
