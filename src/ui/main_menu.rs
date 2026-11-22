@@ -1979,6 +1979,7 @@ pub const ALL: [Row; 74] = [
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
     fn help_text(self) -> Option<&'static str> {
         match self {
+            Row::Telemetry => Some(tr("Sent anonymously: game statistics (launches, maps, events), crash reports, performance figures and battle records. Nothing you type is sent: no names of heroes or saves, no chat. The full list is on the page «What we send», linked from the question «Help Razdor?».")),
             Row::CrtEffect => Some(tr("An old monitor's look over the whole screen: scanlines, a soft glow and darker edges. Quality: Fast for weak phones, High adds a glow around bright areas.")),
             Row::GraphicsQuality => Some(tr("Original: as the original game, with no new effects. Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
@@ -2856,7 +2857,7 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::SendLog => send_log_row(c, geo),
         Row::Telemetry => {
             // «Помогать Раздору»: the answer as yes or no; a click flips it (`telemetry_view`).
-            if labelled_row(c, geo, tr("Help Razdor (statistics, crash reports, battle records)"), yes_no(super::telemetry_view::consent_yes())).0 {
+            if labelled_row_help(c, geo, tr("Help Razdor"), yes_no(super::telemetry_view::consent_yes()), Row::Telemetry.help_text()).0 {
                 super::telemetry_view::toggle_consent();
             }
         }
@@ -4236,7 +4237,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));
