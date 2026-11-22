@@ -84,7 +84,7 @@ const LOGO_FLAME_WIDTH: f32 = 0.95;
 const LOGO_FLAME_HEIGHT: f32 = 1.52;
 const LOGO_FLAME_GLOW: f32 = 0.85;
 
-/// «Фон меню» (`audio::Settings::menu_frame`, Razdor's, the owner's decision 2026-11-22): how the
+/// «Фон меню» (`audio::Settings::menu_frame`, Razdor's; the contributor's change, merged with the owner's yes 2026-11-22): how the
 /// menu's picture meets a screen of another shape. «Растянуто», the default, stretches it over the
 /// whole screen as before; «Обрезано» keeps its proportions, fills the screen and cuts off what does
 /// not fit, nearer the top (`MENU_CROP_TOP`), so the towers' roofs stay.
@@ -177,7 +177,7 @@ fn background() {
             let screen = Rect::new(0.0, 0.0, sw, sh);
             let pic = (t.width(), t.height());
             let src = menu_source(MENU_FRAME.with(|f| f.get()), pic, (sw, sh));
-            // The owner's choice (2026-11-22): the picture enlarged with Lanczos and sharpened
+            // The picture enlarged with Lanczos and sharpened (the contributor's change, merged with the owner's yes 2026-11-22)
             // (`menu_backdrop`); until that is made, as the original filters it.
             let crop = src.unwrap_or(Rect::new(0.0, 0.0, pic.0, pic.1));
             if !super::menu_backdrop::show(crop, screen) {
@@ -1459,6 +1459,7 @@ fn thanks_lines() -> Vec<CreditLine> {
         line("indicozy", 22.0, WHITE, 0.0),
         line(tr("Contributors"), 20.0, chrome::GOLD, 14.0),
         line("Eizenvald", 18.0, WHITE, 0.0),
+        line("Hanzinner", 18.0, WHITE, 0.0),
         line(tr("Thanks to the players"), 20.0, chrome::GOLD, 14.0),
     ];
     lines.extend(THANKS.iter().map(|name| line(name, 18.0, WHITE, 0.0)));
@@ -3094,7 +3095,7 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             }
         }
         Row::MenuFrame => {
-            // Razdor's (the owner's decision, 2026-11-22): the menu's picture stretched or cropped. Look only.
+            // Razdor's (the contributor's change, merged with the owner's yes 2026-11-22): the menu's picture stretched or cropped. Look only.
             if labelled_row_help(c, geo, tr("Menu background"), audio.menu_frame.label(), Row::MenuFrame.help_text()).0 {
                 audio.menu_frame = audio.menu_frame.next();
             }
