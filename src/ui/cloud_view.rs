@@ -112,10 +112,11 @@ pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>) -> String {
     }
 }
 
-/// The cloud space in use, «Занято 3.0 из 20 МБ» (empty while the cloud is off).
+/// The cloud space in use, «Занято 3.0 из 20 МБ» («Выключено» while the cloud is off: an empty button
+/// looked broken on the settings row).
 pub fn space_line(on: bool, used: u64) -> String {
     if !on {
-        return String::new();
+        return tr("Off").to_string();
     }
     razdor::trf!("Using {used} of 20 MB", used = mb(used))
 }
@@ -345,7 +346,7 @@ fn phrase_step() {
         (cloud_store::has_account(), cloud_store::cloud_dir().and_then(|d| account::load_key(&d)))
     };
     let words = match key.as_deref().map(account::phrase) {
-        Some(Ok(p)) => split(&p, 18),
+        Some(Ok(p)) => phrase_lines(&p),
         _ => vec![tr("No account on this device.").to_string()],
     };
     let mut lines = vec![tr("Write it down. On a new device it brings the account back.").to_string()];
@@ -399,6 +400,12 @@ fn delete_step() {
     }
 }
 
+/// A recovery phrase's lines: its 4-character groups joined by dashes, five groups to a line (the
+/// phrase has no spaces, so the word wrap cannot break it and it ran past the window's edge).
+fn phrase_lines(phrase: &str) -> Vec<String> {
+    phrase.split('-').collect::<Vec<_>>().chunks(5).map(|c| c.join("-")).collect()
+}
+
 /// Splits a phrase into lines of about `width` characters, at its spaces.
 fn split(text: &str, width: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -431,6 +438,21 @@ mod tests {
         let lines = split("alpha bravo charlie delta echo foxtrot", 12);
         assert_eq!(lines, ["alpha bravo", "charlie", "delta echo", "foxtrot"]);
         assert!(split("", 12).is_empty());
+    }
+
+    #[test]
+    fn a_recovery_phrase_wraps_by_group_and_keeps_every_character() {
+        let phrase = account::phrase(&"ab".repeat(32)).expect("a 32-byte key has a phrase");
+        let lines = phrase_lines(&phrase);
+        assert!(lines.len() > 1, "the phrase is wrapped, not one long line");
+        assert!(lines.iter().all(|l| l.chars().count() <= 24), "five groups of four and their dashes");
+        assert_eq!(lines.join("-"), phrase);
+    }
+
+    #[test]
+    fn the_space_row_says_off_while_the_cloud_is_off() {
+        assert_eq!(space_line(false, 3 << 20), tr("Off"));
+        assert!(space_line(true, 3 << 20).contains("3.0"), "the used megabytes are shown");
     }
 
     #[test]

@@ -401,10 +401,10 @@ fn newer_row(e: &SaveEntry) -> Row {
     } else {
         e.meta.name.clone()
     };
-    let scenario = if e.meta.device.is_empty() { label.to_string() } else { format!("{} — {label}", e.meta.device) };
+    // The label alone: with the device's name in front it was cut on a phone («ПК — Нужна новая ве…»).
     Row {
         name,
-        scenario,
+        scenario: label.to_string(),
         time: time_line(e.meta.saved_at),
         pinned: false,
         waiting: false,
@@ -2614,7 +2614,7 @@ mod tests {
     fn a_newer_save_is_listed_with_its_label_and_nothing_to_load_or_delete() {
         let row = newer_row(&cloud_save(razdor_wire::cloud::SaveKind::Manual, "ПК"));
         assert!(row.locked, "a newer save is never loaded or deleted here");
-        assert_eq!(row.scenario, format!("ПК — {}", tr("Needs a newer version")));
+        assert_eq!(row.scenario, tr("Needs a newer version"));
         assert_eq!(row.name, "Game");
         assert_eq!(row.cloud, Some(razdor::cloud::SaveState::InCloud));
         assert!(!row.pinned);
