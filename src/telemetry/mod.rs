@@ -41,7 +41,9 @@ pub enum Refused {
 pub struct Hub {
     dir: PathBuf,
     queue: Mutex<Queue>,
-    state: Mutex<State>,
+    /// Serializes the state's read-modify-write within this process. The file is the truth: every
+    /// access reloads it, so several game windows on one folder see each other's pings and ids.
+    state: Mutex<()>,
     /// Set when an item is queued: the sender wakes up at once.
     kick: AtomicBool,
 }
@@ -49,12 +51,11 @@ pub struct Hub {
 impl Hub {
     /// Opens the state and the queue in `dir`. Consent items left while the consent is not yes are purged.
     pub fn open(dir: &Path, cap: u64) -> std::io::Result<Hub> {
-        let st = state::load(dir);
         let mut queue = Queue::open(&dir.join(QUEUE_DIR), cap)?;
-        if st.consent != Consent::Yes {
+        if state::load(dir).consent != Consent::Yes {
             queue.purge_consent();
         }
-        Ok(Hub { dir: dir.to_path_buf(), queue: Mutex::new(queue), state: Mutex::new(st), kick: AtomicBool::new(false) })
+        Ok(Hub { dir: dir.to_path_buf(), queue: Mutex::new(queue), state: Mutex::new(()), kick: AtomicBool::new(false) })
     }
 
     /// The queue, for the sender and the tests. A poisoned lock is used anyway (the queue's files are the truth).
@@ -62,8 +63,10 @@ impl Hub {
         self.queue.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Reads the state file, applies `f` and writes it back, under the process lock.
     fn with_state<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
-        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut st = state::load(&self.dir);
         let out = f(&mut st);
         if let Err(e) = state::save(&self.dir, &st) {
             crate::diag!("telemetry: the state is not saved: {e}");
@@ -116,19 +119,27 @@ impl Hub {
 
     /// Queues the daily ping for `today` (days since 1970), once a day. Always sent (not a consent item).
     pub fn ping_if_due(&self, today: u64, game: &str, lang: &str) -> Result<bool, Refused> {
-        if self.with_state(|s| s.last_ping_day == Some(today)) {
-            return Ok(false);
-        }
+        // The day is checked and marked in one locked step, so two windows starting together ping once.
+        let install = self.with_state(|s| {
+            if s.last_ping_day == Some(today) {
+                return None;
+            }
+            if s.install_id.is_none() {
+                s.install_id = Some(state::new_install_id());
+            }
+            s.last_ping_day = Some(today);
+            s.install_id.clone()
+        });
+        let Some(install) = install else { return Ok(false) };
         let ping = Ping {
             schema: razdor_wire::SCHEMA,
-            install_id: razdor_wire::InstallId::parse(&self.install_id()).map_err(|e| Refused::Invalid(e.to_string()))?,
+            install_id: razdor_wire::InstallId::parse(&install).map_err(|e| Refused::Invalid(e.to_string()))?,
             razdor: env!("CARGO_PKG_VERSION").to_string(),
             platform: platform(),
             game: game.to_string(),
             lang: lang.to_string(),
         };
         self.enqueue_checked(paths::PING, Class::Always, &ping)?;
-        self.with_state(|s| s.last_ping_day = Some(today));
         Ok(true)
     }
 
@@ -317,6 +328,25 @@ mod tests {
         assert_eq!(hub.ping_if_due(20_000, "dt", "ru"), Ok(false));
         assert_eq!(hub.ping_if_due(20_001, "dt", "ru"), Ok(true));
         assert_eq!(hub.queue().len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn one_ping_per_utc_day_across_restarts_and_several_windows() {
+        let (first, dir) = hub("one-ping");
+        let cap = razdor_wire::limits::CLIENT_QUEUE_BYTES;
+        assert_eq!(first.ping_if_due(20_000, "dt", "ru"), Ok(true));
+        // A second game window on the same folder, opened while the first runs: no second ping today.
+        let second = Hub::open(&dir, cap).unwrap();
+        assert_eq!(second.ping_if_due(20_000, "dt", "ru"), Ok(false));
+        // A restart the same day: still none.
+        drop((first, second));
+        let restarted = Hub::open(&dir, cap).unwrap();
+        assert_eq!(restarted.ping_if_due(20_000, "dt", "ru"), Ok(false));
+        assert_eq!(restarted.queue().len(), 1, "a failed send stays the same day's one ping");
+        // The next UTC day: one more.
+        assert_eq!(restarted.ping_if_due(20_001, "dt", "ru"), Ok(true));
+        assert_eq!(restarted.queue().len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
