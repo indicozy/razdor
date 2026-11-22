@@ -22,6 +22,11 @@ pub const ADDRESSES: [&str; 2] = [
     "https://indicozy.gitverse.site/razdor-community/config.json",
 ];
 
+/// The analytics and cloud API's built-in address (`telemetry`, cloud saves). A placeholder until the
+/// owner sets the domain: change it here, the one place in the game, or set `api` in the remote config
+/// so it can move without a release.
+pub const API_BUILTIN: &str = "https://api.razdor.invalid";
+
 /// The fetch's stall limit in seconds (the update feed's).
 const SECONDS: u32 = 20;
 
@@ -44,6 +49,11 @@ pub struct Config {
     pub update_feed: Vec<String>,
     pub hub: Vec<String>,
     pub game: Game,
+    /// The API's addresses, in the order they are tried (`telemetry`).
+    pub api: Vec<String>,
+    /// The kill switch: `false` stops every send of the analytics. Only the config turns it off; a
+    /// config that leaves it out keeps it on.
+    pub telemetry: bool,
 }
 
 /// The config as the file spells it. Unknown fields are ignored (a newer config keeps working).
@@ -56,6 +66,10 @@ struct Raw {
     hub: Vec<String>,
     #[serde(default)]
     game: Option<RawGame>,
+    #[serde(default)]
+    api: Vec<String>,
+    #[serde(default)]
+    telemetry: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +106,8 @@ impl Config {
                 sha256: "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d".into(),
                 name: "discord-times-cu.zip".into(),
             },
+            api: vec![API_BUILTIN.to_string()],
+            telemetry: true,
         }
     }
 
@@ -117,7 +133,9 @@ impl Config {
             }
             None => built.game,
         };
-        Ok(Config { update_feed, hub, game })
+        let api = addresses("api", raw.api).unwrap_or(built.api);
+        let telemetry = raw.telemetry.unwrap_or(true);
+        Ok(Config { update_feed, hub, game, api, telemetry })
     }
 }
 
@@ -235,6 +253,16 @@ pub fn update_feed() -> Vec<String> {
 /// The hub's source folders, in the order they are tried (the first one is the hub's label).
 pub fn hub() -> Vec<String> {
     current().hub
+}
+
+/// The API's addresses, in the order they are tried (`telemetry`).
+pub fn api() -> Vec<String> {
+    current().api
+}
+
+/// Whether the config lets the analytics send (the kill switch; `true` unless the config turns it off).
+pub fn telemetry_allowed() -> bool {
+    current().telemetry
 }
 
 /// The game archive as the config gives it (`gdrive::game`).
@@ -390,6 +418,23 @@ mod tests {
         assert!(b.hub[0].starts_with("https://github.com/"));
         assert_eq!(b.game.links[0], "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
         assert_eq!(b.game.links[1], "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
+    }
+
+    #[test]
+    fn the_api_list_comes_from_the_config_and_the_built_in_is_the_placeholder() {
+        assert_eq!(Config::builtin().api, vec![API_BUILTIN.to_string()]);
+        let text = r#"{"schema":1,"api":["https://api2.example","http://no.example"]}"#;
+        let c = Config::parse(text.as_bytes()).unwrap();
+        assert_eq!(c.api, vec!["https://api2.example".to_string()]);
+        let none = r#"{"schema":1,"api":["http://no.example"]}"#;
+        assert_eq!(Config::parse(none.as_bytes()).unwrap().api, Config::builtin().api);
+    }
+
+    #[test]
+    fn the_kill_switch_is_read_and_defaults_to_on() {
+        assert!(Config::builtin().telemetry);
+        assert!(Config::parse(br#"{"schema":1}"#).unwrap().telemetry);
+        assert!(!Config::parse(br#"{"schema":1,"telemetry":false}"#).unwrap().telemetry);
     }
 
     #[test]
