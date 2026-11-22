@@ -5,12 +5,13 @@
 //! logged and the start is tried again on the next start. The menu only: nothing is loaded here.
 
 use std::path::PathBuf;
-use std::sync::mpsc::channel;
+use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
-use razdor::hub::{Hub, Source};
+use razdor::hub::{HolidayRef, Hub, Source};
 use razdor::i18n::lang;
+use razdor::local;
 
-use super::{finished, holiday, holiday_windows, App};
+use super::{finished, holiday, holiday_windows, launch, App};
 
 /// The start's result: the mod's id and whether it was on the disk before (`false`: it was downloaded).
 pub struct Start {
@@ -28,7 +29,82 @@ fn run(local: PathBuf) -> Result<Start, String> {
     if !was_installed {
         hub.install(&catalog, &id, lang())?;
     }
+    // The bell and the sleigh come with the season start. A failure is not fatal: the look's copy
+    // (`files_tick`) tries them again on the next start.
+    if let Some(h) = &catalog.holiday {
+        if let Err(why) = hub.install_holiday(h) {
+            razdor::diag!("holiday: the files are not all there ({why}); they are tried again on the next start");
+        }
+    }
     Ok(Start { id, was_installed })
+}
+
+/// The holiday files' copy for this launch (see [`files_tick`]).
+enum Files {
+    /// The launch's catalog has not come yet, or the season start is still due (it brings the files).
+    Waiting,
+    /// The files are being checked and, when they differ, downloaded (`Hub::install_holiday`).
+    Installing(Receiver<Result<usize, String>>),
+    /// Decided for this launch.
+    Done,
+}
+
+local! {
+    static FILES: std::cell::RefCell<Files> = const { std::cell::RefCell::new(Files::Waiting) };
+}
+
+/// Each frame: while the holiday look is on and the season start is not due, the launch's catalog's
+/// holiday files (the music, the bell, the sleigh) are kept in the hub folder, on a thread. Files that
+/// are already the catalog's are not downloaded again. A failure is logged and tried on the next launch.
+pub fn files_tick(start_due: bool) {
+    let state = FILES.with(|s| std::mem::replace(&mut *s.borrow_mut(), Files::Done));
+    let next = match state {
+        Files::Done => Files::Done,
+        Files::Waiting if !holiday::on() || start_due => Files::Waiting,
+        Files::Waiting => match launch::catalog() {
+            None => Files::Waiting,
+            Some(Err(why)) => {
+                razdor::diag!("holiday: no catalog this launch: {why}");
+                Files::Done
+            }
+            Some(Ok(catalog)) => match catalog.holiday.clone() {
+                Some(h) => start_files(h),
+                None => Files::Done,
+            },
+        },
+        Files::Installing(rx) => match rx.try_recv() {
+            Err(TryRecvError::Empty) => Files::Installing(rx),
+            Ok(Ok(0)) => Files::Done,
+            Ok(Ok(n)) => {
+                razdor::diag!("holiday: {n} file(s) of the look are updated from the catalog");
+                Files::Done
+            }
+            Ok(Err(why)) => {
+                razdor::diag!("holiday: the files are not all there ({why}); they are tried again on the next launch");
+                Files::Done
+            }
+            Err(TryRecvError::Disconnected) => Files::Done,
+        },
+    };
+    FILES.with(|s| *s.borrow_mut() = next);
+}
+
+/// Starts the holiday files' check on a thread (the hub's address and the hub folder), or Done when there is
+/// no folder for the hub.
+fn start_files(h: HolidayRef) -> Files {
+    let Some(local) = razdor::hub::local_dir() else { return Files::Done };
+    let hub = Hub { source: Source::from_env(), local };
+    let (tx, rx) = channel();
+    let spawned = std::thread::Builder::new().name("holiday-files".into()).spawn(move || {
+        let _ = tx.send(hub.install_holiday(&h));
+    });
+    match spawned {
+        Ok(_) => Files::Installing(rx),
+        Err(e) => {
+            razdor::diag!("holiday: the files cannot start: {e}");
+            Files::Done
+        }
+    }
 }
 
 impl App {

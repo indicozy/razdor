@@ -428,10 +428,38 @@ pub struct HolidayRef {
     /// `ui::holiday_start`). It must be a mod of this catalog. Absent: no mod, no season start.
     #[serde(default, rename = "mod", skip_serializing_if = "Option::is_none")]
     pub mod_id: Option<String>,
+    /// The main menu's bell for the buttons (`hover.ogg`, see [`holiday_hover_path`]). Absent: the normal sound.
+    /// An older client ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hover: Option<HolidayFile>,
+    /// The sleigh's pictures (see [`holiday_sleigh_dir`]): `frame-0.png` to `frame-3.png` and `present.png`,
+    /// each named once. Absent: the bird flocks. An older client ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sleigh: Option<Vec<HolidayFile>>,
 }
+
+/// A file of the holiday look (`hover`, `sleigh`): its name in the holiday folder, its address (an `https://`
+/// address or a path in the hub), its size and SHA-256 (checked before it is kept), and its other addresses
+/// (https only; tried in order after `path`, as a mod's file's mirrors are).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HolidayFile {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<String>,
+}
+
+/// The name of the holiday bell's file (`HolidayRef::hover`).
+pub const HOLIDAY_HOVER_NAME: &str = "hover.ogg";
+/// The names the sleigh's files may have (`HolidayRef::sleigh`).
+pub const HOLIDAY_SLEIGH_NAMES: [&str; 5] = ["frame-0.png", "frame-1.png", "frame-2.png", "frame-3.png", "present.png"];
 
 /// The largest holiday music file (a few minutes of Ogg Vorbis).
 pub const MAX_HOLIDAY_BYTES: u64 = 16 << 20;
+/// The largest sleigh picture or bell file the holiday look keeps (the shipped ones are a few KiB).
+pub const MAX_HOLIDAY_PICTURE_BYTES: u64 = 4 << 20;
 
 /// Where the holiday menu music is kept, in the hub folder `local`.
 pub fn holiday_music_path(local: &Path) -> PathBuf {
@@ -589,6 +617,19 @@ impl Catalog {
                     return Err(format!("index.json: holiday: mod {m:?} is not a mod of the hub"));
                 }
             }
+            if let Some(f) = &mut h.hover {
+                check_holiday_file("hover", f, &[HOLIDAY_HOVER_NAME], MAX_HOLIDAY_PICTURE_BYTES)?;
+            }
+            if let Some(files) = &mut h.sleigh {
+                let mut seen: Vec<String> = Vec::new();
+                for f in files.iter_mut() {
+                    check_holiday_file("sleigh", f, &HOLIDAY_SLEIGH_NAMES, MAX_HOLIDAY_PICTURE_BYTES)?;
+                    if seen.contains(&f.name) {
+                        return Err(format!("index.json: holiday: sleigh: {:?} is named twice", f.name));
+                    }
+                    seen.push(f.name.clone());
+                }
+            }
         }
         Ok(c)
     }
@@ -629,6 +670,33 @@ fn check_wrapped(id: &str, f: &mut FileRef) -> Result<(), String> {
         }
         _ => Err(bad("the archive's SHA-256 is not 64 hex digits")),
     }
+}
+
+/// A holiday file (`hover`, `sleigh`): its name is one of `names`, its address an https one or a path in the hub
+/// (never plain http), its size within `max` and its SHA-256 well formed. Its mirrors are kept when they are
+/// https addresses, not repeated and not `path` itself (the others are dropped, the file stays).
+fn check_holiday_file(what: &str, f: &mut HolidayFile, names: &[&str], max: u64) -> Result<(), String> {
+    if !names.contains(&f.name.as_str()) {
+        return Err(format!("index.json: holiday: {what}: {:?} is not one of its names", f.name));
+    }
+    if !safe_location(&f.path) || f.path.starts_with("http://") {
+        return Err(format!("index.json: holiday: {what}: bad address {:?}", f.path));
+    }
+    if !safe_sha256(&f.sha256) {
+        return Err(format!("index.json: holiday: {what}: the SHA-256 is not 64 hex digits"));
+    }
+    f.sha256 = f.sha256.to_ascii_lowercase();
+    if f.size == 0 || f.size > max {
+        return Err(format!("index.json: holiday: {what}: bad size {}", f.size));
+    }
+    let mut kept: Vec<String> = Vec::new();
+    for m in std::mem::take(&mut f.mirrors) {
+        if crate::remote_config::good_address(&m) && m != f.path && !kept.contains(&m) {
+            kept.push(m);
+        }
+    }
+    f.mirrors = kept;
+    Ok(())
 }
 
 /// The file's other addresses: an https address, no repeats and not `path` itself. One that is not
@@ -1071,6 +1139,12 @@ pub fn rebase(c: &mut Catalog, base: &str) {
     if let Some(a) = &mut c.ad {
         abs(&mut a.image, base);
     }
+    if let Some(h) = &mut c.holiday {
+        abs(&mut h.music, base);
+        for f in h.hover.iter_mut().chain(h.sleigh.iter_mut().flatten()) {
+            abs(&mut f.path, base);
+        }
+    }
 }
 
 /// The catalog of the default hub: the first of `mirror::HUB` whose `index.json` reads as a catalog
@@ -1325,6 +1399,43 @@ impl Hub {
         }
         crate::editor::files::write_atomically(&folder.join(AD_INI), ad_ini_text(a, &picture).as_bytes()).map_err(|e| format!("ads: {e}"))?;
         Ok(true)
+    }
+
+    /// Puts the catalog's holiday files in the hub folder (see [`HolidayRef`]): the music (`holiday/menu.ogg`), the
+    /// bell (`holiday/hover.ogg`) and the sleigh's pictures (`holiday/sleigh/`). A file that is already the
+    /// catalog's is not downloaded again; each other one is checked (size and SHA-256) before it is kept, and
+    /// it is written under a `.part` name first. Returns how many files were written. A failed file is an
+    /// error; the files before it stay.
+    pub fn install_holiday(&self, h: &HolidayRef) -> Result<usize, String> {
+        let music = HolidayFile { name: "menu.ogg".into(), path: h.music.clone(), size: h.size, sha256: h.sha256.clone(), mirrors: Vec::new() };
+        let mut files: Vec<(HolidayFile, PathBuf, u64)> = vec![(music, holiday_music_path(&self.local), MAX_HOLIDAY_BYTES)];
+        if let Some(f) = &h.hover {
+            files.push((f.clone(), holiday_hover_path(&self.local), MAX_HOLIDAY_PICTURE_BYTES));
+        }
+        let sleigh = holiday_sleigh_dir(&self.local);
+        for f in h.sleigh.iter().flatten() {
+            files.push((f.clone(), sleigh.join(&f.name), MAX_HOLIDAY_PICTURE_BYTES));
+        }
+        let mut wrote = 0;
+        for (f, dest, max) in files {
+            if check_sum(&dest, f.size, &f.sha256, &f.name).is_ok() {
+                continue;
+            }
+            if let Some(dir) = dest.parent() {
+                fs::create_dir_all(dir).map_err(|e| format!("holiday: {e}"))?;
+            }
+            let mut part = dest.clone().into_os_string();
+            part.push(".part");
+            let part = PathBuf::from(part);
+            let file = FileRef { path: f.path.clone(), name: f.name.clone(), lang: None, size: f.size, sha256: f.sha256.clone(), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: f.mirrors.clone() };
+            self.download_checked(&file, &part, max, Some(f.size), &|p| Hub::check_file(p, &file)).inspect_err(|_| {
+                let _ = fs::remove_file(&part);
+            })?;
+            fs::rename(&part, &dest).map_err(|e| format!("holiday: {e}"))?;
+            wrote += 1;
+            self.hub_gap();
+        }
+        Ok(wrote)
     }
 
     /// The hub's catalog: the default source tries its mirrors in order (`catalog_from_mirrors`); an
@@ -2944,6 +3055,103 @@ mod tests {
         assert!(with("", &named).is_err(), "a mod that is not in the catalog refuses it");
         assert!(with(&mod_entry.replace("\"kind\":\"mod\"", "\"kind\":\"map\""), &named).is_err(), "a map is not the holiday's mod");
         assert!(with(mod_entry, &named.replace("\"xmas\"", "\"../xmas\"")).is_err(), "the mod id is a path part");
+    }
+
+    /// A holiday with the given extra fields (`,"hover":…`) after its music.
+    fn holiday_json(extra: &str) -> String {
+        let base = GOOD_HOLIDAY.trim_end_matches('}');
+        format!(r#"{{"format":1,"entries":[],"holiday":{base}{extra}}}}}"#)
+    }
+
+    /// One holiday picture: its name, its address and the SHA-256 of `GOOD_HOLIDAY`.
+    fn holiday_pic(name: &str, path: &str) -> String {
+        format!(r#"{{"name":"{name}","path":"{path}","size":5,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA"}}"#)
+    }
+
+    #[test]
+    fn the_holiday_bell_and_sleigh_are_read_and_an_older_catalog_has_neither() {
+        let old = Catalog::parse(holiday_json("").as_bytes()).unwrap().holiday.unwrap();
+        assert_eq!((old.hover, old.sleigh), (None, None), "an older catalog: no bell, no sleigh");
+        let hover = holiday_pic("hover.ogg", "https://example.org/hover.ogg");
+        let sleigh = ["frame-0.png", "frame-1.png", "frame-2.png", "frame-3.png", "present.png"]
+            .map(|n| holiday_pic(n, &format!("https://example.org/sleigh/{n}")));
+        let read = Catalog::parse(holiday_json(&format!(r#","hover":{hover},"sleigh":[{}]"#, sleigh.join(","))).as_bytes())
+            .expect("the bell and the sleigh read")
+            .holiday
+            .unwrap();
+        assert_eq!(read.hover.as_ref().map(|f| f.name.as_str()), Some("hover.ogg"));
+        assert_eq!(read.sleigh.as_ref().map(Vec::len), Some(5));
+    }
+
+    #[test]
+    fn a_bad_bell_or_sleigh_file_refuses_the_catalog() {
+        let ok = |extra: String| Catalog::parse(holiday_json(&extra).as_bytes());
+        let bell = |name: &str, path: &str| holiday_pic(name, path);
+        assert!(ok(format!(r#","hover":{}"#, bell("hover.ogg", "https://example.org/h.ogg"))).is_ok());
+        assert!(ok(format!(r#","hover":{}"#, bell("frame-0.png", "https://example.org/h.ogg"))).is_err(), "the bell is named hover.ogg");
+        assert!(ok(format!(r#","hover":{}"#, bell("hover.ogg", "http://example.org/h.ogg"))).is_err(), "plain http is refused");
+        assert!(ok(format!(r#","hover":{}"#, bell("hover.ogg", "../h.ogg"))).is_err(), "no escaping path");
+        assert!(ok(format!(r#","sleigh":[{}]"#, bell("../frame-0.png", "https://example.org/f.png"))).is_err(), "a sleigh file's name is one of the five");
+        assert!(ok(format!(r#","sleigh":[{},{}]"#, bell("present.png", "https://example.org/p.png"), bell("present.png", "https://example.org/q.png"))).is_err(), "a name is given once");
+        assert!(ok(format!(r#","sleigh":[{}]"#, bell("present.png", "https://example.org/p.png").replace("\"size\":5", "\"size\":0"))).is_err(), "an empty file");
+        assert!(ok(format!(r#","sleigh":[{}]"#, bell("present.png", "https://example.org/p.png").replace("\"size\":5", &format!("\"size\":{}", MAX_HOLIDAY_PICTURE_BYTES + 1)))).is_err(), "too big");
+        assert!(ok(format!(r#","sleigh":[{}]"#, bell("present.png", "https://example.org/p.png").replace("3AA411", "3AA41"))).is_err(), "a SHA-256 is 64 digits");
+    }
+
+    #[test]
+    fn a_holiday_file_keeps_its_https_mirrors_once_and_drops_the_rest() {
+        let pic = holiday_pic("present.png", "https://example.org/p.png").replace("\"size\":5", "\"size\":5,\"mirrors\":[\"http://example.org/x.png\",\"https://mirror.example.org/p.png\",\"https://mirror.example.org/p.png\",\"https://example.org/p.png\"]");
+        let c = Catalog::parse(holiday_json(&format!(r#","sleigh":[{pic}]"#)).as_bytes()).unwrap();
+        let sleigh = c.holiday.unwrap().sleigh.unwrap();
+        assert_eq!(sleigh[0].mirrors, ["https://mirror.example.org/p.png"]);
+    }
+
+    #[test]
+    fn a_holiday_from_a_mirror_has_its_files_made_absolute() {
+        let hover = holiday_pic("hover.ogg", "holiday/hover.ogg");
+        let mut c = Catalog::parse(holiday_json(&format!(r#","hover":{hover}"#)).as_bytes()).unwrap();
+        rebase(&mut c, "https://example.org/hub");
+        let h = c.holiday.unwrap();
+        assert_eq!(h.music, "https://example.org/menu.ogg", "an https address stays as it is");
+        assert_eq!(h.hover.unwrap().path, "https://example.org/hub/holiday/hover.ogg");
+    }
+
+    #[test]
+    fn the_holiday_files_are_kept_once_and_a_bad_one_is_refused() {
+        let root = std::env::temp_dir().join(format!("razdor-holiday-files-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let src = root.join("hub");
+        fs::create_dir_all(src.join("holiday").join("sleigh")).unwrap();
+        fs::write(src.join("holiday").join("menu.ogg"), b"music bytes").unwrap();
+        fs::write(src.join("holiday").join("hover.ogg"), b"bell").unwrap();
+        fs::write(src.join("holiday").join("sleigh").join("frame-0.png"), b"frame zero").unwrap();
+        fs::write(src.join("holiday").join("sleigh").join("present.png"), b"a present").unwrap();
+        let sum = |rel: &str| crate::update::sha256_file(&src.join(rel)).unwrap();
+        let size = |rel: &str| fs::metadata(src.join(rel)).unwrap().len();
+        let pic = |name: &str, rel: &str| format!(r#"{{"name":"{name}","path":"{rel}","size":{},"sha256":"{}"}}"#, size(rel), sum(rel));
+        let json = format!(
+            r#"{{"format":1,"entries":[],"holiday":{{"id":"winter","version":3,"music":"holiday/menu.ogg","size":{},"sha256":"{}","hover":{},"sleigh":[{},{}]}}}}"#,
+            size("holiday/menu.ogg"),
+            sum("holiday/menu.ogg"),
+            pic("hover.ogg", "holiday/hover.ogg"),
+            pic("frame-0.png", "holiday/sleigh/frame-0.png"),
+            pic("present.png", "holiday/sleigh/present.png"),
+        );
+        let h = Catalog::parse(json.as_bytes()).unwrap().holiday.unwrap();
+        let hub = Hub { source: Source::Dir(src.clone()), local: root.join("local") };
+        assert_eq!(hub.install_holiday(&h), Ok(4), "the music, the bell and two pictures are written");
+        assert_eq!(fs::read(holiday_music_path(&hub.local)).unwrap(), b"music bytes");
+        assert_eq!(fs::read(holiday_hover_path(&hub.local)).unwrap(), b"bell");
+        assert_eq!(fs::read(holiday_sleigh_dir(&hub.local).join("present.png")).unwrap(), b"a present");
+        assert_eq!(hub.install_holiday(&h), Ok(0), "the same files are not written again");
+
+        // A picture that is not the catalog's (its SHA-256 is wrong) is refused: the copy on disk stays, and no part is left.
+        let bad = json.replace(&sum("holiday/hover.ogg"), &"0".repeat(64));
+        let bad = Catalog::parse(bad.as_bytes()).unwrap().holiday.unwrap();
+        assert!(hub.install_holiday(&bad).is_err());
+        assert_eq!(fs::read(holiday_hover_path(&hub.local)).unwrap(), b"bell");
+        assert!(!holiday_hover_path(&hub.local).with_file_name("hover.ogg.part").exists());
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
