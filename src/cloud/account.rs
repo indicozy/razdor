@@ -63,13 +63,13 @@ pub fn forget_key(cloud_dir: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
-fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)
 }
 
 #[cfg(not(unix))]
-fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
+pub(crate) fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
     OpenOptions::new().write(true).create_new(true).open(path)
 }
 

@@ -23,6 +23,36 @@ pub trait Net: Send + Sync {
     fn send(&self, method: &str, url: &str, key: Option<&str>, body: Option<&[u8]>) -> Result<Reply, String>;
 }
 
+/// A header line in a file only this user can read (0600 on unix), removed when dropped: how the
+/// account key reaches curl without appearing in its arguments.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+struct HeaderFile(std::path::PathBuf);
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl HeaderFile {
+    fn new(line: &str) -> std::io::Result<HeaderFile> {
+        use std::io::Write;
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        let path = std::env::temp_dir().join(format!("razdor-cloud-{}-{nanos}.h", std::process::id()));
+        let mut file = super::account::open_private(&path)?;
+        let file = HeaderFile(path).with(|| file.write_all(line.as_bytes()))?;
+        Ok(file)
+    }
+
+    /// Runs `write`; on an error the file is removed (by the drop) and the error returned.
+    fn with(self, write: impl FnOnce() -> std::io::Result<()>) -> std::io::Result<HeaderFile> {
+        write()?;
+        Ok(self)
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+impl Drop for HeaderFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// The desktop transport: `curl`, which gives up after `seconds`.
 pub struct Curl {
     pub seconds: u32,
@@ -38,9 +68,16 @@ impl Net for Curl {
         cmd.args(["-sS", "-X", method, "--max-time"])
             .arg(self.seconds.to_string())
             .args(["-H", "Content-Type: application/octet-stream"]);
-        if let Some(key) = key {
-            cmd.args(["-H", &format!("{KEY_HEADER}: {key}")]);
-        }
+        // The key goes to curl through a private file (`-H @file`, curl 7.55+), never on the command
+        // line, where other local users could read it from the process list. Removed when `_header` drops.
+        let _header = match key {
+            Some(key) => {
+                let file = HeaderFile::new(&format!("{KEY_HEADER}: {key}\n")).map_err(|e| format!("curl: key header: {e}"))?;
+                cmd.args(["-H", &format!("@{}", file.0.display())]);
+                Some(file)
+            }
+            None => None,
+        };
         cmd.args(["-o", "-", "-w", "\n%{http_code}"]);
         if body.is_some() {
             cmd.args(["--data-binary", "@-"]).stdin(Stdio::piped());
