@@ -434,6 +434,8 @@ async fn main() {
         if frames == 1 {
             razdor::diag::step("first frame shown");
         }
+        // The screen a crash report names, every frame (cheap: the store is skipped when the name is the same).
+        razdor::telemetry::crash::set_screen(app.screen_name());
         if razdor::diag::profiling() {
             // The whole frame: the game's work, then drawing and the GPU (textures and font
             // atlases go up there), vsync included (~16 ms). Over the threshold is a hitch.
@@ -443,8 +445,6 @@ async fn main() {
             ui::perf_log::profile_once();
             // The screen the frame drew (after its input): the other screens' lines are per screen.
             razdor::frame_probe::set_screen(app.screen_name());
-            // The screen a crash report names (cheap: the store is skipped when the name is the same).
-            razdor::telemetry::crash::set_screen(app.screen_name());
             razdor::frame_probe::end_frame(work, total);
             if total.as_millis() > razdor::diag::slow_frame_ms() || opened > 0 {
                 opened = opened.saturating_sub(1);
