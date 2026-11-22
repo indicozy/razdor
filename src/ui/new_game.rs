@@ -863,13 +863,32 @@ fn mark_lines(mark: &marks::RunMark) -> Vec<String> {
     mark_lines_in(mark, tr)
 }
 
-/// A run mark's tick in a box of side `s` at `(x, y)`; a run with Razdor's fixes only (`Level::Fixes`)
-/// gets a «Р» beside it (the owner's decision, 2026-11-22), so it reads apart from the plain green tick.
-fn mark_tick(level: marks::Level, x: f32, y: f32, s: f32) {
-    tick(x, y, s, mark_ink(level));
+/// The sizes of a run mark in a row whose text is `text` px tall: the tick's side (its box `s`, at
+/// least 0.7 of the text, the capitals' height) and the «Р»'s font size (1.4 of the box, at least the
+/// text). A phone's row text is 14-15 dp, so both grow with it and the «Р» reads at 12 sp or more; on
+/// the desktop the boxes keep their sizes (the text there is below 1.4 of the box).
+fn mark_sizes(s: f32, text: f32) -> (f32, f32) {
+    (s.max(0.7 * text), (s * 1.4).max(text))
+}
+
+/// The width of a run mark from its tick's left edge: the tick, and for a run with Razdor's fixes only
+/// (`Level::Fixes`) the «Р» beside it (the owner's decision, 2026-11-22), measured in the face it is drawn in.
+fn mark_width(level: marks::Level, side: f32, letter: f32) -> f32 {
+    if level == marks::Level::Fixes { side + 2.0 + measure("Р", letter).width } else { side }
+}
+
+/// The x of a run mark's left edge: its old place on the desktop; on a phone moved left as needed so it
+/// ends at `right` (the favourite star's left, or the row's right), since its «Р» is bigger there.
+fn mark_x(old: f32, right: f32, width: f32, phone: bool) -> f32 {
+    if phone { old.min(right - width) } else { old }
+}
+
+/// A run mark's tick in the square `tick_r`, and for `Level::Fixes` a «Р» of `letter` px beside it, its
+/// foot on the tick's foot. A run with Razdor's fixes gets the «Р», so it reads apart from the plain green tick.
+fn mark_tick(level: marks::Level, tick_r: Rect, letter: f32) {
+    tick(tick_r.x, tick_r.y, tick_r.w, mark_ink(level));
     if level == marks::Level::Fixes {
-        let size = (s * 1.4).max(12.0);
-        chrome::shadow_text("Р", x + s + 2.0, y + s, size, mark_ink(level));
+        chrome::shadow_text("Р", tick_r.x + tick_r.w + 2.0, tick_r.y + tick_r.h, letter, mark_ink(level));
     }
 }
 
@@ -1229,21 +1248,6 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             }
             keep_marks(m.clone());
         }
-        // The row's mark (1532): its checkmark in the mark's colour, the tooltip on hover; a won
-        // map with no record (won before the marks) keeps the plain green tick.
-        let mark_r = mark_box(head, k);
-        if let Some(mark) = &f.mark {
-            mark_tick(mark.level, mark_r.x, mark_r.y, mark_r.w);
-            // The hover area: a finger's square on a phone, cut at the star's tap area (`tick_hit`).
-            let hit = tick_hit(mark_r, super::display::dp_px(), r, finger_hit(star_r).x);
-            if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
-                // Queued: drawn over the whole window once its frame is up (`draw_later`), not cut at the rows.
-                // Razdor's own information: it shows whatever the hints option says (`info_later`).
-                info_later(&mark_lines(mark).into_iter().map(|line| (line, INK)).collect::<Vec<_>>());
-            }
-        } else if f.completed {
-            tick(mark_r.x, mark_r.y, mark_r.w, TICK_GREEN);
-        }
         scenario_icon(e.scenario.header.scenario_picture_index, vec2(head.x + 14.0 * k, head.y + head.h / 2.0), k);
         let name = group_name(scenarios, g);
         // The name's Benguiat variant (0x4e266e..0x4e27a3, colours from 0x4dbb0c): the tutorial
@@ -1266,6 +1270,8 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         // end is 32 px past the name's start (the name ends at the row's edge, 2 px short of the
         // scrollbar), so a name fits the row as it was before the corner insets (208 px).
         let name_w = r.w - (32.0 + if f.mark.is_some() || f.completed { 44.0 } else if f.favourite { 24.0 } else { 0.0 }) * k;
+        // The name's drawn size: the head's mark is drawn at the same text (below).
+        let mut name_px = 15.0 * k;
         with_face(Face::Subtitle, || {
             // Shrunk to fit the name's room (`fit_size`, 15 px at most), as before the insets; grown
             // with its row (`row_text_size`), cut by its room when the grown name is longer.
@@ -1278,11 +1284,31 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
                 }
             };
             let is_grown = grown > normal;
+            name_px = if is_grown { grown } else { normal };
             super::dt_font::legacy_metrics_if(is_grown, || {
                 let size = if is_grown { grown } else { normal };
                 chrome::shadow_text(&ellipsize(name, name_w, size), head.x + 32.0 * k, head.y + head.h * 0.5 + size * 0.36, size, name_ink);
             });
         });
+        // The row's mark (1532) at the name's size: its checkmark in the mark's colour, the tooltip on
+        // hover; a won map with no record (won before the marks) keeps the plain green tick.
+        let mark_r = mark_box(head, k);
+        let head_level = f.mark.as_ref().map(|m| m.level).or(f.completed.then_some(marks::Level::Green));
+        if let Some(level) = head_level {
+            let (side, letter) = mark_sizes(mark_r.w, name_px);
+            let x = mark_x(mark_r.x, star_r.x - 4.0 * k, mark_width(level, side, letter), super::display::dp_px().is_some());
+            let tick_r = Rect::new(x, head.y + head.h / 2.0 - side / 2.0, side, side);
+            mark_tick(level, tick_r, letter);
+            if let Some(mark) = &f.mark {
+                // The hover area: a finger's square on a phone, cut at the star's tap area (`tick_hit`).
+                let hit = tick_hit(tick_r, super::display::dp_px(), r, finger_hit(star_r).x);
+                if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
+                    // Queued: drawn over the whole window once its frame is up (`draw_later`), not cut at the rows.
+                    // Razdor's own information: it shows whatever the hints option says (`info_later`).
+                    info_later(&mark_lines(mark).into_iter().map(|line| (line, INK)).collect::<Vec<_>>());
+                }
+            }
+        }
         // The chapters' size: the Normal 12 px, grown with the row (`row_text_size`).
         let small_normal = pl.as_ref().map_or(12.0 * k, |p| p.chapter_px);
         with_face(Face::Body, || for (n, &c) in chapters.iter().enumerate() {
@@ -1295,16 +1321,20 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             let is_grown = small > small_normal;
             let cy = r.y + head_h + n as f32 * chapter_h + chapter_h * 0.5 + small * 0.36;
             super::dt_font::legacy_metrics_if(is_grown, || chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color()));
-            let tick_r = Rect::new(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, 10.0 * k);
-            if let Some(mark) = &mark {
-                mark_tick(mark.level, tick_r.x, tick_r.y, tick_r.w);
-                let margin = Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k);
-                let hit = tick_hit(margin, super::display::dp_px(), r, r.right());
-                if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
-                    info_later(&mark_lines(mark).into_iter().map(|line| (line, INK)).collect::<Vec<_>>());
+            // The tick at the text's middle, its «Р» (if any) at the text's size.
+            let level = mark.as_ref().map(|m| m.level).or(won.then_some(marks::Level::Green));
+            if let Some(level) = level {
+                let (side, letter) = mark_sizes(10.0 * k, small);
+                let x = mark_x(head.x + head.w - 40.0 * k, r.right(), mark_width(level, side, letter), super::display::dp_px().is_some());
+                let tick_r = Rect::new(x, cy - small * 0.36 - side / 2.0, side, side);
+                mark_tick(level, tick_r, letter);
+                if let Some(mark) = &mark {
+                    let margin = Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k);
+                    let hit = tick_hit(margin, super::display::dp_px(), r, r.right());
+                    if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
+                        info_later(&mark_lines(mark).into_iter().map(|line| (line, INK)).collect::<Vec<_>>());
+                    }
                 }
-            } else if won {
-                tick(tick_r.x, tick_r.y, tick_r.w, TICK_GREEN);
             }
         });
         // A campaign heading or individual chapter is selected only on click.
@@ -1832,6 +1862,11 @@ fn experimental_menu() {
         }
         let size = match dp { Some(d) => 17.0 * d, None => normal };
         chrome::marble_button_sized(rect, label, true, preset == choice, size);
+        // The choice is ringed in gold, as the picked tab is (`hub_view`'s tab buttons): the pressed
+        // frame alone looks the same as the other button's.
+        if preset == choice {
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 3.0 * big, chrome::GOLD);
+        }
     }
     if let Some(choice) = chosen {
         rules.set_fixes(choice == Preset::Razdor);
