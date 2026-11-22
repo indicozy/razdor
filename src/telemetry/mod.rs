@@ -8,6 +8,7 @@
 //! consent items. The ping and the delete request are the `Always` class.
 
 pub mod crash;
+pub mod events;
 pub mod queue;
 pub mod sanitize;
 pub mod state;
@@ -76,6 +77,11 @@ impl Hub {
 
     pub fn consent(&self) -> Consent {
         self.with_state(|s| s.consent)
+    }
+
+    /// The consent as the file holds it, read without writing the state (the play events check it once a second).
+    pub fn consent_now(&self) -> Consent {
+        state::load(&self.dir).consent
     }
 
     /// Sets the player's answer. `version` is the Razdor version the question was answered in. A
