@@ -333,8 +333,10 @@ impl Tracker {
 
     /// The screen the player is on (the run's last screen, named in the end event). Empty names are ignored.
     pub fn set_screen(&mut self, screen: &str) {
-        if let (Some(run), false) = (self.run.as_mut(), screen.is_empty()) {
-            run.last_screen = screen.to_string();
+        if let Some(run) = self.run.as_mut() {
+            if !screen.is_empty() && run.last_screen != screen {
+                run.last_screen = screen.to_string();
+            }
         }
     }
 
