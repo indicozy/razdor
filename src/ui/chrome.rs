@@ -1454,16 +1454,29 @@ pub fn cover_source(pic: (f32, f32), screen: (f32, f32)) -> Option<Rect> {
     if pw <= 0.0 || ph <= 0.0 || sw <= 0.0 || sh <= sw {
         return None;
     }
-    let (pic_aspect, screen_aspect) = (pw / ph, sw / sh);
-    if (0.8..=1.2).contains(&(screen_aspect / pic_aspect)) {
+    if (0.8..=1.2).contains(&((sw / sh) / (pw / ph))) {
         return None;
     }
+    crop_source(pic, screen, 0.5)
+}
+
+/// The part of a `pic` picture (width, height) that covers a `screen` (width, height) at the
+/// picture's own aspect, in picture pixels, whatever the screen's shape: a screen wider than the
+/// picture keeps its whole width and the band of rows `top` of the way down the rows cut off (0
+/// the top rows, 0.5 the middle ones); a narrower one keeps the centre strip of its width. None for
+/// an empty picture or screen.
+pub fn crop_source(pic: (f32, f32), screen: (f32, f32), top: f32) -> Option<Rect> {
+    let ((pw, ph), (sw, sh)) = (pic, screen);
+    if pw <= 0.0 || ph <= 0.0 || sw <= 0.0 || sh <= 0.0 {
+        return None;
+    }
+    let (pic_aspect, screen_aspect) = (pw / ph, sw / sh);
     if screen_aspect < pic_aspect {
         let cut = ph * screen_aspect;
         Some(Rect::new(((pw - cut) / 2.0).round(), 0.0, cut.round(), ph))
     } else {
         let cut = pw / screen_aspect;
-        Some(Rect::new(0.0, ((ph - cut) / 2.0).round(), pw, cut.round()))
+        Some(Rect::new(0.0, ((ph - cut) * top).round(), pw, cut.round()))
     }
 }
 

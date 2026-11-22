@@ -84,16 +84,71 @@ const LOGO_FLAME_WIDTH: f32 = 0.95;
 const LOGO_FLAME_HEIGHT: f32 = 1.52;
 const LOGO_FLAME_GLOW: f32 = 0.85;
 
-/// The burning ruins over the whole screen, a little warmer where the fire glows. Not panned:
-/// the screen behind a panned title stays covered (`ui::pan`).
+/// «Фон меню» (`audio::Settings::menu_frame`, Razdor's, the owner's decision 2026-11-22): how the
+/// menu's picture meets a screen of another shape. «Растянуто», the default, stretches it over the
+/// whole screen as before; «Обрезано» keeps its proportions, fills the screen and cuts off what does
+/// not fit, nearer the top (`MENU_CROP_TOP`), so the towers' roofs stay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MenuFrame {
+    #[default]
+    Stretched,
+    Cropped,
+}
+
+impl MenuFrame {
+    /// The other choice, on a click of the row.
+    pub fn next(self) -> MenuFrame {
+        match self {
+            MenuFrame::Stretched => MenuFrame::Cropped,
+            MenuFrame::Cropped => MenuFrame::Stretched,
+        }
+    }
+
+    /// The row's value.
+    pub fn label(self) -> &'static str {
+        match self {
+            MenuFrame::Stretched => tr("Stretched"),
+            MenuFrame::Cropped => tr("Cropped"),
+        }
+    }
+}
+
+/// How far down the rows a cropped menu picture keeps (`chrome::crop_source`'s `top`): on a 16:9
+/// screen the 512×512 `Castle.lit` shows its rows 30 to 318, the band picked by looking at the
+/// picture (the towers' roofs stay; above them is only sky).
+const MENU_CROP_TOP: f32 = 30.0 / 224.0;
+
+local! {
+    /// The menu's frame in use (`set_menu_frame`, from the settings every frame).
+    static MENU_FRAME: Cell<MenuFrame> = const { Cell::new(MenuFrame::Stretched) };
+}
+
+/// Sets the menu picture's frame (`display::follow_settings`).
+pub fn set_menu_frame(frame: MenuFrame) {
+    MENU_FRAME.with(|f| f.set(frame));
+}
+
+/// The part of the menu's picture (`pic`: width, height) drawn over the `screen` (width, height) in
+/// `frame`, in picture pixels; None draws the whole picture stretched over the screen. Stretched is
+/// the frame as it always was: stretched, but a phone in portrait gets the centre
+/// (`chrome::cover_source`).
+fn menu_source(frame: MenuFrame, pic: (f32, f32), screen: (f32, f32)) -> Option<Rect> {
+    match frame {
+        MenuFrame::Stretched => chrome::cover_source(pic, screen),
+        MenuFrame::Cropped => chrome::crop_source(pic, screen, MENU_CROP_TOP),
+    }
+}
+
+/// The burning ruins over the whole screen, a little warmer where the fire glows, framed as the
+/// settings say (`MenuFrame`). Not panned: the screen behind a panned title stays covered (`ui::pan`).
 fn background() {
     super::pan::unpanned(|| match chrome::win("Castle") {
         Some(t) => {
-            // A phone in portrait covers the screen with the picture's centre (keeping its
-            // aspect), not stretched; other screens stretch it as before.
             let (sw, sh) = (screen_width(), screen_height());
             let screen = Rect::new(0.0, 0.0, sw, sh);
-            match chrome::cover_source((t.width(), t.height()), (sw, sh)) {
+            let pic = (t.width(), t.height());
+            let src = menu_source(MENU_FRAME.with(|f| f.get()), pic, (sw, sh));
+            match src {
                 Some(src) => chrome::tex_src(&t, src, screen, WHITE),
                 None => chrome::tex(&t, screen, WHITE),
             }
@@ -1875,7 +1930,7 @@ impl Group {
         match self {
             Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
-            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
+            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::MenuFrame, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench],
         }
@@ -1941,6 +1996,8 @@ pub enum Row {
     Font,
     TextSize,
     LargeWindows,
+    /// Razdor's «Фон меню» (`audio::Settings::menu_frame`): the menu's picture stretched or cropped. Look only.
+    MenuFrame,
     /// Razdor's «ЭЛТ-эффект» (`audio::Settings::crt`): an old monitor's look over the whole screen. Look only.
     CrtEffect,
     /// Razdor's «Качество ЭЛТ» (`audio::Settings::crt_quality`): the cost of the CRT look. Look only.
@@ -1965,7 +2022,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 70] = [
+pub const ALL: [Row; 71] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -2021,6 +2078,7 @@ pub const ALL: [Row; 70] = [
         Row::Font,
         Row::TextSize,
         Row::LargeWindows,
+        Row::MenuFrame,
         Row::CrtEffect,
         Row::CrtQuality,
         Row::CrtCurve,
@@ -2041,6 +2099,7 @@ pub const ALL: [Row; 70] = [
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
     fn help_text(self) -> Option<&'static str> {
         match self {
+            Row::MenuFrame => Some(tr("Stretched: the menu's picture is stretched over the whole screen, as before. Cropped: the picture keeps its proportions and fills the screen; what does not fit is cut off.")),
             Row::CrtEffect => Some(tr("An old monitor's look over the whole screen: scanlines, a soft glow and darker edges. Quality: Fast for weak phones, High adds a glow around bright areas.")),
             Row::GraphicsQuality => Some(tr("Original: as the original game, with no new effects. Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
             Row::MapZoom => Some(tr("The zoom the map plays at. The wheel steps away from it and the 0 key comes back to it; locked, the map always shows it.")),
@@ -2847,6 +2906,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::LargeWindows => {
             if labelled_row(c, geo, tr("Large message windows"), yes_no(audio.large_windows)).0 {
                 audio.large_windows = !audio.large_windows;
+            }
+        }
+        Row::MenuFrame => {
+            // Razdor's (the owner's decision, 2026-11-22): the menu's picture stretched or cropped. Look only.
+            if labelled_row_help(c, geo, tr("Menu background"), audio.menu_frame.label(), Row::MenuFrame.help_text()).0 {
+                audio.menu_frame = audio.menu_frame.next();
             }
         }
         Row::CrtEffect => {
@@ -3943,6 +4008,50 @@ pub fn close_options_kept() {
 mod tests {
     use super::*;
 
+    /// `Castle.lit`'s size.
+    const CASTLE: (f32, f32) = (512.0, 512.0);
+
+    #[test]
+    fn the_stretched_menu_frame_is_the_frame_as_before() {
+        // Today's frame: the desktop's and a phone held sideways stretch the whole picture, a phone in
+        // portrait covers with its centre.
+        for screen in [(1920.0, 1080.0), (1024.0, 768.0), (2560.0, 1080.0), (1280.0, 800.0), (800.0, 800.0), (1080.0, 2160.0), (720.0, 1280.0)] {
+            assert_eq!(menu_source(MenuFrame::Stretched, CASTLE, screen), chrome::cover_source(CASTLE, screen), "{screen:?}");
+        }
+        assert_eq!(menu_source(MenuFrame::Stretched, CASTLE, (1920.0, 1080.0)), None, "the desktop: stretched");
+        assert_eq!(menu_source(MenuFrame::Stretched, CASTLE, (1080.0, 2160.0)), Some(Rect::new(128.0, 0.0, 256.0, 512.0)));
+    }
+
+    #[test]
+    fn the_cropped_menu_frame_keeps_the_aspect_fills_the_screen_and_keeps_the_towers() {
+        // 16:9: the whole width and the rows 30 to 318, the band picked by looking at the picture.
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (1920.0, 1080.0)), Some(Rect::new(0.0, 30.0, 512.0, 288.0)));
+        for screen in [(1920.0, 1080.0), (1024.0, 768.0), (2560.0, 1080.0), (1280.0, 800.0), (3840.0, 2160.0), (1366.0, 768.0)] {
+            let r = menu_source(MenuFrame::Cropped, CASTLE, screen).expect("a landscape screen is cropped");
+            // The picture's own aspect (within a rounded row), the whole width, inside the picture.
+            assert!(((r.w / r.h) - screen.0 / screen.1).abs() < 0.01, "{screen:?}: {r:?}");
+            assert_eq!((r.x, r.w), (0.0, 512.0), "{screen:?}");
+            assert!(r.y >= 0.0 && r.y + r.h <= 512.0, "{screen:?}: {r:?}");
+            // Nearer the top than the middle: the towers' roofs stay.
+            let cut = 512.0 - r.h;
+            assert!(r.y < cut / 4.0, "{screen:?}: {r:?}");
+            assert_eq!(r.y, (cut * MENU_CROP_TOP).round(), "{screen:?}");
+        }
+        // A phone in portrait: the centre strip of the width, all the rows.
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (1080.0, 2160.0)), Some(Rect::new(128.0, 0.0, 256.0, 512.0)));
+        // A square screen: the whole picture; an empty one: nothing to crop.
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (800.0, 800.0)), Some(Rect::new(0.0, 0.0, 512.0, 512.0)));
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (0.0, 0.0)), None);
+    }
+
+    #[test]
+    fn the_menu_frame_row_switches_between_the_two() {
+        assert_eq!(MenuFrame::Stretched.next(), MenuFrame::Cropped);
+        assert_eq!(MenuFrame::Cropped.next(), MenuFrame::Stretched);
+        assert!(Group::Screen.rows().contains(&Row::MenuFrame));
+        assert!(Row::MenuFrame.help_text().is_some());
+    }
+
     #[test]
     fn the_bottom_row_scales_down_to_its_room_and_keeps_its_gaps() {
         // Fits: as given.
@@ -4348,7 +4457,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

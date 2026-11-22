@@ -338,6 +338,11 @@ drawn at the interface scale (`world_view::window_backdrop`). Landscape and desk
 spellbook keeps its landscape window (`window_layout::landscape_window`).
 The title background is covered, not stretched, on a portrait screen whose aspect is more than 20% off the
 picture's (`chrome::cover_source`: the picture's centred crop); every other screen stretches it as before.
+That is the frame «Растянуто», the default of the setting «Фон меню» (Screen group, `Settings::menu_frame`,
+`main_menu::MenuFrame`, pushed by `display::follow_settings` into `main_menu::set_menu_frame`; the owner's decision,
+2026-11-22). «Обрезано» covers every screen at the picture's own aspect (`chrome::crop_source`): a portrait one with
+the centre of its width, a landscape one with the band of rows `MENU_CROP_TOP` of the way down (rows 30 to 318 of the
+512×512 `Castle.lit` at 16:9, so the towers' roofs stay); `RAZDOR_MENU_FRAME=cropped` sets it in snapshots.
 The title menu held upright (`main_menu::portrait_menu`, pure, with unit tests): the five buttons are 1.6× the
 landscape size in one column, its middle at the middle of the area between the top safe inset and the foot lines
 (the owner's OnePlus, 1080×2376 at 2.75 px per dp: the column's top moved from ~1001 px to ~561 px, its middle

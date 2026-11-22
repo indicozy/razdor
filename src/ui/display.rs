@@ -861,6 +861,11 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         }
         // `RAZDOR_MAP_EDGE=1`: the map's ground goes on past its edges («Продолжать карту за краем»).
         crate::ui::world_view::set_edge_pref(std::env::var("RAZDOR_MAP_EDGE").is_ok_and(|v| v.trim() == "1"));
+        // `RAZDOR_MENU_FRAME=cropped`: the menu's picture cropped to its proportions («Фон меню»: «Обрезано»).
+        crate::ui::main_menu::set_menu_frame(match std::env::var("RAZDOR_MENU_FRAME").as_deref().map(str::trim) {
+            Ok("cropped") => crate::ui::main_menu::MenuFrame::Cropped,
+            _ => crate::ui::main_menu::MenuFrame::Stretched,
+        });
         // `RAZDOR_MIST=1|flat|billows|off`: the unexplored land is drifting clouds, a plain mist, the billows or the black (`mist::env_mode`)
         // («Туман вместо черноты»).
         crate::ui::mist::set_pref(crate::ui::mist::env_mode().unwrap_or_default());
@@ -908,6 +913,7 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     set_bar_size(settings.bottom_bar_size);
     crate::ui::world_view::set_zoom_prefs(settings.map_zoom, settings.zoom_locked);
     crate::ui::world_view::set_edge_pref(settings.map_extended);
+    crate::ui::main_menu::set_menu_frame(settings.menu_frame);
     let quality = settings.map_light_quality.unwrap_or_else(|| crate::ui::lights::default_quality(dp_px().is_some()));
     crate::ui::daylight::set_prefs(settings.map_light, settings.map_light_cycle, settings.map_light_hour, settings.map_shadows, quality);
     crate::ui::daylight::set_steady(settings.map_steady);
