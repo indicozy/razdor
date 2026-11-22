@@ -1,6 +1,6 @@
 # Experimental scenario rules
 
-The `...` button beside Next on the scenario screen opens sixteen independent switches,
+The `...` button beside Next on the scenario screen opens seventeen independent switches,
 all off by default for new games. The last five (`bless_once` through `rear_service_flat`, below) and `building_store`
 are the parity switches: off gives the original's rule, on gives Razdor's rule of today. Choices reset when
 starting a new playthrough from the main menu.
@@ -115,6 +115,7 @@ off).
   taken (`Battle::answer_kill`, `curse_takes`, `curse_kill`). Off (the original's rule, 48b49f and
   48a3f0: no on-kill effects for a counter blow): the answerer survives. Part of the «Правила Раздора» preset (the owner's rule, 2026-11-08: Razdor's fixes join it). Old saves and settings files have no key and read it OFF. `battle.md`, «Counterblow».
 - **No corpses in garrisons** («Мёртвых не оставлять в гарнизоне», default off, `no_corpse_garrison`; a player's report, the owner's decision 2026-11-12): on, a fallen unit (hp 0) is refused by a castle's or fort's garrison, both ways (`Game::leave_in_garrison`, `Game::swap_with_garrison`, `ServiceError::Dead`). Off (the original's rule, 0x4c653c and 0x4c6f50: only the hero and named units are refused, so a corpse moves both ways; a corpse kept in a castle starts the plague): a corpse goes in and comes out. Part of the «Правила Раздора» preset. Old saves and settings files have no key and read it OFF. `towns-economy.md`, «Garrisons»; `economy.md` §2.
+- **Strict initiative order** («Строгий порядок инициативы», default off, `strict_initiative`; a player's report, "random" turn order): on, the next actor is always the living fighter with actions and the highest current initiative (ties: the player's side, then its list place), so a unit whose initiative rises mid-turn (Bless, Шквальная атака) acts at once. The turn ends when none is left. Off (the original's threshold scan, 0x489ca0): a unit whose initiative rises after the scan passed its place waits for the next threshold. Part of the «Правила Раздора» preset. Old saves and settings files have no key and read it OFF. `battle.md` §3 (`Battle::strict_next`, `queue`).
 
 Saves: each switch is written as its own key. A save (or a `NextMap` hand-over) from before the five
 parity switches (or before `building_store`) has no key for them, and those read ON (`RulesWire`): the
@@ -221,11 +222,11 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 ## The rules window (new_game.rs `experimental_menu`)
 
-The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the sixteen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
+The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the seventeen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
-Opened from the scenario list's «Экспериментальные правила» button. Above the sixteen rows is a full-width
-«Правила Раздора» row with its hint line (`ExperimentalRules::razdor_preset` and `set_razdor_preset`, `is_razdor_preset_on`): on when all eight preset switches (the six parity switches `bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`, and Razdor's fixes `death_curse_counter` and `no_corpse_garrison`) are on, and pressed it sets all eight together (off when they are all on), leaving the other experiments alone. The owner's rule (2026-11-08): every Razdor QoL fix behind a switch joins the preset. The row and its hint scroll with the rows (the grid starts under them, `grid_top`). Its scale is `display::popup_o`
-fitted to the screen. Its sixteen rows and OK are touch targets (40 dp on a phone); its texts are one
+Opened from the scenario list's «Экспериментальные правила» button. Above the seventeen rows is a full-width
+«Правила Раздора» row with its hint line (`ExperimentalRules::razdor_preset` and `set_razdor_preset`, `is_razdor_preset_on`): on when all nine preset switches (the six parity switches `bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`, and Razdor's fixes `death_curse_counter`, `no_corpse_garrison` and `strict_initiative`) are on, and pressed it sets all nine together (off when they are all on), leaving the other experiments alone. The owner's rule (2026-11-08): every Razdor QoL fix behind a switch joins the preset. The row and its hint scroll with the rows (the grid starts under them, `grid_top`). Its scale is `display::popup_o`
+fitted to the screen. Its seventeen rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
 fewest whose height fits the screen (a phone's landscape takes two or three), and the window takes

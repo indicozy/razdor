@@ -641,6 +641,85 @@ fn row15_a_slowed_unit_acts_later_in_the_same_turn() {
     assert_eq!(bt.queue().collect::<Vec<_>>(), vec![2, 1]);
 }
 
+/// `with` under Razdor's strict initiative order (`strict_initiative`, off by default).
+fn with_strict(extra: Vec<UnitDef>, player: &[(u32, Slot)], enemies: &[(u32, Slot)]) -> Battle {
+    let c = content_with(extra, Formation::WIDE);
+    battle_in(&Arc::new(c.with_experimental(crate::rules::content::ExperimentalRules { strict_initiative: true, ..Default::default() })), player, enemies)
+}
+
+/// The reported case (a Bless raises an initiative after the scan has passed its place): A (43)
+/// stands in front of the blesser B (45); the enemy C (45) is behind them. B acts at 45 and blesses
+/// A to 49 (the Elemental blessing's +6).
+fn blessed_past_its_place(strict: bool) -> Battle {
+    let a = UnitDef { initiative: 43, ..warrior(60, 10, 0) };
+    let blesser = UnitDef { initiative: 45, ..mage(61, 40, MagicSchool::Elemental, MagicDirection::ToAlly) };
+    // The player's side gets +1 on turn 1 (see row15_16), so the blesser and the enemy both act at 46.
+    let enemy = UnitDef { initiative: 46, ..warrior(62, 10, 0) };
+    let extra = vec![a, blesser, enemy];
+    let player = [(60, f(0)), (61, b(2))];
+    let enemies = [(62, f(5))];
+    if strict { with_strict(extra, &player, &enemies) } else { with(extra, &player, &enemies) }
+}
+
+#[test]
+fn strict_initiative_off_keeps_the_scan_a_blessed_unit_waits_for_its_place() {
+    let mut bt = blessed_past_its_place(false);
+    assert_eq!(bt.active(), Some(1), "the blesser acts at threshold 46; A is passed");
+    let hit = bt.act(0).unwrap();
+    assert!(hit.buff.initiative > 0);
+    assert!(bt.fighters[0].stats[Stat::Initiative] > bt.fighters[2].stats[Stat::Initiative], "A is blessed above the enemy");
+    assert_eq!(bt.active(), Some(2), "the original: the enemy at 46 acts before A, which passed its list place");
+}
+
+#[test]
+fn strict_initiative_on_the_blessed_unit_acts_next() {
+    let mut bt = blessed_past_its_place(true);
+    assert_eq!(bt.active(), Some(1), "the highest initiative first: the blesser (46) ties the enemy and is in the player's list");
+    bt.act(0).unwrap();
+    assert!(bt.fighters[0].stats[Stat::Initiative] > bt.fighters[2].stats[Stat::Initiative]);
+    assert_eq!(bt.active(), Some(0), "A now has the highest initiative and acts next");
+    assert_eq!(bt.queue().next(), Some(0));
+}
+
+#[test]
+fn strict_initiative_on_turn_start_goes_by_initiative_not_list_order() {
+    // Both above the 75 threshold: the scan would take the list's first (80); the strict order
+    // takes 90, then 80, then the enemy's 10.
+    let slow = UnitDef { initiative: 80, ..warrior(63, 10, 0) };
+    let fast = UnitDef { initiative: 90, ..warrior(64, 10, 0) };
+    let weak = UnitDef { initiative: 10, ..warrior(65, 10, 0) };
+    let mut bt = with_strict(vec![slow, fast, weak], &[(63, f(0)), (64, f(1))], &[(65, f(5))]);
+    let mut seen = vec![];
+    for _ in 0..3 {
+        seen.push(bt.active().unwrap());
+        bt.skip();
+    }
+    assert_eq!(seen, vec![1, 0, 2]);
+    assert_eq!((bt.round, bt.active()), (2, Some(1)), "the turn ends after the three; turn 2 starts with the highest again");
+}
+
+#[test]
+fn strict_initiative_queue_matches_the_pick_order() {
+    let slow = UnitDef { initiative: 80, ..warrior(63, 10, 0) };
+    let fast = UnitDef { initiative: 90, ..warrior(64, 10, 0) };
+    let weak = UnitDef { initiative: 10, ..warrior(65, 10, 0) };
+    let mut bt = with_strict(vec![slow, fast, weak], &[(63, f(0)), (64, f(1))], &[(65, f(5))]);
+    let queue = bt.queue().collect::<Vec<_>>();
+    assert_eq!(queue, vec![1, 0, 2]);
+    let mut seen = vec![];
+    for _ in 0..queue.len() {
+        seen.push(bt.active().unwrap());
+        bt.skip();
+    }
+    assert_eq!(seen, queue, "the queue predicts the strict order");
+    // Off, the same battle keeps the scan: the list's first unit at 80 acts first.
+    let slow = UnitDef { initiative: 80, ..warrior(63, 10, 0) };
+    let fast = UnitDef { initiative: 90, ..warrior(64, 10, 0) };
+    let weak = UnitDef { initiative: 10, ..warrior(65, 10, 0) };
+    let bt = with(vec![slow, fast, weak], &[(63, f(0)), (64, f(1))], &[(65, f(5))]);
+    assert_eq!(bt.active(), Some(0), "the original's scan takes the list order above the threshold");
+}
+
 #[test]
 fn row17_artillery_gets_30_initiative_on_turn_1_only() {
     let gun = bonus(24, Bonus::Artillery, UnitDef { initiative: 1, ..shooter(24, 10) });

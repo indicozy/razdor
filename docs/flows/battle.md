@@ -94,6 +94,11 @@ holds which cells exist per side.
   turns where the first actor of the previous turn acted. At each threshold the player's living
   units are scanned in order, then the enemy's; a unit whose initiative reaches the threshold
   and has actions becomes `current` and spends **all** its actions in a row.
+- Experimental `strict_initiative` (Строгий порядок инициативы, off by default; Razdor's rule, not
+  the original's): `Battle::strict_next` picks the living fighter with actions and the highest
+  current initiative (ties: player side, then list place); the turn ends when none is left. A Bless
+  that raises a unit's initiative after the scan passed its place therefore counts at once.
+  `queue` follows the same order.
 - `Battle::queue` predicts the order for the UI's small numbers on the cards.
 - The turn limit (`BattleEndTurn`) ends the battle after its first action
   (`EndReason::TurnLimit`); the player wins if any of his units stand.

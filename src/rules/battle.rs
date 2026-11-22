@@ -1384,8 +1384,10 @@ impl Battle {
         self.fighters[i].stats[Stat::Initiative]
     }
 
-    /// The expected order of the fighters still to act this turn, the active one first.
+    /// The expected order of the fighters still to act this turn, the active one first. With
+    /// `strict_initiative` on, the rest go by their current initiative (see [`Battle::strict_next`]).
     pub fn queue(&self) -> impl Iterator<Item = usize> + '_ {
+        let strict = self.content.experimental.strict_initiative;
         let (t, (side, pos)) = (self.threshold, self.cursor);
         let mut rest: Vec<(i32, usize, usize, usize)> = Vec::new();
         for (s, team) in Team::BOTH.into_iter().enumerate() {
@@ -1395,7 +1397,7 @@ impl Battle {
                     continue;
                 }
                 let this_pass = (s, p) > (side, pos) && ini >= t;
-                rest.push((if this_pass { t } else { ini.min(t - 1) }, s, p, i));
+                rest.push((if strict { ini } else if this_pass { t } else { ini.min(t - 1) }, s, p, i));
             }
         }
         rest.sort_by_key(|&(at, s, p, _)| (-at, s, p));
@@ -1640,7 +1642,35 @@ impl Battle {
         }
     }
 
+    /// The fighter Razdor's strict initiative order (`strict_initiative`, off by default) picks
+    /// next: among the living fighters of both sides with actions left and a current initiative
+    /// above 0, the highest initiative. A tie goes to the player's side, then to the earlier place
+    /// in its living list (the same tie order as the scan). None when nobody is left this turn.
+    fn strict_next(&self, lists: &[Vec<usize>; 2]) -> Option<usize> {
+        let mut best: Option<(i32, usize, usize, usize)> = None;
+        for (side, list) in lists.iter().enumerate() {
+            for (pos, &i) in list.iter().enumerate() {
+                let ini = self.initiative(i);
+                if self.fighters[i].actions <= 0 || ini <= 0 {
+                    continue;
+                }
+                let better = match best {
+                    None => true,
+                    Some((b, bs, bp, _)) => ini > b || (ini == b && (side, pos) < (bs, bp)),
+                };
+                if better {
+                    best = Some((ini, side, pos, i));
+                }
+            }
+        }
+        best.map(|(_, _, _, i)| i)
+    }
+
     /// Picks the next actor with the threshold scan (489ca0), starting new turns as needed.
+    /// Razdor's rule when `strict_initiative` is on (not the original's; the scan is 0x489ca0):
+    /// the next actor is [`Battle::strict_next`], and the turn ends when nobody is left. The
+    /// threshold is kept at the picked fighter's initiative (the turn's first actor sets
+    /// `first_threshold` as the scan does), so the bookkeeping stays harmless.
     fn advance(&mut self) {
         self.current = None;
         if self.outcome() != Outcome::Ongoing {
@@ -1648,7 +1678,19 @@ impl Battle {
         }
         let mut lists = [self.living_ids(Team::Player), self.living_ids(Team::Enemy)];
         loop {
-            if self.cursor == (0, 0) && self.threshold > 0 {
+            if self.content.experimental.strict_initiative {
+                match self.strict_next(&lists) {
+                    Some(i) => {
+                        self.threshold = self.initiative(i);
+                        if self.first_threshold == 0 {
+                            self.first_threshold = self.threshold;
+                        }
+                        self.current = Some(i);
+                        return;
+                    }
+                    None => self.threshold = 0,
+                }
+            } else if self.cursor == (0, 0) && self.threshold > 0 {
                 // A pass that finds nobody only lowers the threshold: jump over those.
                 let top = lists.iter().flatten().filter(|&&i| self.fighters[i].actions > 0).map(|&i| self.initiative(i)).max().unwrap_or(0);
                 self.threshold = self.threshold.min(top.max(0));

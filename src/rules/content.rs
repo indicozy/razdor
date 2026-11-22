@@ -177,6 +177,12 @@ pub struct ExperimentalRules {
     /// (0x4c653c, 0x4c6f50 refuse only the hero and named units), where a corpse moves both ways and
     /// a corpse kept in a castle starts the plague. Razdor's deviation.
     pub no_corpse_garrison: bool,
+    /// «Строгий порядок инициативы» («Strict initiative order»): the next actor is always the living
+    /// fighter with the highest current initiative (ties: the player's side, then its list order),
+    /// not the original's threshold scan (0x489ca0), which lets a unit whose initiative rose after
+    /// its list place was passed wait for the next threshold. Off: the original's rule. Razdor's
+    /// deviation.
+    pub strict_initiative: bool,
     /// The `INHERITABLE` switches that read ON only because the save predates them: Razdor's own
     /// old rule, kept for that save, not chosen by the player. One bit per switch (fixed numbers).
     /// Rules play is the same as for a chosen switch; the run's mark skips them (`first_on`).
@@ -226,10 +232,10 @@ impl ExperimentalRules {
 
     /// The «Правила Раздора» switches: the six that hold Razdor's own former rules (the set
     /// `before_the_rules_were_saved` turns on) and Razdor's fixes of the original's gaps
-    /// (`death_curse_counter`, `no_corpse_garrison`). The owner's rule (2026-11-08): every Razdor QoL
+    /// (`death_curse_counter`, `no_corpse_garrison`, `strict_initiative`). The owner's rule (2026-11-08): every Razdor QoL
     /// fix behind a switch joins this preset. The rules window's «Правила Раздора» row sets them
     /// together; the other switches are extra experiments and are left alone.
-    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 8] = [
+    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 9] = [
         |r| &mut r.bless_once,
         |r| &mut r.undead_poison_immune,
         |r| &mut r.unlimited_spells,
@@ -238,6 +244,7 @@ impl ExperimentalRules {
         |r| &mut r.building_store,
         |r| &mut r.death_curse_counter,
         |r| &mut r.no_corpse_garrison,
+        |r| &mut r.strict_initiative,
     ];
 
     /// Turns on the six «Правила Раздора» switches; the other switches stay as they are.
@@ -280,6 +287,7 @@ impl ExperimentalRules {
             (self.building_store, BUILDING_STORE, crate::i18n::n_("Store in your own buildings")),
             (self.death_curse_counter, 0, crate::i18n::n_("Death curse on counter blows")),
             (self.no_corpse_garrison, 0, crate::i18n::n_("No corpses in garrisons")),
+            (self.strict_initiative, 0, crate::i18n::n_("Strict initiative order")),
         ]
         .into_iter()
         .find(|(on, bit, _)| *on && self.inherited & bit == 0)
@@ -325,6 +333,10 @@ struct RulesWire {
     /// must still play, see `recording/snapshot.rs`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     no_corpse_garrison: bool,
+    /// Missing (false) in saves from before the initiative switch: the original's scan. Written only
+    /// when on, so the serialised rules of every other game stay as they were (see `no_corpse_garrison`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    strict_initiative: bool,
     /// The wire keys of the `INHERITABLE` switches that are inherited (`ExperimentalRules::inherited`).
     /// Written, so a save that was re-saved keeps saying so; unknown names are ignored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -395,6 +407,7 @@ impl From<RulesWire> for ExperimentalRules {
             building_store,
             death_curse_counter: w.death_curse_counter,
             no_corpse_garrison: w.no_corpse_garrison,
+            strict_initiative: w.strict_initiative,
             inherited,
         }
     }
@@ -419,6 +432,7 @@ impl From<ExperimentalRules> for RulesWire {
             building_store: Some(r.building_store),
             death_curse_counter: r.death_curse_counter,
             no_corpse_garrison: r.no_corpse_garrison,
+            strict_initiative: r.strict_initiative,
             inherited: INHERITABLE.iter().filter(|(bit, _)| r.inherited & bit != 0).map(|(_, key)| key.to_string()).collect(),
             multiple_rings: false,
             multiple_amulets: false,
@@ -1102,7 +1116,7 @@ mod experimental_rules_save_tests {
         assert!(!rules.is_razdor_preset_on());
         rules.razdor_preset();
         assert!(rules.is_razdor_preset_on());
-        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, no_corpse_garrison: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
+        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, no_corpse_garrison: true, strict_initiative: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
         rules.set_razdor_preset(false);
         assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() });
         assert!(!rules.is_razdor_preset_on());
@@ -1204,6 +1218,28 @@ mod experimental_rules_save_tests {
         assert!(rules.is_razdor_preset_on() && rules.no_corpse_garrison);
         rules.set_razdor_preset(false);
         assert!(!rules.no_corpse_garrison);
+    }
+
+    /// «Строгий порядок инициативы» (`strict_initiative`): off by default, in a new game, before the
+    /// rules were saved, and in a save without its key (the original's scan). Written only when on;
+    /// its name is the rules window's and the scenario mark's; the «Правила Раздора» row sets it.
+    #[test]
+    fn the_strict_initiative_switch_is_off_without_its_key() {
+        assert!(!ExperimentalRules::for_new_game().strict_initiative);
+        assert!(!ExperimentalRules::before_the_rules_were_saved().strict_initiative);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"fast_ai": true, "no_corpse_garrison": false}"#).unwrap();
+        assert!(!old.strict_initiative);
+        let on = ExperimentalRules { strict_initiative: true, ..Default::default() };
+        let json = serde_json::to_value(on).unwrap();
+        assert_eq!(json["strict_initiative"].as_bool(), Some(true));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), on);
+        assert!(serde_json::to_value(ExperimentalRules::default()).unwrap().get("strict_initiative").is_none(), "an off switch is not written");
+        assert_eq!(on.first_on(), Some("Strict initiative order"));
+        let mut rules = ExperimentalRules::default();
+        rules.set_razdor_preset(true);
+        assert!(rules.is_razdor_preset_on() && rules.strict_initiative);
+        rules.set_razdor_preset(false);
+        assert!(!rules.strict_initiative);
     }
 
     /// A save with the parity keys missing (before them): the six inheritable switches read ON
