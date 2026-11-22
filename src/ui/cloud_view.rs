@@ -454,7 +454,7 @@ pub fn cloud_lines(others: &[SaveEntry], newer: &[SaveEntry]) -> Vec<CloudLine> 
         lines.push(CloudLine::Device(device_title(&group[0].0.meta.device)));
         for (e, locked) in group {
             let name = if e.meta.name.is_empty() { kind_label(e.meta.kind) } else { e.meta.name.clone() };
-            let place = format!("{} · {}", e.meta.map, kind_label(e.meta.kind));
+            let place = e.meta.map.clone();
             lines.push(CloudLine::Save { id: e.id.clone(), name, place, saved_at: e.meta.saved_at, locked });
         }
     }
