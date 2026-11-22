@@ -242,7 +242,7 @@ is `Off`, a blocker that keeps its drag a drag). The registrations of a frame ar
 the slop within 0.25 s of touching down, on a `Pan` or `ScrollRows` area, is a swipe: no click, the map's
 `Frame::pan` (the finger's slide, applied 1:1 by `world_view::pan` on the idle map), or the list's wheel
 steps (one per row, finger up = content up). A finger held still longer first, or outside any area, is
-the held drag as above; taps, double taps and the long press are unchanged. The touchpad mode is an option (`Settings::touchpad`, off by default; below). Gamepads are off
+the held drag as above; taps, double taps and the long press are unchanged. The wheel (`input::mouse_wheel`) is in notches, up positive: X11 gives one a notch, Windows `WM_MOUSEWHEEL`'s raw 120 (miniquad passes it on), which is divided by 120 (`input::wheel_notches`; a player's report, 2026-11-21: one notch ran «Настройки» to its end); the gestures' and the pad's wheel add notches too. The touchpad mode is an option (`Settings::touchpad`, off by default; below). Gamepads are off
 (`--no-default-features --features audio`).
 The screen turns with the device (Android `screenOrientation = fullUser` in `Cargo.toml`,
 following the rotation lock; iOS portrait and landscape in `scripts/dist-ios.sh`'s Info.plist); a

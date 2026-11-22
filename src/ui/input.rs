@@ -428,7 +428,18 @@ pub fn mouse_wheel() -> (f32, f32) {
         return (0.0, 0.0);
     }
     let (x, y) = mq::mouse_wheel();
-    (x, y + with_frame(|f| f.wheel))
+    (wheel_notches(x, RAW_PER_NOTCH), wheel_notches(y, RAW_PER_NOTCH) + with_frame(|f| f.wheel))
+}
+
+/// Windows' wheel units per notch (`WHEEL_DELTA`): miniquad passes `WM_MOUSEWHEEL`'s delta on as is.
+pub const WINDOWS_WHEEL_DELTA: f32 = 120.0;
+
+/// The system's raw wheel units per notch.
+const RAW_PER_NOTCH: f32 = if cfg!(target_os = "windows") { WINDOWS_WHEEL_DELTA } else { 1.0 };
+
+/// The wheel in notches from the system's raw value (`raw_per_notch` units a notch).
+pub fn wheel_notches(raw: f32, raw_per_notch: f32) -> f32 {
+    raw / raw_per_notch
 }
 
 pub fn is_mouse_button_pressed(b: MouseButton) -> bool {
@@ -515,6 +526,24 @@ pub fn pad_key_pressed(k: KeyCode) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_windows_wheel_notch_is_one_notch() {
+        use super::{wheel_notches, WINDOWS_WHEEL_DELTA};
+        // One notch each way, as X11 gives it.
+        assert_eq!(wheel_notches(WINDOWS_WHEEL_DELTA, WINDOWS_WHEEL_DELTA), 1.0);
+        assert_eq!(wheel_notches(-WINDOWS_WHEEL_DELTA, WINDOWS_WHEEL_DELTA), -1.0);
+        // A precise touchpad's part of a notch stays a part.
+        assert_eq!(wheel_notches(30.0, WINDOWS_WHEEL_DELTA), 0.25);
+        assert_eq!(wheel_notches(1.0, 1.0), 1.0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_windows_build_reads_a_notch_as_one() {
+        assert_eq!(super::RAW_PER_NOTCH, super::WINDOWS_WHEEL_DELTA);
+        assert_eq!(super::wheel_notches(-120.0, super::RAW_PER_NOTCH), -1.0);
+    }
+
     #[test]
     fn hints_follow_the_long_press_in_gestures_and_the_touch_hover_elsewhere() {
         use super::hint_shown;

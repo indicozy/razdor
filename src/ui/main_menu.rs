@@ -3101,7 +3101,7 @@ fn pane_begin(view: Rect, step: f32, list_k: f32) -> f32 {
     if most > 0.0 {
         super::widgets::swipe_rows(view, step);
         if crate::ui::widgets::mouse_in(view.x, view.y, view.w, view.h) {
-            scroll = (scroll - wheel() * step).clamp(0.0, most);
+            scroll = pane_wheel_scroll(scroll, wheel(), step, most);
         }
         let bar = Rect::new(view.x + view.w - 24.0 * list_k, view.y, 24.0 * list_k, view.h);
         super::widgets::scrollbar_px(bar, &mut scroll, most, view.h, step);
@@ -3111,6 +3111,11 @@ fn pane_begin(view: Rect, step: f32, list_k: f32) -> f32 {
     phone_clip(Some(view));
     ADV_VIEW.with(|v| v.set(Some(view)));
     view.y - scroll
+}
+
+/// A pane's scroll after `notches` of the wheel (up is positive): `step` px a notch, within `0..=most`.
+fn pane_wheel_scroll(scroll: f32, notches: f32, step: f32, most: f32) -> f32 {
+    (scroll - notches * step).clamp(0.0, most)
 }
 
 /// Ends a pane's scroll view (`pane_begin`): the clip is lifted and the content's height, from the
@@ -4066,6 +4071,17 @@ pub fn close_options_kept() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_wheel_notch_scrolls_the_settings_pane_one_step() {
+        use crate::ui::input::{wheel_notches, WINDOWS_WHEEL_DELTA};
+        // A player's report (Windows, 1.5.4): one notch down in «Настройки» ran the pane to its end.
+        let (step, most) = (30.0, 900.0);
+        let down = wheel_notches(-WINDOWS_WHEEL_DELTA, WINDOWS_WHEEL_DELTA);
+        assert_eq!(pane_wheel_scroll(0.0, down, step, most), step);
+        let up = wheel_notches(WINDOWS_WHEEL_DELTA, WINDOWS_WHEEL_DELTA);
+        assert_eq!(pane_wheel_scroll(2.0 * step, up, step, most), step);
+    }
 
     #[test]
     fn the_bottom_row_scales_down_to_its_room_and_keeps_its_gaps() {
