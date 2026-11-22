@@ -284,9 +284,11 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
   the cloud lands as an ordinary save (approximated: the session slot is one per install, not per map).
   Marks: `rules::marks::Records` (merged in `set_marks`, written by the worker). Synced settings: the
   language (`ui::language::Settings`, settings.json), the speeds, hints, keys and AI strength (`audio.json`);
-  `cloud/synced.json` keeps each key's value and when this device first saw it. Applied at the next start
-  (approximated: the running game keeps its in-memory copy). Hub: the installed items (`installed.json`).
-  Benchmark reports: none pending yet (approximated).
+  `cloud/synced.json` keeps each key's value and when this device first saw it. A pulled value reaches the
+  running game too: `take_cloud_pulled` (each frame) applies it to the in-memory settings and the keymap.
+  Hub: the installed items (`installed.json`). Benchmark reports: each finished run is kept as a pending
+  report (`cloud/bench/<at>.json`, the newest 20); `bench::cloud_report` builds the wire body, and the
+  worker posts it (`sync.rs`).
 - Start: `cloud_store::start_if_on` after the install is loaded, only with an account and the cloud on.
   The worker starts on a thread of its own (the remote config's API list is read there), with
   `platform_net(30)`. Push: on exit (`finish_on_exit` waits up to 4 s), on minimise (the window's focus
@@ -312,5 +314,5 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
   delete|saves|hub-offer` shows made-up states (no worker, no key); `saves` also marks the save files by name
   and lists one made-up newer save.
 
-Not built (approximated or left for later): the benchmark reports; the running game's settings apply at the
-next start.
+Not built (approximated or left for later): the phone's transport (Android and iOS are offline until `http.rs`
+gets one); a cloud session lands as an ordinary save, and the session slot is one per install.
