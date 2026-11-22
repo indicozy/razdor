@@ -1918,8 +1918,7 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bo
     use super::chrome;
     const W: f32 = 634.0;
     const H: f32 = BATTLE_EXIT_H;
-    let art = |name: &str| chrome::win(&format!("{name}Up")).map(|t| (t.width(), t.height()));
-    let (b3, b2, b1) = (art("Btn3").unwrap_or((160.0, 36.0)), art("Btn2").unwrap_or((128.0, 36.0)), art("Btn1").unwrap_or((96.0, 36.0)));
+    let [b1, b2, b3] = chrome::button_art_sizes();
     let (sw, sh) = (screen_width(), screen_height());
     let o = (chrome::k() * 0.9375).min((sw - 12.0) / W).min((sh - chrome::bar_height() - 4.0) / H);
     // Centred between the safe area's sides and between its top and the bar (on the desktop, the
@@ -1980,16 +1979,16 @@ fn battle_exit_window(title: &str, warning: &str, asking: &mut bool, retreat: bo
         items.push(("Btn2", b2.1, tr(n_("Keys")).to_string(), Some(ExitChoice::Keys)));
     }
     items.push(("Btn1", b1.1, own("Buttons", "Cancel", n_("Cancel")), None));
-    // Each label's width on its button, as drawn (`defeat_button_art` at the window's scale), plus a margin.
+    // Each label's width on its button, as drawn (`defeat_button` at the window's scale), plus a margin.
     let needs: Vec<f32> = items.iter().map(|(_, h, label, _)| chrome::marble_label_width(h * o, label) / o + 12.0).collect();
     let row = battle_exit_row(phone, (b3.0, b2.0, b1.0), retreat, true, &needs);
     let mut choice = None;
     let mut cancel = closed;
     let was_asking = *asking;
-    for ((art, bh, label, what), (x, bw)) in items.iter().zip(row.iter()) {
+    for ((_, bh, label, what), (x, bw)) in items.iter().zip(row.iter()) {
         let b = Rect::new(wx + x * o, wy + by * o, bw * o, bh * o);
         let over = !*asking && b.contains(crate::ui::widgets::pointer().into()) && !input_blocked();
-        chrome::defeat_button_art(b, art, label, over && super::input::is_mouse_button_down(MouseButton::Left));
+        chrome::defeat_button(b, label, true, over && super::input::is_mouse_button_down(MouseButton::Left));
         if over && clicked() {
             match what {
                 Some(ExitChoice::Restart) => *asking = true,

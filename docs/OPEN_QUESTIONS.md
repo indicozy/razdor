@@ -905,11 +905,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   strip is Razdor's (the original's strip is an ornament; its hints are hint boxes): the audit
   found it large. A Razdor choice to settle with the owner, not a parity fix.
 
-- **Button art picked by screen width** (2026-10-14). `chrome::defeat_button` and
-  `marble_button` choose Btn1/2/3 by the screen's width, so on large screens a 95-px button is
-  drawn from Btn3. Check which art the original uses for which button size and pick by the
-  button's own size.
-
 - **Scrollbar knob narrower than a finger on phones** (2026-11-02, report 1476). The knob is the
   drawn 24 dp strip (`widgets::scrollbar`, `bar_px`), under the 40 dp touch rule; a press beside it
   misses. The hold-then-drag failure was fixed by `SwipeKind::Grab`. Whether the knob's hit area
