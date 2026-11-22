@@ -193,13 +193,14 @@ without an Android or iOS file gets no offer on that system.
 
 When: 6b exits 1 (the previous release does not update to this one, or its data does not carry over), 6c exits 1
 (the new APK does not install or start over the previous one, or it crashes where the old one does not), or players
-report a broken update or a crash on start. Run it within minutes, then tell the owner.
+report a broken update or a crash on start. Run the dry run at once and send the owner its result (stolik,
+kind "proactive", level "critical"); `--apply` is public, so it runs on the owner's yes.
 
 1. Dry run: `python3 -I tools/release/rollback.py --to vPREV` (vPREV = the release players should be on). It prints
    the two changes: the bad release becomes a pre-release on GitHub (`gh release edit vBAD --prerelease`, so the API
    list the updaters read skips it), and the update feed `releases.json` on the razdor-community Pages is rewritten
    without the bad release. A blocker stops it (exit 1, nothing changed): report it to the owner; do not work around it.
-2. Apply: `python3 -I tools/release/rollback.py --to vPREV --apply`. It writes the feed first (a commit on
+2. Apply, after the owner's yes: `python3 -I tools/release/rollback.py --to vPREV --apply`. It writes the feed first (a commit on
    razdor-community `main`, then a wait until the address serves it), then flips GitHub, then checks that the newest
    published release is vPREV. It prints what it changed; a failure says what may have changed: check the feed and
    the GitHub release by hand.
