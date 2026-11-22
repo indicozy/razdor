@@ -138,7 +138,8 @@ impl App {
         let (installed, catalog) = match razdor::hub::local_dir() {
             Some(local) => {
                 let installed = hub::read_installed(&local);
-                let catalog = Hub { source: Source::from_env(), local }.cached_catalog();
+                // A mod not listed yet (its `visible_from` is later) is not offered.
+                let catalog = Hub { source: Source::from_env(), local }.cached_catalog().map(|c| c.listed_on(super::holiday::today()));
                 (installed, catalog)
             }
             None => (Installed::default(), None),

@@ -351,10 +351,24 @@ pub struct Entry {
     /// Likes and dislikes (👍/👎) on the post it came from, when it came from one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<Rating>,
+    /// The first day the entry is listed, `YYYY-MM-DD` (a local date; the Christmas mod's is 1 December).
+    /// Absent: listed always. The game hides the entry before that day (see [`Entry::visible_on`]); an older
+    /// client ignores the field and lists it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_from: Option<String>,
     pub files: Vec<FileRef>,
 }
 
 impl Entry {
+    /// Whether the entry is listed on `today` (year, month, day): it is when it has no `visible_from`, or when
+    /// `today` is that day or later. The dates are compared as `YYYY-MM-DD` text, which orders them.
+    pub fn visible_on(&self, today: (i64, u32, u32)) -> bool {
+        match &self.visible_from {
+            None => true,
+            Some(day) => format!("{:04}-{:02}-{:02}", today.0, today.1, today.2).as_str() >= day.as_str(),
+        }
+    }
+
     /// The files to install for `lang`: those in that language or with no language; when it
     /// has no file in `lang`, the Russian ones.
     pub fn files_for(&self, lang: &str) -> Vec<&FileRef> {
@@ -512,6 +526,9 @@ impl Catalog {
             if !safe_id(&e.id) || !e.requires.iter().all(|r| safe_id(r)) {
                 return Err(format!("index.json: bad id {:?}", e.id));
             }
+            if e.visible_from.as_deref().is_some_and(|d| !safe_day(d)) {
+                return Err(format!("index.json: {}: bad visible_from {:?}", e.id, e.visible_from));
+            }
             for f in &mut e.files {
                 // A mod's file keeps its place in the mod (`data/units.ini`); a map's is a name.
                 let name_ok = if e.kind == Kind::Mod { safe_rel_name(&f.name) } else { safe_name(&f.name) };
@@ -636,6 +653,13 @@ impl Catalog {
 
     pub fn entry(&self, id: &str) -> Option<&Entry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// The catalog without the entries not listed on `today` (see [`Entry::visible_on`]): what the game offers
+    /// (the lists, the lacking-mod offer). The holiday's own season start reads the whole catalog.
+    pub fn listed_on(mut self, today: (i64, u32, u32)) -> Catalog {
+        self.entries.retain(|e| e.visible_on(today));
+        self
     }
 }
 
@@ -780,6 +804,17 @@ fn safe_location(path: &str) -> bool {
 
 /// A SHA-256 as the catalog spells it: exactly 64 ASCII hex digits, either case. It names
 /// the preview and download files, so nothing else may get into a path.
+/// A day, `YYYY-MM-DD` (digits, a month 1-12 and a day 1-31: the order of the text is the order of the days).
+fn safe_day(day: &str) -> bool {
+    let b = day.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let digits = |s: &[u8]| s.iter().all(u8::is_ascii_digit);
+    let num = |s: &[u8]| s.iter().fold(0u32, |n, c| n * 10 + u32::from(c - b'0'));
+    digits(&b[0..4]) && digits(&b[5..7]) && digits(&b[8..10]) && (1..=12).contains(&num(&b[5..7])) && (1..=31).contains(&num(&b[8..10]))
+}
+
 fn safe_sha256(sum: &str) -> bool {
     sum.len() == 64 && sum.bytes().all(|b| b.is_ascii_hexdigit())
 }
@@ -1878,6 +1913,7 @@ pub mod mock {
                 status_note: Text { ru: note.0.into(), en: note.1.into() },
                 preview: None,
                 picture: None,
+                visible_from: None,
                 base: String::new(),
                 rating: None,
                 files,
@@ -1913,6 +1949,7 @@ pub mod mock {
                 status_note: Text { ru: note.0.into(), en: note.1.into() },
                 preview: None,
                 picture: None,
+                visible_from: None,
                 base: "Community Update 1.2".into(),
                 rating: None,
                 files: vec![f],
@@ -3152,6 +3189,35 @@ mod tests {
         assert_eq!(fs::read(holiday_hover_path(&hub.local)).unwrap(), b"bell");
         assert!(!holiday_hover_path(&hub.local).with_file_name("hover.ogg.part").exists());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A catalog with one mod whose `visible_from` is `extra` (a JSON fragment, `,"visible_from":…` or empty).
+    fn listed_catalog(extra: &str) -> Result<Catalog, String> {
+        Catalog::parse(format!(
+            r#"{{"format":1,"entries":[{{"id":"xmas","kind":"mod","title":{{"ru":"Новый год"}},"author":"a","version":"1","files":[{{"path":"x.zip","name":"x.zip","size":1,"sha256":"3AA411F3AB65A986DD7FDE5ECFBBCB0D399458306678421D4DEFC6B899C550CA","archive":true}}]{extra}}}]}}"#
+        ).as_bytes())
+    }
+
+    #[test]
+    fn an_entry_is_listed_from_its_visible_from_day_and_always_without_it() {
+        let c = listed_catalog("").unwrap();
+        assert!(c.entries[0].visible_from.is_none());
+        assert!(c.entries[0].visible_on((2026, 1, 1)), "no visible_from: listed always");
+
+        let c = listed_catalog(r#","visible_from":"2026-12-01""#).unwrap();
+        let e = &c.entries[0];
+        assert!(!e.visible_on((2026, 11, 30)), "the day before: hidden");
+        assert!(!e.visible_on((2026, 2, 28)), "an earlier month: hidden");
+        assert!(e.visible_on((2026, 12, 1)), "the day itself: listed");
+        assert!(e.visible_on((2027, 1, 5)), "after: listed");
+        assert!(e.visible_on((2026, 12, 31)), "later in the same month: listed");
+    }
+
+    #[test]
+    fn a_bad_visible_from_refuses_the_catalog() {
+        for bad in ["2026-13-01", "2026-00-10", "2026-12-32", "2026/12/01", "1 December", "2026-12-1", ""] {
+            assert!(listed_catalog(&format!(r#","visible_from":"{bad}""#)).is_err(), "{bad:?} is not a day");
+        }
     }
 
     #[test]

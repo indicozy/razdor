@@ -337,16 +337,19 @@ fn kind_label(k: Kind) -> &'static str {
 /// The entry to pick in `c` after its catalog changed: the one picked before when it is still
 /// there, else the first.
 pub fn keep_pick(picked: Option<&str>, c: &Catalog) -> Option<String> {
+    let today = super::holiday::today();
     match picked {
-        Some(p) if c.entry(p).is_some() => Some(p.to_string()),
-        _ => c.entries.first().map(|e| e.id.clone()),
+        Some(p) if c.entry(p).is_some_and(|e| e.visible_on(today)) => Some(p.to_string()),
+        _ => c.entries.iter().find(|e| e.visible_on(today)).map(|e| e.id.clone()),
     }
 }
 
-/// The tab's entries that match the search, best rated first (`hub::by_rating`).
+/// The tab's entries that match the search, best rated first (`hub::by_rating`). An entry not listed yet
+/// (its `visible_from` is later than today) is left out.
 fn shown<'a>(c: &'a Catalog, tab: usize, query: &str) -> Vec<&'a Entry> {
+    let today = super::holiday::today();
     let want = [None, Some(Kind::Map), Some(Kind::Campaign), Some(Kind::Mod)][tab.min(MODS_TAB)];
-    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(c, e, query)).collect();
+    let mut list: Vec<&Entry> = c.entries.iter().filter(|e| e.visible_on(today)).filter(|e| want.is_none_or(|k| e.kind == k)).filter(|e| matches(c, e, query)).collect();
     list.sort_by(|a, b| hub::by_rating(a, b));
     list
 }
