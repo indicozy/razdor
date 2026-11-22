@@ -73,6 +73,9 @@ REMOTE_GAME = "remote-game"  # the game archive, fetched here during publishing 
 GITVERSE_BASE = pages.HOSTS["gitverse"]["base"].rstrip("/")
 GITHUB_BASE = pages.HOSTS["github"]["base"].rstrip("/")
 PREVIEWS = "previews/"
+# The holiday look's files (music, bell, sleigh pictures): bare Pages files here on GitVerse (GitVerse refuses .ogg
+# release assets); their GitHub release copy is the mirror of the bell and the sleigh.
+HOLIDAY_DIR = "holiday/"
 # The community repository's latest release (the app's DEFAULT_SOURCE): its files are the catalog's, bare.
 GITHUB_HUB_RELEASE = "https://github.com/indicozy/razdor-community/releases/latest/download"
 STATE = "gitverse-state.json"
@@ -107,9 +110,20 @@ def ext_of(name):
     return name.rpartition(".")[2].lower() if "." in name else ""
 
 
+def holiday_files(hol):
+    """The holiday's bell and sleigh files (dicts with a `path`), in catalog order. The music is a plain path
+    (the holiday's `music`), not a dict: see refs and gitverse_index."""
+    out = []
+    if isinstance(hol.get("hover"), dict):
+        out.append(hol["hover"])
+    out.extend(f for f in hol.get("sleigh") or [] if isinstance(f, dict))
+    return out
+
+
 def refs(cat):
-    """[(name, role)] of the catalog's files: role "file" (an entry's file) or "picture" (a preview, a map
-    picture, the ad's picture). Remote addresses are not files."""
+    """[(name, role)] of the catalog's files: role "file" (an entry's file), "picture" (a preview, a map
+    picture, the ad's picture) or "holiday" (the holiday look's music, bell and sleigh pictures: bare Pages files
+    under holiday/, see HOLIDAY_DIR). Remote addresses are not files."""
     out = set()
 
     def add(rel, role):
@@ -129,6 +143,11 @@ def refs(cat):
     ad = cat.get("ad")
     if isinstance(ad, dict):
         add(ad.get("image"), "picture")
+    hol = cat.get("holiday")
+    if isinstance(hol, dict):
+        add(hol.get("music"), "holiday")
+        for f in holiday_files(hol):
+            add(f.get("path"), "holiday")
     return sorted(out)
 
 
@@ -151,6 +170,8 @@ def destination(name, role):
     Pages file."""
     if role == "picture":
         return "pages", pages_problem(name)
+    if role == "holiday":
+        return "pages", pages_problem(name)
     if ext_of(name) in ARCHIVE_EXT:
         return "release", gv.name_problem(name)
     return "wrap", gv.name_problem(name + ".zip")
@@ -169,7 +190,7 @@ def plan(cat):
         elif dest == "wrap":
             wrap.append(name)
         else:
-            site[PREVIEWS + name] = name
+            site[(HOLIDAY_DIR if role == "holiday" else PREVIEWS) + name] = name
     return {"release": sorted(release), "wrap": sorted(wrap), "pages": site, "problems": problems}
 
 
@@ -192,6 +213,13 @@ def check_local(folder, cat, names, sha_of):
     ad = cat.get("ad")
     if isinstance(ad, dict) and ad.get("image") in names:
         want[ad["image"]] = (ad.get("size"), ad.get("sha256"))
+    hol = cat.get("holiday")
+    if isinstance(hol, dict):
+        if hol.get("music") in names:
+            want[hol["music"]] = (hol.get("size"), hol.get("sha256"))
+        for f in holiday_files(hol):
+            if f.get("path") in names:
+                want[f["path"]] = (f.get("size"), f.get("sha256"))
     for name in sorted(names):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
@@ -354,6 +382,17 @@ def gitverse_index(cat, links, game=None):
     ad = out.get("ad")
     if isinstance(ad, dict):
         ad["image"] = PREVIEWS + os.path.basename(ad["image"])
+    hol = out.get("holiday")
+    if isinstance(hol, dict):
+        # The holiday's files are GitVerse Pages files (`HOLIDAY_DIR`); the bell and the sleigh's pictures keep the
+        # GitHub release copy as their mirror (the music has no mirror field: its path only).
+        if not str(hol.get("music", "")).startswith("https://"):
+            hol["music"] = GITVERSE_BASE + "/" + HOLIDAY_DIR + hol["music"]
+        for f in holiday_files(hol):
+            name = f["path"]
+            if not name.startswith("https://"):
+                f["path"] = GITVERSE_BASE + "/" + HOLIDAY_DIR + name
+                f["mirrors"] = [GITHUB_HUB_RELEASE + "/" + name]
     game_entry = out.get("game")
     if isinstance(game_entry, dict) and game is not None:
         game_entry["url"] = game["url"]
@@ -416,6 +455,13 @@ def check_index(idx):
     ad = idx.get("ad")
     if isinstance(ad, dict) and not ad["image"].startswith(PREVIEWS):
         raise HubError(f"the ad's picture is not under {PREVIEWS}")
+    hol = idx.get("holiday")
+    if isinstance(hol, dict):
+        if not str(hol.get("music", "")).startswith("https://"):
+            raise HubError("the holiday's music is not an address (its release asset)")
+        for f in holiday_files(hol):
+            if not str(f.get("path", "")).startswith("https://"):
+                raise HubError(f"the holiday's {f.get('name')} is not an address (its release asset)")
 
 
 def write_stage(folder, idx, site, name=STAGE):

@@ -54,12 +54,23 @@ def links_for(cat):
     """The addresses the upload would give, per catalog name: one per release asset (the zip of a wrapped
     file, the file itself for an archive), with the asset's size and SHA-256."""
     out = {}
-    for n, _ in ph.refs(cat):
-        if ph.destination(n, "file")[0] == "release":
+    for n, role in ph.refs(cat):
+        if ph.destination(n, role)[0] == "release":
             out[n] = {"url": f"{ATT}{n[:4]}-uuid", "size": 9, "sha256": "44" * 32}
-        elif ph.destination(n, "file")[0] == "wrap":
+        elif ph.destination(n, role)[0] == "wrap":
             out[n] = {"url": f"{ATT}{n[:4]}-zip", "size": 77, "sha256": "55" * 32}
     return out
+
+
+def holiday_catalog():
+    """The small catalog with the holiday look's music, bell and one sleigh picture (flat names)."""
+    cat = catalog()
+    cat["holiday"] = {
+        "id": "winter", "version": 3, "music": "menu-christmas.ogg", "size": 6, "sha256": "66" * 32, "mod": "mod-x",
+        "hover": {"name": "hover.ogg", "path": "hover-bell.ogg", "size": 7, "sha256": "77" * 32},
+        "sleigh": [{"name": "frame-0.png", "path": "sleigh-frame-0.png", "size": 8, "sha256": "88" * 32}],
+    }
+    return cat
 
 
 class RoutingTests(HermeticTestCase):
@@ -197,6 +208,54 @@ class IndexTests(HermeticTestCase):
         cat["entries"][0]["files"][0]["path"] = "maps/x.dtm"
         with self.assertRaises(ph.HubError):
             ph.refs(cat)
+
+
+class HolidayTests(HermeticTestCase):
+    def test_holiday_files_are_bare_pages_files_under_holiday(self):
+        cat = holiday_catalog()
+        roles = dict(ph.refs(cat))
+        self.assertEqual(roles["menu-christmas.ogg"], "holiday")
+        self.assertEqual(roles["hover-bell.ogg"], "holiday")
+        self.assertEqual(roles["sleigh-frame-0.png"], "holiday")
+        pl = ph.plan(cat)
+        self.assertEqual(pl["pages"]["holiday/menu-christmas.ogg"], "menu-christmas.ogg")
+        self.assertEqual(pl["pages"]["holiday/sleigh-frame-0.png"], "sleigh-frame-0.png")
+        self.assertNotIn("menu-christmas.ogg", pl["release"], "GitVerse refuses .ogg release assets")
+        self.assertEqual(pl["problems"], [])
+
+    def test_a_holiday_file_pages_refuses_is_a_problem(self):
+        cat = holiday_catalog()
+        cat["holiday"]["hover"]["path"] = "hover-bell.zip"
+        self.assertEqual([n for n, _ in ph.plan(cat)["problems"]], ["hover-bell.zip"])
+
+    def test_a_folder_path_in_the_holiday_is_refused(self):
+        cat = holiday_catalog()
+        cat["holiday"]["music"] = "holiday/menu.ogg"
+        with self.assertRaises(ph.HubError):
+            ph.refs(cat)
+        cat = holiday_catalog()
+        cat["holiday"]["sleigh"][0]["path"] = "sleigh/frame-0.png"
+        with self.assertRaises(ph.HubError):
+            ph.refs(cat)
+
+    def test_gitverse_index_points_the_holiday_at_the_pages_site_and_the_bell_has_a_github_mirror(self):
+        cat = holiday_catalog()
+        idx = ph.gitverse_index(cat, links_for(cat))
+        hol = idx["holiday"]
+        self.assertEqual(hol["music"], ph.GITVERSE_BASE + "/holiday/menu-christmas.ogg")
+        self.assertEqual(hol["hover"]["path"], ph.GITVERSE_BASE + "/holiday/hover-bell.ogg")
+        self.assertEqual(hol["hover"]["mirrors"], [ph.GITHUB_HUB_RELEASE + "/hover-bell.ogg"])
+        self.assertEqual(hol["sleigh"][0]["path"], ph.GITVERSE_BASE + "/holiday/sleigh-frame-0.png")
+        self.assertNotIn("wrapped", hol["hover"], "the bell is a bare file")
+        self.assertEqual(cat["holiday"]["music"], "menu-christmas.ogg", "the source catalog is not changed")
+        ph.check_index(idx)
+
+    def test_check_index_refuses_a_holiday_file_that_is_not_an_address(self):
+        cat = holiday_catalog()
+        idx = ph.gitverse_index(cat, links_for(cat))
+        idx["holiday"]["hover"]["path"] = "hover-bell.ogg"
+        with self.assertRaises(ph.HubError):
+            ph.check_index(idx)
 
 
 class StageTests(HermeticTestCase):
