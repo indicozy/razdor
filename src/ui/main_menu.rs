@@ -385,46 +385,60 @@ fn frame_colour(hover: bool) -> Color {
     }
 }
 
-/// A button's word colour. Under the mouse the original's: the words' vertex colour 0xE6E68C, yellowish
-/// (0x4c7dc5). Not under it Razdor's light lilac stays: the original's 0x96AADC (0x4c7e22) is drawn
-/// added over the marble (`BLENDDIFFUSEALPHA` with vertex alpha 0), which Razdor's rimmed words do not do.
+/// A button's word colour, the vertex colour of its quad (0x4c7d40): 0x96AADC, under the mouse the
+/// yellowish 0xE6E68C (0x4c7e22, 0x4c7dc5). The original adds it to what is below ([`word`]).
 fn word_colour(hover: bool) -> Color {
     if hover {
         Color::from_rgba(0xE6, 0xE6, 0x8C, 255)
     } else {
-        Color::new(0.93, 0.90, 1.0, 1.0)
+        Color::from_rgba(0x96, 0xAA, 0xDC, 255)
     }
 }
 
-/// How much bigger than the sheet the words of `SMText_RUS` are drawn.
+/// An English word (Razdor's: the original has only the Russian sheet) is drawn this much bigger
+/// than the Russian words' capital height and widest width below.
 const WORD_SCALE: f32 = 1.05;
 /// The engraved words' capital height and the widest word's width (sheet pixels of
 /// `SMText_RUS`: «Н» of «Новая Игра» is 16 rows, «Н» of «Настройки» 15; «Новая Игра» 124
 /// columns): an English word is drawn as tall, and at most as wide.
 const WORD_CAP: f32 = 15.5;
 const WORD_WIDTH: f32 = 124.0;
-/// The dark rim round a word (video pixels).
+/// The dark rim round an English word (video pixels).
 const WORD_RIM: f32 = 1.5;
 const WORD_EDGE: Color = Color::new(0.12, 0.05, 0.25, 0.8);
 
-/// The button's word: its row of `SMText_RUS` in Russian, else the text, as large and with
-/// the same rim.
+/// The original's word quad on its 1024 × 768 screen (loaded at 0x4dd6e1…, the loop over 0x65a2c0):
+/// 138 × 25.875 px (0x48c4c0 with 0x41cf0000, 0x430a0000), its left 45 px and top 35 px inside the
+/// oval's frame (x 442.5 against the frame's 397.5, y 234.5 + 98 · i against 199.5 + 98 · i), the
+/// sheet's whole width and a band of 0.1875 of the texture's height per word. The texture is the
+/// picture padded to a power of two (the frames' quad takes u 0.890625 of `mb2.ugs`, 228 of 256), so
+/// for `SMText_RUS` (128 × 120 in a 128 × 128 texture) a band is 24 rows: the five words at rows 4,
+/// 27, 51, 75 and 99 each sit in their own 24.
+const ORIGINAL_WORD: (f32, f32, f32, f32) = (45.0, 35.0, 138.0, 25.875);
+const ORIGINAL_WORD_BAND: f32 = 0.1875;
+
+/// Where a button's word is drawn (row `i` of a `sheet` of (width, height) texels) for the button centred at
+/// `c`, at `k` screen px per video px: (the band of the sheet, the screen rect), as the original's quad
+/// ([`ORIGINAL_WORD`]): the frame's left and top as `oval_picture` places it (114 and 46 original px
+/// from the centre), then the word's offset and size inside it.
+fn word_quad(i: usize, c: Vec2, k: f32, sheet: (f32, f32)) -> (Rect, Rect) {
+    let u = k * VIDEO_PER_ORIGINAL;
+    let (dx, dy, w, h) = ORIGINAL_WORD;
+    let dst = Rect::new(c.x - 114.0 * u + dx * u, c.y - 46.0 * u + dy * u, w * u, h * u);
+    let band = (sheet.1 as u32).next_power_of_two() as f32 * ORIGINAL_WORD_BAND;
+    (Rect::new(0.0, i as f32 * band, sheet.0, band), dst)
+}
+
+/// A button's word as the original draws it (0x4c7d40, after the frames): one quad of `SMText_RUS`
+/// ([`word_quad`]), no rim, filtered LINEAR (0x4c7e65), the texture times the vertex colour
+/// ([`word_colour`]) with vertex alpha 0 under `BLENDDIFFUSEALPHA` and `ONE / INVSRCALPHA`: added to
+/// what is below. Without the Russian sheet (English) Razdor's engraved text, in the same colours.
 fn word(i: usize, label: &str, c: Vec2, hover: bool, k: f32) {
     let color = word_colour(hover);
-    let sheet = (i18n::lang() == Lang::Ru).then(|| chrome::win_fx("SMText_RUS", Fx::Glow)).flatten();
-    match sheet {
+    match (i18n::lang() == Lang::Ru).then(|| chrome::win("SMText_RUS")).flatten() {
         Some(t) => {
-            let rh = t.height() / BUTTONS.len() as f32;
-            let src = Rect::new(0.0, i as f32 * rh, t.width(), rh);
-            let (w, h) = (t.width() * WORD_SCALE * k, rh * WORD_SCALE * k);
-            let dst = Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h);
-            // A dark rim, then the word.
-            chrome::filtered(layer_filter(Layer::Words), || {
-                for (dx, dy) in [(-WORD_RIM, 0.0), (WORD_RIM, 0.0), (0.0, -WORD_RIM), (0.0, WORD_RIM)] {
-                    chrome::tex_src(&t, src, Rect::new(dst.x + dx * k, dst.y + dy * k, dst.w, dst.h), WORD_EDGE);
-                }
-                chrome::tex_src(&t, src, dst, color);
-            });
+            let (src, dst) = word_quad(i, c, k, (t.width(), t.height()));
+            chrome::additive_filtered(layer_filter(Layer::Words), || chrome::tex_src(&t, src, dst, color));
         }
         None => {
             let box_ = (WORD_CAP * WORD_SCALE * k, WORD_WIDTH * WORD_SCALE * k);
@@ -4257,11 +4271,29 @@ mod tests {
         assert_eq!((h.r, h.g, h.b, h.a), (196.0 / 255.0, 196.0 / 255.0, 196.0 / 255.0, 0.0));
     }
 
-    /// The word under the mouse is the original's yellowish 0xE6E68C (0x4c7dc5).
+    /// The words' colours are the original's: 0x96AADC, under the mouse 0xE6E68C (0x4c7e22, 0x4c7dc5).
     #[test]
-    fn the_word_under_the_mouse_is_the_originals_yellow() {
+    fn the_words_are_the_originals_colours() {
+        assert_eq!(word_colour(false), Color::from_rgba(0x96, 0xAA, 0xDC, 255));
         assert_eq!(word_colour(true), Color::from_rgba(0xE6, 0xE6, 0x8C, 255));
-        assert_ne!(word_colour(false), word_colour(true));
+    }
+
+    /// A word's quad is the original's (0x4dbb0c, the loop over 0x65a2c0): 138 × 25.875 original px,
+    /// 45 and 35 px inside the frame, and its band of `SMText_RUS` (128 × 120, a 128 × 128 texture) is
+    /// 24 rows, so each word is whole and none of its neighbours shows.
+    #[test]
+    fn a_word_is_the_originals_quad_and_its_own_band_of_the_sheet() {
+        let c = vec2(500.0, 300.0);
+        let (src, dst) = word_quad(2, c, 1.0 / VIDEO_PER_ORIGINAL, (128.0, 120.0));
+        assert_eq!(src, Rect::new(0.0, 48.0, 128.0, 24.0));
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert!(close(dst.x, c.x - 69.0) && close(dst.y, c.y - 11.0), "{dst:?}");
+        assert!(close(dst.w, 138.0) && close(dst.h, 25.875), "{dst:?}");
+        // The five words' rows in the sheet (first and last row with ink): each inside its band.
+        for (i, (first, last)) in [(4.0, 23.0), (27.0, 46.0), (51.0, 70.0), (75.0, 94.0), (99.0, 117.0)].into_iter().enumerate() {
+            let (src, _) = word_quad(i, c, 1.0, (128.0, 120.0));
+            assert!(src.y <= first && last + 1.0 <= src.y + src.h, "word {i}: {src:?}");
+        }
     }
 
     #[test]
