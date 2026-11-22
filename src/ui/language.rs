@@ -265,6 +265,14 @@ pub fn set(data: Option<String>) {
     state(|s| s.data = data);
 }
 
+/// A language pulled from the cloud (its code, as `code_of` writes it): the running game switches to
+/// it when it is installed here; otherwise it stays as it is (the file keeps the code).
+pub fn apply_pulled_code(code: &str) {
+    if let Some(c) = choices().into_iter().find(|c| code_of(c.data.as_deref()) == code) {
+        set(c.data);
+    }
+}
+
 /// At startup: sets the saved language, or the system's when none is saved (a translation is
 /// checked once the install is known, [`set_install`]).
 pub fn init() {

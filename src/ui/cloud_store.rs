@@ -340,13 +340,19 @@ impl Local for Store {
         let mut s = Settings::load();
         let mut chosen = Chosen::load();
         let mut seen = SyncState::load();
+        let mut pulled = Vec::new();
         for (key, v) in settings.values {
             apply_synced(&mut s, &mut chosen, &key, &v.value);
+            pulled.push((key.clone(), v.value.clone()));
             seen.values.insert(key, Seen { value: v.value, changed_at: v.changed_at });
         }
         s.save();
         chosen.save();
         seen.save();
+        // The running game takes the same values (`ui::audio`), or its next save writes the old ones back.
+        if let Ok(mut q) = PULLED.lock() {
+            q.extend(pulled);
+        }
     }
 
     fn hub(&self) -> HubList {
@@ -374,13 +380,57 @@ impl Local for Store {
         }
     }
 
-    // Approximated: the benchmark reports are not kept as pending files yet (`bench`), so none is sent.
     fn bench_pending(&self) -> Vec<BenchReport> {
-        Vec::new()
+        let Some(dir) = bench_dir() else { return Vec::new() };
+        let mut out: Vec<BenchReport> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| std::fs::read(e.path()).ok())
+            .filter_map(|b| serde_json::from_slice(&b).ok())
+            .collect();
+        out.sort_by_key(|r: &BenchReport| r.at);
+        out
     }
 
-    fn bench_sent(&mut self, _at: u64) {}
+    fn bench_sent(&mut self, at: u64) {
+        if let Some(dir) = bench_dir() {
+            let _ = std::fs::remove_file(dir.join(format!("{at}.json")));
+        }
+    }
 }
+
+/// The folder of the benchmark reports not sent yet (`cloud/bench`, one JSON file each, named by its time).
+fn bench_dir() -> Option<PathBuf> {
+    cloud_dir().map(|d| d.join("bench"))
+}
+
+/// Keeps a finished benchmark report until the cloud sends it (`Store::bench_pending`). The newest
+/// `BENCH_KEEP` are kept; a report made in the same second takes the next free time.
+pub fn bench_finished(report: &BenchReport) {
+    let Some(dir) = bench_dir() else { return };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let mut at = report.at;
+    while dir.join(format!("{at}.json")).exists() {
+        at += 1;
+    }
+    let mut report = report.clone();
+    report.at = at;
+    if let Ok(text) = serde_json::to_vec(&report) {
+        let _ = std::fs::write(dir.join(format!("{at}.json")), text);
+    }
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    files.sort();
+    let extra = files.len().saturating_sub(BENCH_KEEP);
+    for old in files.into_iter().take(extra) {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
+/// How many benchmark reports wait for the cloud at most.
+const BENCH_KEEP: usize = 20;
 
 /// Another device's installed Hub list, kept for «Установить то же самое?» (the offer is not shown yet).
 pub static HUB_OFFER: Mutex<Option<HubList>> = Mutex::new(None);
@@ -431,10 +481,28 @@ pub fn synced_values(s: &Settings, chosen: &Chosen) -> BTreeMap<String, String> 
     out
 }
 
+/// Settings pulled from the cloud and not yet applied to the running game (`(key, JSON value)`),
+/// taken on the main thread by [`take_pulled`].
+static PULLED: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+
+/// The synced settings a pull wrote since the last call (the main thread applies them to the
+/// running game, see `ui::audio::Audio::take_cloud_pulled`).
+pub fn take_pulled() -> Vec<(String, String)> {
+    PULLED.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
+}
+
 /// Writes one synced value into the settings (a value that does not read is ignored).
 pub fn apply_synced(s: &mut Settings, chosen: &mut Chosen, key: &str, value: &str) {
+    if key == "language" {
+        set_json(value, &mut chosen.language);
+    } else {
+        apply_synced_audio(s, key, value);
+    }
+}
+
+/// The synced values kept in the audio settings (everything but the language).
+pub fn apply_synced_audio(s: &mut Settings, key: &str, value: &str) {
     match key {
-        "language" => set_json(value, &mut chosen.language),
         "anim_speed" => set_json(value, &mut s.anim_speed),
         "walk_speed" => set_json(value, &mut s.walk_speed),
         "scroll_speed" => set_json(value, &mut s.scroll_speed),

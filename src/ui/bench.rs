@@ -967,7 +967,43 @@ pub fn save(report: &Report) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(file_name(epoch));
     std::fs::write(&path, report_text(report)).map_err(|e| e.to_string())?;
+    // The cloud keeps the report pending until it is sent (`ui::cloud_store`); nothing is sent here.
+    super::cloud_store::bench_finished(&cloud_report(report, epoch));
     Ok(path)
+}
+
+/// The report as the cloud carries it (`razdor_wire::cloud::BenchReport`): the device, the settings
+/// as the setup lines, and each cell's median and 99th-percentile frame time.
+pub fn cloud_report(r: &Report, at: u64) -> razdor_wire::cloud::BenchReport {
+    let device = razdor_wire::analytics::DeviceInfo {
+        os: r.device.os.clone(),
+        os_version: String::new(),
+        gpu: r.device.gpu.clone(),
+        gpu_driver: String::new(),
+        cpu_cores: std::thread::available_parallelism().map_or(1, |n| n.get() as u32),
+        ram_mb: 0,
+        screen_w: r.device.screen.0,
+        screen_h: r.device.screen.1,
+        scale_pct: 100,
+        phone: None,
+    };
+    razdor_wire::cloud::BenchReport {
+        schema: razdor_wire::SCHEMA,
+        razdor: r.device.version.clone(),
+        at,
+        device,
+        settings: r.setup.iter().enumerate().map(|(i, line)| (format!("setup{i}"), line.clone())).collect(),
+        scenes: r
+            .cells
+            .iter()
+            .map(|c| razdor_wire::cloud::BenchScene {
+                name: c.name.clone(),
+                median_ms: c.stats.frame_med,
+                p99_ms: c.stats.frame_p99,
+                frames: c.stats.frames as u32,
+            })
+            .collect(),
+    }
 }
 
 /// Records the saved file (or why it failed) and the clipboard's answer on the shown report.

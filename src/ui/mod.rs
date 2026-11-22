@@ -1052,6 +1052,7 @@ impl App {
         if !self.help && !cuts_wait && keymap::listening().is_none() && hotkeys::shortcuts_allowed(self.guard()) && is_key_pressed(keymap::key(Action::Music)) {
             self.audio.settings.music_muted = !self.audio.settings.music_muted;
         }
+        self.audio.take_cloud_pulled();
         let mood = self.mood();
         self.audio.frame(mood);
     }

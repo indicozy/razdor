@@ -2337,6 +2337,32 @@ fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, hel
     (scroll_button(r, value, geo.btn_size), r)
 }
 
+/// A settings row whose value is plain text, not a button (the cloud's state): beside the label when
+/// both fit, else under it, left-aligned. Its «?» help sits at the right, as in [`labelled_row_help`].
+fn value_text_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: Option<&'static str>) {
+    let help_w = if help.is_some() { help_size(geo) + geo.gap } else { 0.0 };
+    let vw = measure(value, geo.size).width;
+    let lw = measure(label, geo.size).width;
+    let room = c.w - help_w - 10.0 * geo.k;
+    let top = c.y;
+    let beside = lw + vw + 10.0 * geo.k <= room;
+    let help_y = if beside {
+        let base = top + geo.row_h / 2.0 + geo.size * 0.36;
+        chrome::shadow_text(label, c.x, base, geo.size, chrome::CREAM);
+        chrome::shadow_text(value, c.x + c.w - help_w - vw, base, geo.size, chrome::CREAM);
+        c.y += geo.row_h + geo.gap;
+        top + (geo.row_h - help_size(geo)) / 2.0
+    } else {
+        chrome::shadow_text(label, c.x, top + geo.size * 0.9, geo.size, chrome::CREAM);
+        chrome::shadow_text(value, c.x, top + geo.lh + geo.size * 0.9, geo.size, chrome::CREAM);
+        c.y += 2.0 * geo.lh + geo.gap;
+        top + (geo.lh - help_size(geo)) / 2.0
+    };
+    if let Some(text) = help {
+        help_button(c, geo, help_y, text);
+    }
+}
+
 /// One row of a settings pane (the same widgets the settings window had them in).
 fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings, over_map: bool) {
     let yes_no = |on: bool| -> &'static str {
@@ -2909,7 +2935,7 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         }
         Row::CloudState => {
             let v = super::cloud_view::view();
-            labelled_row_help(c, geo, tr("Cloud state"), &v.state, Some(tr("The cloud holds 20 MB per account: delete old saves to upload new ones.")));
+            value_text_row(c, geo, tr("Cloud state"), &v.state, Some(tr("The cloud holds 20 MB per account: delete old saves to upload new ones.")));
         }
         Row::CloudSpace => {
             let v = super::cloud_view::view();

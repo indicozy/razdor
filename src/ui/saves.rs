@@ -869,16 +869,23 @@ impl Book {
                 };
                 super::dt_font::legacy_metrics_if(grown, || super::chrome::shadow_centered(&ellipsize(&row.scenario, 250.0 * k, size), cx, r.y + lh * 0.42, size, lit(SCENARIO_INK)));
             });
+            // The time is centred, but cut (with an ellipsis) before the marks at either edge: the pin
+            // and the cloud mark on the left, the arrows and the delete sign of the selected row on the right.
+            let mark = 18.0 * k * self.grow;
+            let time_centre = self.p(437.0, 0.0).x;
+            let left_edge = 6.0 * k + if row.pinned { mark + 4.0 * k } else { 0.0 } + if row.cloud.is_some() { mark + 4.0 * k } else { 0.0 };
+            let right_edge = 6.0 * k + if selected == Some(i) { 2.0 * 22.0 * k * self.grow + 10.0 * k + mark + 4.0 * k } else { 0.0 };
+            let time_room = (2.0 * (time_centre - r.x - left_edge)).min(2.0 * (r.x + r.w - right_edge - time_centre)).min(250.0 * k).max(0.0);
             super::dt_font::with_face(super::dt_font::Face::Body, || {
                 let normal = 11.0 * k;
                 let (size, grown) = match self.upright {
                     Some(u) => (u.sp(13.0), true),
                     None => {
-                        let size = super::new_game::row_text_size(&row.time, normal, grow, 250.0 * k);
+                        let size = super::new_game::row_text_size(&row.time, normal, grow, time_room);
                         (size, size > normal)
                     }
                 };
-                super::dt_font::legacy_metrics_if(grown, || super::chrome::shadow_centered(&ellipsize(&row.time, 250.0 * k, size), cx, r.y + lh * 0.9, size, lit(TIME_INK)));
+                super::dt_font::legacy_metrics_if(grown, || super::chrome::shadow_centered(&ellipsize(&row.time, time_room, size), time_centre, r.y + lh * 0.9, size, lit(TIME_INK)));
             });
             // Keep the play mark above long save names and the selected row highlight.
             if selected == Some(i) {

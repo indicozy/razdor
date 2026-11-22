@@ -3,8 +3,8 @@
 
 Cloud saves = Облачные сохранения
 Cloud state = Состояние облака
-Sync now = Синхронизировать сейчас
-Sync = Синхронизировать
+Sync now = Синхронизировать
+Sync = Сейчас
 Link a device = Привязать устройство
 Enter a code = Ввести код
 Enter… = Ввести…

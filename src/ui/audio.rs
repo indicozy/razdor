@@ -959,6 +959,22 @@ impl Audio {
         razdor::diag!("audio: the default output is now {id}: {}", if ok { "the sounds moved to it" } else { "silent; tried again later" });
     }
 
+    /// The synced settings a cloud pull wrote to the files take effect in the running game too: the
+    /// next save would otherwise write this copy's old values back. The save of the frame writes
+    /// the result (`saved` stays as it was, so an unsaved change of this copy is kept).
+    pub fn take_cloud_pulled(&mut self) {
+        for (key, value) in super::cloud_store::take_pulled() {
+            if key == "language" {
+                super::language::apply_pulled_code(&value);
+            } else {
+                super::cloud_store::apply_synced_audio(&mut self.settings, &key, &value);
+                if key == "keys" {
+                    super::keymap::load(&self.settings.keys);
+                }
+            }
+        }
+    }
+
     /// Plays this frame's cues and keeps the music of `mood` going.
     pub fn frame(&mut self, mood: Mood) {
         self.follow_output();
