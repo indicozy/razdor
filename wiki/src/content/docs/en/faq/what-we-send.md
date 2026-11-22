@@ -12,9 +12,9 @@ exception is the daily ping (see below).
 
 **The daily ping** (always sent, no consent needed). It holds nothing about you:
 
-- the Razdor version and the platform (Windows, Linux, macOS, Android, iOS);
-- the game or mod: DT, Community Update, Evolution, or the mod's name;
-- the interface language;
+- the Razdor version and the platform (Windows, Linux, macOS, Android, iOS).
+- the game or mod: DT, Community Update, Evolution, or the mod's name.
+- the interface language.
 - a random install ID. It is made at the first start and is not tied to the device.
 
 The server does not keep your IP address. It works out only the country from it and drops the address at once.

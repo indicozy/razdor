@@ -71,3 +71,14 @@ Columns: `snapshot_utc,repo,tag,published_at,platform,downloads,approx`.
 
 The CSV holds the counts of the owner's players. It lives outside the repository and is never
 committed.
+
+## Analytics scripts
+
+- `verify_battles.py`: pulls the pending battles (`GET /v1/battles/pending`), runs `razdor-verify` on each
+  and posts the verdict. The server takes `ok` or `suspicious` only, so an `unverified` battle (a mod's,
+  or «Максимум» on the enemy side) is posted as `suspicious` with an `unverified:` reason. Needs
+  `RAZDOR_ADMIN_TOKEN`; `--dry-run` prints the verdicts and posts nothing.
+- `digest.py`: reads `/admin/api/summary.json` and sends the weekly digest with `tg-notify --silent`
+  (`--dry-run` prints it, `--file` reads a saved summary).
+
+Their unit tests: `python3 -I -m unittest discover -s tools/stats -p 'test_*.py'`.

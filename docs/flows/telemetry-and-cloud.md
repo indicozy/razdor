@@ -216,8 +216,11 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 ### Battle records: what is not verified
 
 The record is packed and read back in the tests (`file::read_cut`), and the
-capture is tested with synthetic starts (`hook::tap_tests`). Nothing ran a real battle through the verifier:
-whether the record replays with the real engine is the verifier's check (it needs an install). Open points:
+capture is tested with synthetic starts (`hook::tap_tests`). The verifier (`razdor-verify`, `telemetry::verify`)
+replays a battle on the owner's install: its test plays a real battle and checks the honest record, a changed
+result and an illegal act (it needs `RAZDOR_DT_DIR`). It reads the battle as `GET /v1/battles/{id}` returns it;
+the server checked the record's hash on ingest, so the verifier does not. `tools/stats/verify_battles.py` runs it
+on the pending battles and posts the verdicts. Open points:
 `mod_hash` is always none (the client keeps no hub mod hash); the reload tag is set when a save is loaded
 while a battle is open; whether the battle screen can load a save at all was not checked, so the tag may never be sent;
 the hour cap counts only the items queued for one boundary, so backlog from earlier hours that retries into

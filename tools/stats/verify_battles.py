@@ -103,7 +103,12 @@ def main(argv=None):
     os.makedirs(scratch, exist_ok=True)
     counts = {"ok": 0, "suspicious": 0, "unverified": 0, "failed": 0}
     try:
-        for battle_id in pending(server, token, args.limit):
+        try:
+            ids = pending(server, token, args.limit)
+        except (urllib.error.URLError, ValueError) as e:
+            print(f"the server did not list the pending battles: {e}", file=sys.stderr)
+            return 1
+        for battle_id in ids:
             path = os.path.join(scratch, battle_id + ".bin")
             try:
                 with open(path, "wb") as f:
