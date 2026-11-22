@@ -45,7 +45,7 @@ impl Glue {
     }
 }
 
-thread_local! {
+razdor::local! {
     static GLUE: RefCell<Option<Glue>> = const { RefCell::new(None) };
 }
 

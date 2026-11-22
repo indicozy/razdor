@@ -45,7 +45,7 @@ struct Glue {
     reloaded: bool,
 }
 
-thread_local! {
+razdor::local! {
     static TRACKER: RefCell<Option<Tracker>> = const { RefCell::new(None) };
     static GLUE: RefCell<Glue> = RefCell::new(Glue::default());
 }
