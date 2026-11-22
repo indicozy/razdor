@@ -176,7 +176,7 @@ impl Validate for SavePut {
 }
 
 /// A map's completed-game level (`marks.rs`'s level, snake case on the wire).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MarkLevel {
     Green,
@@ -184,6 +184,22 @@ pub enum MarkLevel {
     Grey,
     Yellow,
     Red,
+}
+
+/// An unknown level name (one from a newer build) reads as yellow, the safe «not clean» level, so one
+/// unknown mark never drops the whole marks file or the other maps' marks.
+impl<'de> Deserialize<'de> for MarkLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Any JSON value, not only a string: an odd level must not fail the whole document.
+        let name = serde_json::Value::deserialize(deserializer)?;
+        Ok(match name.as_str() {
+            Some("green") => MarkLevel::Green,
+            Some("fixes") => MarkLevel::Fixes,
+            Some("grey") => MarkLevel::Grey,
+            Some("red") => MarkLevel::Red,
+            _ => MarkLevel::Yellow,
+        })
+    }
 }
 
 /// One map's record: its level, the date, and the game's own mark JSON (`RunMark`), opaque here.
@@ -326,5 +342,24 @@ impl Validate for BenchReport {
             check::number("frames", u64::from(s.frames), 10_000_000)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A level from a newer build reads as yellow (not clean), and the other maps' marks still parse.
+    #[test]
+    fn an_unknown_mark_level_reads_yellow_and_keeps_the_others() {
+        let text = r#"{"schema":1,"updated_at":5,"maps":{
+            "one":{"level":"green","date":"2026-01-01","mark":{}},
+            "two":{"level":"from_the_future","date":"2026-01-02","mark":{}},
+            "three":{"level":"fixes","date":"2026-01-03","mark":{}}}}"#;
+        let marks: Marks = serde_json::from_str(text).expect("one unknown level drops no marks");
+        assert_eq!(marks.maps["one"].level, MarkLevel::Green);
+        assert_eq!(marks.maps["two"].level, MarkLevel::Yellow);
+        assert_eq!(marks.maps["three"].level, MarkLevel::Fixes);
+        assert_eq!(serde_json::to_string(&MarkLevel::Fixes).unwrap(), "\"fixes\"");
     }
 }

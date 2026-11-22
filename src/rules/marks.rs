@@ -12,8 +12,24 @@ use serde::{Deserialize, Serialize};
 
 use super::save;
 
+/// A level name this build does not know (one from a newer build, in a file or a cloud payload)
+/// reads as yellow, the safe «not clean» level, so one unknown mark never drops the other marks.
+impl<'de> Deserialize<'de> for Level {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Any JSON value, not only a string: an odd level must not fail the whole file.
+        let name = serde_json::Value::deserialize(deserializer)?;
+        Ok(match name.as_str() {
+            Some("green") => Level::Green,
+            Some("fixes") => Level::Fixes,
+            Some("grey") => Level::Grey,
+            Some("red") => Level::Red,
+            _ => Level::Yellow,
+        })
+    }
+}
+
 /// The mark's colour, best first. The order is how bad it is: the worst mark is the greatest.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Level {
     /// No cheat, no experimental rule, every gameplay setting the original's. A run whose history
@@ -24,7 +40,8 @@ pub enum Level {
     Fixes,
     /// A gameplay setting that is not the original's.
     Grey,
-    /// A cheat (an experimental «Читы» switch) is on.
+    /// A cheat (an experimental «Читы» switch) is on. Also what an unknown level name reads as
+    /// (see the `Deserialize` impl above).
     Yellow,
     /// A cheat was used.
     Red,
@@ -286,6 +303,20 @@ mod tests {
         let back = Records::from_json(&records.to_json());
         assert_eq!(back.get("four").unwrap().mark.level, Level::Fixes);
         assert!(records.to_json().contains("\"fixes\""));
+    }
+
+    /// A level name this build does not know (from a newer build) reads as yellow, the safe «not
+    /// clean» level, and the other maps' marks still load: one unknown name drops no mark.
+    #[test]
+    fn an_unknown_level_reads_yellow_and_keeps_the_other_marks() {
+        let text = r#"{"maps":{"one":{"mark":{"level":"green","reason":"Honest"},"date":"2026-01-01"},
+            "two":{"mark":{"level":"sparkly","reason":{"Rule":"Future rule"}},"date":"2026-01-02"},
+            "three":{"mark":{"level":"fixes","reason":{"Rule":"Bless once a turn"}},"date":"2026-01-03"}}}"#;
+        let records = Records::from_json(text);
+        assert_eq!(records.get("one").unwrap().mark.level, Level::Green, "a clean mark survives");
+        assert_eq!(records.get("two").unwrap().mark.level, Level::Yellow, "an unknown level is not clean");
+        assert_eq!(records.get("three").unwrap().mark.level, Level::Fixes);
+        assert!(Records::from_json("not json").maps.is_empty(), "a broken file is still no marks");
     }
 
     #[test]
