@@ -367,6 +367,13 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     } else {
         draw_ellipse_lines(c.x, c.y, size.x / 2.0, size.y / 2.0, 0.0, 3.0, if hover { chrome::GOLD } else { chrome::SILVER });
     }
+    // The holiday look only: its snow is bright under the buttons, and the hovered button's light
+    // (added to the frame and to the word) turns it to white. A dark plate under the light keeps the
+    // word readable there. Razdor's, not the original's: the original's backdrop is dark, so vanilla
+    // draws nothing here.
+    if hover && super::holiday::on() {
+        chrome::multiply(|| draw_ellipse(c.x, c.y, size.x * 0.42, size.y * 0.42, 0.0, Color::new(0.55, 0.55, 0.55, 1.0)));
+    }
     word(i, label, c, hover, k);
     if pressed {
         cue(Cue::MenuPress);

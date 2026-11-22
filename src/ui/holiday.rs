@@ -95,7 +95,10 @@ pub fn set_running_mod(active: Option<&str>) {
         .and_then(|c| c.holiday)
         .and_then(|h| h.mod_id);
     let before = on();
-    MOD_RUNNING.set(is_christmas_mod(active, christmas.as_deref()));
+    // `RAZDOR_SCENE_HOLIDAY_MOD=1` (a snapshot aid only): the Christmas mod counts as played, since a
+    // snapshot run has no hub catalog (its source is the mock) to name it.
+    let forced = std::env::var("RAZDOR_SCENE_HOLIDAY_MOD").is_ok_and(|v| v == "1");
+    MOD_RUNNING.set(forced || is_christmas_mod(active, christmas.as_deref()));
     if PLAYED.with(|p| p.borrow().as_deref() != active) {
         PLAYED.with(|p| *p.borrow_mut() = active.map(str::to_owned));
         GENERATION.set(GENERATION.get() + 1);
