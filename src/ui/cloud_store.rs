@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use razdor::cloud::account;
-use razdor::cloud::http::Curl;
 use razdor::cloud::sync::{Local, LocalSave};
 use razdor::cloud::{Cloud, Job};
 use razdor::rules::marks::{Level, Record, RunMark, Records};
@@ -144,7 +143,7 @@ fn start_worker() {
     let spawned = std::thread::Builder::new().name("razdor-cloud-start".into()).spawn(|| {
         let Some(dir) = cloud_dir() else { return };
         let Some(base) = razdor::remote_config::api().into_iter().next() else { return };
-        let cloud = Cloud::start(Box::new(Store), Arc::new(Curl { seconds: 20 }), &base, dir);
+        let cloud = Cloud::start(Box::new(Store), razdor::cloud::http::platform_net(30), &base, dir);
         let mut queue = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
         let _ = CLOUD.set(cloud);
         if let Some(c) = CLOUD.get() {
