@@ -1133,6 +1133,39 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_report_becomes_a_valid_cloud_body() {
+        use razdor_wire::Validate;
+        let cell = |id: &str, name: &str| CellResult {
+            id: id.into(),
+            name: name.into(),
+            view: "25d",
+            stats: stats(&[(1.0, 10.0), (2.0, 20.0), (3.0, 30.0)], 0.5, 12.0, None),
+            stages: None,
+            motion: None,
+        };
+        let r = Report {
+            choice: Choice::Mine,
+            device: fake_device(),
+            map: "demo".into(),
+            cells: vec![cell("mine.near", "Мои настройки, ближе"), cell("mine.far", "Мои настройки, дальше")],
+            file: None,
+            copied: false,
+            error: None,
+            setup: vec!["Vsync: device".into(), "Экран: 1920x1080".into()],
+        };
+        let body = cloud_report(&r, 1_700_000_000);
+        assert!(body.validate().is_ok(), "the game's own report passes the server's checks");
+        assert_eq!((body.razdor.as_str(), body.at), (r.device.version.as_str(), 1_700_000_000));
+        assert_eq!(body.settings.get("setup1").map(String::as_str), Some("Экран: 1920x1080"));
+        assert_eq!(body.scenes.len(), 2);
+        assert_eq!((body.scenes[0].name.as_str(), body.scenes[0].median_ms, body.scenes[0].p99_ms), ("Мои настройки, ближе", 20.0, 30.0));
+        assert_eq!(body.scenes[0].frames, 3);
+        let mut broken = body.clone();
+        broken.scenes[0].median_ms = f32::NAN;
+        assert!(broken.validate().is_err(), "a NaN frame time is refused before it is sent");
+    }
+
+    #[test]
     fn percentiles_are_nearest_rank() {
         let v: Vec<f32> = (1..=100).map(|n| n as f32).collect();
         assert_eq!(percentile(&v, 0.5), 50.0);

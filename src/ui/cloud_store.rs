@@ -610,6 +610,31 @@ mod tests {
     }
 
     #[test]
+    fn pulled_settings_apply_to_the_running_settings_and_come_back_the_same() {
+        let (mut src, chosen) = (Settings::default(), Chosen::default());
+        apply_synced_audio(&mut src, "anim_speed", "0.5");
+        apply_synced_audio(&mut src, "ai_strength", "[true,false]");
+        let mut dst = Settings::default();
+        for (key, value) in synced_values(&src, &chosen) {
+            if key != "language" {
+                apply_synced_audio(&mut dst, &key, &value);
+            }
+        }
+        assert_eq!((dst.anim_speed, dst.expert_ai, dst.max_ai), (Some(0.5), Some(true), false));
+        assert_eq!(synced_values(&dst, &chosen), synced_values(&src, &chosen));
+        apply_synced_audio(&mut dst, "no_such_key", "1");
+        assert_eq!(synced_values(&dst, &chosen), synced_values(&src, &chosen), "an unknown key changes nothing");
+    }
+
+    #[test]
+    fn the_pulled_queue_is_taken_once_in_order() {
+        PULLED.lock().unwrap().extend([("anim_speed".to_string(), "0.5".to_string()), ("hints_off".to_string(), "true".to_string())]);
+        let taken = take_pulled();
+        assert_eq!(taken.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(), ["anim_speed", "hints_off"]);
+        assert!(take_pulled().is_empty(), "a second take sees nothing");
+    }
+
+    #[test]
     fn a_cloud_copy_keeps_its_device_and_a_local_save_has_none() {
         let dir = std::env::temp_dir().join(format!("razdor-cloud-store-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
