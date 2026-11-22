@@ -2,7 +2,7 @@
 # plain `cargo build` at the root on the game alone (scripts/dist*.sh, the release pipeline, Android).
 [workspace]
 resolver = "2"
-members = [".", "crates/wire"]
+members = [".", "crates/wire", "server"]
 default-members = ["."]
 
 [package]
