@@ -489,9 +489,9 @@ Razdor's: a short shake of the battlefield when a unit takes a hit. Stronger on 
 Updates = Обновления
 Ask = Спрашивать
 Always = Всегда
-Off = Выключены
+Off = Выключено
 Check now = Проверить
-Ask: at start a newer version is offered in a window. Off: Razdor does not check for updates. = Спрашивать: при запуске новая версия предлагается в окне. Выключены: Раздор не проверяет обновления.
+Ask: at start a newer version is offered in a window. Off: Razdor does not check for updates. = Спрашивать: при запуске новая версия предлагается в окне. Выключено: Раздор не проверяет обновления.
 Checking… = Проверка…
 Checking the catalog… = Проверяем каталог…
 Up to date ({v}) = Последняя версия ({v})
