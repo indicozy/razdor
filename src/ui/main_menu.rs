@@ -1803,7 +1803,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId],
+            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId, Row::CloudSaves, Row::CloudState, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
         }
     }
 }
@@ -1895,11 +1895,25 @@ pub enum Row {
     TelemetryDelete,
     /// «Новый идентификатор»: a new install id, the old one's queued data not sent.
     TelemetryNewId,
+    /// «Облачные сохранения» (`cloud_view`): on or off; on creates the account.
+    CloudSaves,
+    /// The cloud's state line (`cloud_view::state_line`).
+    CloudState,
+    /// «Синхронизировать сейчас».
+    CloudSync,
+    /// «Привязать устройство»: the code for another device.
+    CloudLink,
+    /// «Ввести код»: the code from another device.
+    CloudEnter,
+    /// «Фраза восстановления»: shown; a phrase typed there restores the account.
+    CloudPhrase,
+    /// «Удалить аккаунт».
+    CloudDelete,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 74] = [
+pub const ALL: [Row; 81] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1974,6 +1988,13 @@ pub const ALL: [Row; 74] = [
         Row::TelemetryId,
         Row::TelemetryDelete,
         Row::TelemetryNewId,
+        Row::CloudSaves,
+        Row::CloudState,
+        Row::CloudSync,
+        Row::CloudLink,
+        Row::CloudEnter,
+        Row::CloudPhrase,
+        Row::CloudDelete,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -2874,6 +2895,42 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::TelemetryNewId => {
             if labelled_row(c, geo, tr("New id"), tr("New…")).0 {
                 super::telemetry_view::open(super::telemetry_view::Panel::NewId);
+            }
+        }
+        Row::CloudSaves => {
+            // «Облачные сохранения»: on creates the account (or syncs the one there); off stops the sync.
+            let v = super::cloud_view::view();
+            if labelled_row(c, geo, tr("Cloud saves"), if v.on { tr("On") } else { tr("Off") }).0 {
+                super::cloud_view::toggle();
+            }
+        }
+        Row::CloudState => {
+            let v = super::cloud_view::view();
+            labelled_row(c, geo, tr("Cloud state"), &v.state);
+        }
+        Row::CloudSync => {
+            if labelled_row(c, geo, tr("Sync now"), tr("Sync")).0 {
+                super::cloud_view::sync_now();
+            }
+        }
+        Row::CloudLink => {
+            if labelled_row(c, geo, tr("Link a device"), tr("Show")).0 && super::cloud_view::view().on {
+                super::cloud_view::open(super::cloud_view::Panel::Link);
+            }
+        }
+        Row::CloudEnter => {
+            if labelled_row(c, geo, tr("Enter a code"), tr("Enter…")).0 && super::cloud_view::view().on {
+                super::cloud_view::open(super::cloud_view::Panel::Enter);
+            }
+        }
+        Row::CloudPhrase => {
+            if labelled_row(c, geo, tr("Recovery phrase"), tr("Show…")).0 && super::cloud_view::view().has_account {
+                super::cloud_view::open(super::cloud_view::Panel::Phrase);
+            }
+        }
+        Row::CloudDelete => {
+            if labelled_row(c, geo, tr("Delete the account"), tr("Delete…")).0 && super::cloud_view::view().has_account {
+                super::cloud_view::open(super::cloud_view::Panel::Delete);
             }
         }
         Row::OldSaves => {

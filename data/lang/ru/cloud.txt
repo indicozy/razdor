@@ -1,0 +1,33 @@
+# Razdor interface in Russian: the cloud saves' settings and windows (`ui::cloud_view`, `ui::cloud_store`).
+# "English = Russian", one per line; \n is a line break, {name} a value filled in by the game.
+
+Cloud saves = Облачные сохранения
+Cloud state = Состояние облака
+Sync now = Синхронизировать сейчас
+Sync = Синхронизировать
+Link a device = Привязать устройство
+Enter a code = Ввести код
+Enter… = Ввести…
+Recovery phrase = Фраза восстановления
+Show… = Показать…
+Delete the account = Удалить аккаунт
+Delete the account? = Удалить аккаунт?
+The server deletes the account and every save of it. The saves on this device stay. = Сервер удалит аккаунт и все его сохранения. Сохранения на этом устройстве останутся.
+This cannot be undone. = Это нельзя отменить.
+Not synced yet = Ещё не синхронизировано
+The cloud is full: delete old saves = Облако заполнено, удалите старые сохранения
+No connection = Нет связи
+Sync failed, it will try again = Ошибка связи, попробуем позже
+Syncing… = Синхронизация…
+Using = Занято
+of 20 MB = из 20 МБ
+Synced = Синхронизировано
+Code for the other device = Код для другого устройства
+Making a code… = Создаём код…
+Valid for 10 minutes, once. Until = Действует 10 минут, один раз. До
+On the other device: Settings, Other, Cloud saves, Enter a code. = На другом устройстве: Настройки, Прочее, Облачные сохранения, Ввести код.
+Type the code shown on the other device. = Введите код, показанный на другом устройстве.
+Link = Привязать
+Write it down. On a new device it brings the account back. = Запишите её. На новом устройстве она вернёт аккаунт.
+No account on this device. = На этом устройстве нет аккаунта.
+Restore = Восстановить

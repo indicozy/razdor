@@ -72,6 +72,7 @@ pub mod popup;
 pub mod prep_line;
 pub mod rest;
 pub mod cloud_store;
+pub mod cloud_view;
 pub mod saves;
 pub mod screens;
 pub mod session;
@@ -2097,6 +2098,8 @@ impl App {
         saves_move::modal();
         // The analytics' questions («Помочь Раздору?», the crash report's question; `telemetry`).
         telemetry_view::modal();
+        // The cloud saves' windows (the settings' «Облачные сохранения», `cloud_view`).
+        cloud_view::modal();
         // The note of a transfer started from Settings («Прочее», «Отправить журнал…»).
         #[cfg(target_os = "android")]
         {

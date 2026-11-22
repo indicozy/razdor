@@ -376,6 +376,8 @@ struct Row {
     mark: Option<std::ops::Range<usize>>,
     /// The new save's grey placeholder (nothing typed yet), not a name.
     placeholder: bool,
+    /// The save's cloud state (drawn as an icon), for a saved row.
+    cloud: Option<razdor::cloud::SaveState>,
     /// The caret's character in `name` while a name is typed: a name too long for its
     /// column keeps the caret's side in sight.
     caret: Option<usize>,
@@ -389,12 +391,17 @@ fn time_line(secs: u64) -> String {
 
 fn row_of(e: &ListedSave) -> Row {
     let Some(m) = &e.meta else {
-        return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None };
+        return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None, cloud: None };
     };
-    let name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
+    let mut name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
+    // A save pulled from the cloud from another device says which («… — телефон, 22:10»).
+    if let Some(device) = super::cloud_store::origin_of(&e.path) {
+        name = format!("{name} — {device}, {}", super::cloud_view::hhmm(m.saved_at));
+    }
     // A game in which the cheat console worked says so after its scenario.
     let scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
-    Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None }
+    let cloud = Some(super::cloud_store::state_of(&e.path.to_string_lossy()));
+    Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud }
 }
 
 /// The save lists' fonts (0x4b61bc, 0x4b6338): the save's name in ae24a0 (Benguiat less
@@ -412,6 +419,35 @@ const PICKED_ADDED: [u8; 3] = [0, 30, 90];
 fn row_ink(c: [u8; 3], picked: bool) -> Color {
     let add = if picked { PICKED_ADDED } else { [0; 3] };
     Color::from_rgba(c[0].saturating_add(add[0]), c[1].saturating_add(add[1]), c[2].saturating_add(add[2]), 255)
+}
+
+/// The cloud mark of a save, drawn with shapes (the font has no ☁ ⏳ 💾): a cloud when it is in the
+/// cloud, an hourglass while it waits to upload, a floppy disk when it is only on this device.
+fn draw_cloud_mark(r: Rect, state: razdor::cloud::SaveState) {
+    use razdor::cloud::SaveState;
+    let (x, y, w, h) = (r.x, r.y, r.w, r.h);
+    match state {
+        SaveState::InCloud => {
+            let c = Color::new(0.55, 0.8, 1.0, 1.0);
+            draw_circle(x + w * 0.35, y + h * 0.6, w * 0.22, c);
+            draw_circle(x + w * 0.62, y + h * 0.48, w * 0.3, c);
+            draw_circle(x + w * 0.85, y + h * 0.65, w * 0.18, c);
+            draw_rectangle(x + w * 0.2, y + h * 0.6, w * 0.65, h * 0.22, c);
+        }
+        SaveState::WaitingUpload => {
+            let c = Color::new(0.95, 0.78, 0.3, 1.0);
+            draw_rectangle(x + w * 0.2, y + h * 0.1, w * 0.6, h * 0.08, c);
+            draw_rectangle(x + w * 0.2, y + h * 0.82, w * 0.6, h * 0.08, c);
+            draw_triangle(vec2(x + w * 0.25, y + h * 0.18), vec2(x + w * 0.75, y + h * 0.18), vec2(x + w * 0.5, y + h * 0.5), c);
+            draw_triangle(vec2(x + w * 0.5, y + h * 0.5), vec2(x + w * 0.25, y + h * 0.82), vec2(x + w * 0.75, y + h * 0.82), c);
+        }
+        SaveState::LocalOnly => {
+            let c = Color::new(0.75, 0.75, 0.75, 0.9);
+            draw_rectangle(x + w * 0.12, y + h * 0.12, w * 0.76, h * 0.76, c);
+            draw_rectangle(x + w * 0.28, y + h * 0.12, w * 0.44, h * 0.3, Color::new(0.2, 0.2, 0.2, 0.9));
+            draw_rectangle(x + w * 0.25, y + h * 0.6, w * 0.5, h * 0.28, Color::new(0.2, 0.2, 0.2, 0.9));
+        }
+    }
 }
 
 /// Razdor's pin of a save: a round head with a needle, gold when pinned, grey when not.
@@ -748,6 +784,9 @@ impl Book {
                     let p = Rect::new(r.x + r.w - 2.0 * sign - 10.0 * k, r.y + (r.h - sign) / 2.0, sign, sign);
                     let (over, down, pressed) = super::widgets::button_state(p, true);
                     draw_pin(p, row.pinned, down);
+                    if let Some(state) = row.cloud {
+                        draw_cloud_mark(Rect::new(p.x - sign - 6.0 * k, p.y, sign, sign), state);
+                    }
                     if over {
                         tooltip(&[(if row.pinned { tr("Unpin the save (P)") } else { tr("Pin the save (P): it is never overwritten, stays on top and is not counted in the save limit") }.to_string(), INK)]);
                     }
@@ -948,12 +987,12 @@ fn typed_name(name: &str, edit: super::text_edit::TextEdit, caret_on: bool) -> (
 fn new_save_row(name: &str, edit: super::text_edit::TextEdit, caret_on: bool, title: &str, now: u64) -> Row {
     let time = time_line(now);
     if name.is_empty() {
-        return Row { name: own("Buttons", "NewSave", n_("(save anew)")), scenario: title.to_string(), time, pinned: false, waiting: false, mark: None, placeholder: true, caret: None };
+        return Row { name: own("Buttons", "NewSave", n_("(save anew)")), scenario: title.to_string(), time, pinned: false, waiting: false, mark: None, placeholder: true, caret: None, cloud: None };
     }
     let (typed, mark) = typed_name(name, edit, caret_on);
     let mut edit = edit;
     edit.fit(name);
-    Row { name: typed, scenario: title.to_string(), time, pinned: false, waiting: false, mark, placeholder: false, caret: Some(edit.caret) }
+    Row { name: typed, scenario: title.to_string(), time, pinned: false, waiting: false, mark, placeholder: false, caret: Some(edit.caret), cloud: None }
 }
 
 /// The part of `name` (`caret`: the caret's character, drawn as its own glyph) that fits

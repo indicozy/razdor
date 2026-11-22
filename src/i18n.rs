@@ -84,6 +84,7 @@ pub const RU_FILES: &[(&str, &str)] = &[
     ("events.txt", include_str!("../data/lang/ru/events.txt")),
     ("translate.txt", include_str!("../data/lang/ru/translate.txt")),
     ("telemetry.txt", include_str!("../data/lang/ru/telemetry.txt")),
+    ("cloud.txt", include_str!("../data/lang/ru/cloud.txt")),
 ];
 
 /// One catalog line: its file and line number, the English key and the translation.

@@ -194,6 +194,11 @@ fn write_side(save: &Path, side: &Side) -> Result<(), String> {
     std::fs::write(side_path(save), text).map_err(|e| e.to_string())
 }
 
+/// The device that made a cloud copy saved here (none for a save made on this device).
+pub fn origin_of(path: &Path) -> Option<String> {
+    Some(side_of(path).device).filter(|d| !d.is_empty())
+}
+
 /// The map key of a save: its map's slot key, or `demo`.
 fn map_of(meta: &SaveMeta) -> String {
     match &meta.scenario {
@@ -471,4 +476,46 @@ impl SyncState {
 /// A setting value as the wire carries it: its JSON text.
 fn js<T: Serialize + ?Sized>(v: &T) -> String {
     serde_json::to_string(v).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_device_independent_settings_are_synced() {
+        let values = synced_values(&Settings::default(), &Chosen::default());
+        let keys: Vec<&str> = values.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["ai_strength", "anim_speed", "hints_off", "keys", "language", "scroll_speed", "walk_speed"]);
+    }
+
+    #[test]
+    fn a_synced_value_is_applied_and_a_broken_one_ignored() {
+        let (mut s, mut c) = (Settings::default(), Chosen::default());
+        apply_synced(&mut s, &mut c, "anim_speed", "0.5");
+        assert_eq!(s.anim_speed, Some(0.5));
+        apply_synced(&mut s, &mut c, "anim_speed", "not json");
+        assert_eq!(s.anim_speed, Some(0.5));
+        apply_synced(&mut s, &mut c, "ai_strength", "[true,false]");
+        assert_eq!((s.expert_ai, s.max_ai), (Some(true), false));
+        apply_synced(&mut s, &mut c, "graphics", "0");
+        assert_eq!(synced_values(&s, &c)["ai_strength"], "[true,false]");
+    }
+
+    #[test]
+    fn a_cloud_copy_keeps_its_device_and_a_local_save_has_none() {
+        let dir = std::env::temp_dir().join(format!("razdor-cloud-store-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = dir.join("a.rzsave");
+        assert_eq!(origin_of(&save), None);
+        write_side(&save, &Side { device: "телефон".into(), title: String::new() }).unwrap();
+        assert_eq!(origin_of(&save).as_deref(), Some("телефон"));
+        assert_eq!(side_path(&save), dir.join("a.rzsave.cloud"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_device_names_are_the_players_words() {
+        assert!(matches!(device_name(), "ПК" | "телефон"));
+    }
 }

@@ -433,6 +433,14 @@ fn button_area(k: f32, f: f32) -> f32 {
 /// The window's buttons at its bottom right (as the update window's): the pressed one's index.
 /// On a phone a button is 44 dp high, its label at the phone's text size, and the buttons share
 /// the window's width when they must.
+/// The rect of a text field on line `line` of a frame's text (the frame's lines are 20 px apart,
+/// the first at 34 px; a blank line keeps the room for the field).
+pub(super) fn field_at(inner: Rect, line: usize) -> Rect {
+    let k = chrome::k();
+    let f = phone_factor();
+    Rect::new(inner.x + 24.0 * k * f, inner.y + 34.0 * k * f + line as f32 * 20.0 * k * f - 2.0 * k * f, inner.w - 48.0 * k * f, 24.0 * k * f)
+}
+
 pub(super) fn buttons(inner: Rect, labels: &[&str]) -> Option<usize> {
     let k = chrome::k();
     let f = phone_factor();
