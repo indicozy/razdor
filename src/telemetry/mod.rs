@@ -7,7 +7,9 @@
 //! `worker::step` sends it only while the consent is yes. Turning the consent off purges the queued
 //! consent items. The ping and the delete request are the `Always` class.
 
+pub mod crash;
 pub mod queue;
+pub mod sanitize;
 pub mod state;
 pub mod transport;
 pub mod worker;
@@ -158,11 +160,21 @@ impl Hub {
         self.install_id()
     }
 
+    /// The folder of the state and the queue (`state::telemetry_dir` in the app).
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     /// Checks a body (`Validate`), serializes it and queues it for `path`.
     pub fn enqueue_checked<T: serde::Serialize + Validate>(&self, path: &str, class: Class, body: &T) -> Result<u64, Refused> {
+        self.enqueue_token(path, class, body, None)
+    }
+
+    /// As [`Hub::enqueue_checked`], with a token: the item's server id is kept under it (a crash report).
+    pub fn enqueue_token<T: serde::Serialize + Validate>(&self, path: &str, class: Class, body: &T, token: Option<String>) -> Result<u64, Refused> {
         body.validate().map_err(|e| Refused::Invalid(e.to_string()))?;
         let json = serde_json::to_vec(body).map_err(|e| Refused::Invalid(e.to_string()))?;
-        self.enqueue_bytes(path, class, json, None, None, None)
+        self.enqueue_bytes(path, class, json, None, token, None)
     }
 
     /// Queues a framed body: `header` (JSON) and the raw `body`. `token` names this item (a crash
@@ -233,9 +245,10 @@ pub fn active() -> bool {
         && std::env::var_os("RAZDOR_SCENE").is_none()
 }
 
-/// Start-up: opens the analytics in the app's data folder, queues the ping (when due) and starts the
-/// sender thread. Does nothing when [`active`] is false or the folder is not there.
-pub fn start(game: &str, lang: &str) {
+/// Start-up: opens the analytics in the app's data folder, queues the ping (when due), queues the
+/// crash report of the last run (with the consent yes; `crash::collect`) and starts the sender thread.
+/// `dt` is the install folder (cleaned out of the report). Does nothing when [`active`] is false.
+pub fn start(game: &str, lang: &str, dt: Option<&Path>) {
     if !active() {
         return;
     }
@@ -251,6 +264,10 @@ pub fn start(game: &str, lang: &str) {
     if let Err(e) = opened.ping_if_due(today, game, lang) {
         crate::diag!("telemetry: no ping: {e:?}");
     }
+    // The crashed run's log: `diag::init` moved it aside when this run started.
+    let previous = crate::diag::log_path().map(|p| p.with_file_name("razdor.previous.log"));
+    let names = sanitize::Paths::for_this_machine(dt, None, &[]);
+    let _ = crash::collect(&opened, previous.as_deref(), &names, game, BTreeMap::new(), None);
     if HUB.set(opened).is_err() {
         return;
     }

@@ -259,6 +259,8 @@ fn install_panic_hook() {
         }
         let bt = std::backtrace::Backtrace::force_capture();
         log(&format!("PANIC in thread '{name}'{place}: {msg}\nbacktrace:\n{bt}"));
+        // The crash report of the next start (`telemetry::crash`): a plain file write, nothing else.
+        crate::telemetry::crash::note_panic(&format!("{msg}{place}\n{bt}"));
         // Only the main thread's panic ends the game (the audio thread's does not).
         if name == "main" {
             log("exit: the main thread panicked, the process ends after this report");
