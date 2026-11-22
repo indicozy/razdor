@@ -720,6 +720,54 @@ fn strict_initiative_queue_matches_the_pick_order() {
     assert_eq!(bt.active(), Some(0), "the original's scan takes the list order above the threshold");
 }
 
+/// A mid-turn raise to 58 on the Puskar (list place 1, initiative 13) once the scan is at the
+/// enemy's Arbalesters (15) on turn 2: returns the fighters that act for the rest of turn 2.
+fn puskar_raised_past_its_place(strict: bool) -> Vec<usize> {
+    let princess = UnitDef { initiative: 43, ..warrior(30, 10, 0) };
+    let puskar = UnitDef { initiative: 13, ..warrior(31, 10, 0) };
+    let arbalester = bonus(32, Bonus::Artillery, UnitDef { initiative: 15, ..shooter(32, 10) });
+    let extra = vec![princess, puskar, arbalester];
+    let player = [(30, f(0)), (31, b(2))];
+    let enemies = [(32, f(3)), (32, f(4)), (32, f(5))];
+    let mut bt = if strict { with_strict(extra, &player, &enemies) } else { with(extra, &player, &enemies) };
+    to_round(&mut bt, 2);
+    turn_of(&mut bt, 2);
+    assert_eq!(bt.round, 2, "the first Arbalester acts at 15 on turn 2");
+    let cur = bt.fighters[1].stats[Stat::Initiative];
+    bt.fighters[1].mods.initiative += 58 - cur;
+    bt.refresh(1);
+    let mut order = vec![];
+    while bt.round == 2 {
+        let Some(a) = bt.active() else { break };
+        order.push(a);
+        bt.skip();
+    }
+    order
+}
+
+#[test]
+fn turn_order_a_mid_turn_raise_past_the_place_waits_for_the_next_threshold_as_original() {
+    // 0x489ca0 (battle.md §8): the Puskar passed at threshold 15 waits for threshold 14, so the
+    // three Arbalesters at 15 act first, then the Puskar at 58.
+    assert_eq!(puskar_raised_past_its_place(false), vec![2, 3, 4, 1]);
+    // Razdor's strict_initiative: the highest current initiative next, so the Puskar follows the
+    // Arbalester already acting.
+    assert_eq!(puskar_raised_past_its_place(true), vec![2, 1, 3, 4]);
+}
+
+#[test]
+fn turn_order_a_pre_battle_initiative_of_58_acts_first_under_both_orders() {
+    let princess = UnitDef { initiative: 58, ..warrior(30, 10, 0) };
+    let puskar = UnitDef { initiative: 13, ..warrior(31, 10, 0) };
+    let arbalester = bonus(32, Bonus::Artillery, UnitDef { initiative: 15, ..shooter(32, 10) });
+    let player = [(30, f(0)), (31, b(2))];
+    let enemies = [(32, f(3)), (32, f(4)), (32, f(5))];
+    let bt = with(vec![princess.clone(), puskar.clone(), arbalester.clone()], &player, &enemies);
+    assert_eq!(bt.active(), Some(0), "the Princess at 58 is above the Arbalesters' 45 on turn 1");
+    let bt = with_strict(vec![princess, puskar, arbalester], &player, &enemies);
+    assert_eq!(bt.active(), Some(0));
+}
+
 #[test]
 fn row17_artillery_gets_30_initiative_on_turn_1_only() {
     let gun = bonus(24, Bonus::Artillery, UnitDef { initiative: 1, ..shooter(24, 10) });
