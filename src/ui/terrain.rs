@@ -975,11 +975,18 @@ fn make_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&
     load_material(ShaderSource::Glsl { vertex: VERTEX, fragment }, params).map_err(|e| e.to_string())
 }
 
-/// A material of `fragment` drawn alpha-blended over what is under it. The default pipeline blends nothing, so the
-/// water picture's composite (its transparent pixels show the ground) needs this.
+/// The water picture composite's colour factors (source, destination): premultiplied alpha. The picture is cleared to
+/// (0, 0, 0, 0) and its water pixels are opaque, so its colours are premultiplied; where the linear filter of a
+/// smaller picture (water quality «Низкое») mixes a water texel with a cleared one, the plain alpha blend
+/// (`SourceAlpha`, `OneMinusSourceAlpha`) counted the cleared black twice and darkened the water's edge: thin dark lines
+/// along the cells round the water (a player's report, 2026-11-21, Windows 1.5.4).
+const WATER_COMPOSITE_FACTORS: (BlendFactor, BlendFactor) = (BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha));
+
+/// A material of `fragment` drawn over what is under it with premultiplied alpha ([`WATER_COMPOSITE_FACTORS`]). The
+/// default pipeline blends nothing, so the water picture's composite (its transparent pixels show the ground) needs this.
 fn make_blended_material(fragment: &str, uniforms: &[(&str, UniformType)], textures: &[&str]) -> Result<Material, String> {
     let pipeline_params = PipelineParams {
-        color_blend: Some(BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
+        color_blend: Some(BlendState::new(Equation::Add, WATER_COMPOSITE_FACTORS.0, WATER_COMPOSITE_FACTORS.1)),
         alpha_blend: Some(BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha))),
         ..Default::default()
     };
@@ -1661,6 +1668,29 @@ mod shading_rate {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_water_picture_composite_does_not_darken_the_waters_edge() {
+        use super::WATER_COMPOSITE_FACTORS;
+        use macroquad::miniquad::{BlendFactor, BlendValue};
+        // A «Низкое» water picture (half the screen's size) is read through a linear filter: at the edge of the wet
+        // pixels a screen pixel takes half a water texel (alpha 1) and half a cleared one (0, 0, 0, 0). The ground under
+        // that edge is the same colour as the water's edge there, so the composite must give that colour back.
+        let water = [0.2f32, 0.5, 0.6];
+        let src = [water[0] * 0.5, water[1] * 0.5, water[2] * 0.5, 0.5];
+        let factor = |f: BlendFactor, a: f32| match f {
+            BlendFactor::One => 1.0,
+            BlendFactor::Zero => 0.0,
+            BlendFactor::Value(BlendValue::SourceAlpha) => a,
+            BlendFactor::OneMinusValue(BlendValue::SourceAlpha) => 1.0 - a,
+            _ => panic!("an unexpected blend factor"),
+        };
+        let (s, d) = WATER_COMPOSITE_FACTORS;
+        for c in 0..3 {
+            let out = src[c] * factor(s, src[3]) + water[c] * factor(d, src[3]);
+            assert!((out - water[c]).abs() < 1e-6, "channel {c}: {out} instead of {} (a darker line at the water's edge)", water[c]);
+        }
+    }
+
     use super::*;
 
     #[test]
