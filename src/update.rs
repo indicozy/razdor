@@ -464,6 +464,57 @@ fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
+/// One POST of `body` to `url` (the analytics' requests, `telemetry`): the status and the reply's
+/// body. A transport failure is `Err`; any HTTP answer is `Ok`, whatever its status. Not retried here.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub(crate) fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>), String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    // The body goes on stdin, never on the command line (it can be a few megabytes).
+    let mut cmd = curl_base();
+    cmd.args(["--max-time", &seconds.to_string(), "-X", "POST", "-H", "Content-Type: application/json"])
+        .args(["--data-binary", "@-", "-w", "\n%{http_code}", url])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("curl: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        // A curl that stops reading early fails the request below; the write error is not that.
+        let _ = stdin.write_all(body);
+    }
+    let out = child.wait_with_output().map_err(|e| format!("curl: {e}"))?;
+    if !out.status.success() {
+        return Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)));
+    }
+    parse_post_reply_bytes(&out.stdout)
+}
+
+/// One POST (see the desktop's); on the phones it is the phones' own request.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>), String> {
+    phone::post(url, body, seconds)
+}
+
+/// The desktop's reply: the body, then a line with the status code (`curl -w "\n%{http_code}"`).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn parse_post_reply_bytes(out: &[u8]) -> Result<(u16, Vec<u8>), String> {
+    let cut = out.iter().rposition(|&b| b == b'\n').ok_or("curl: no HTTP answer")?;
+    let code = std::str::from_utf8(&out[cut + 1..]).ok().and_then(|s| s.trim().parse::<u16>().ok());
+    match code {
+        Some(c) if c > 0 => Ok((c, out[..cut].to_vec())),
+        _ => Err("curl: no HTTP answer".into()),
+    }
+}
+
+/// The phones' reply: `HTTP <code>` on the first line, the body after it; anything else is the failure's text.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn parse_post_reply(text: &str) -> Result<(u16, Vec<u8>), String> {
+    let rest = text.strip_prefix("HTTP ").ok_or_else(|| if text.is_empty() { "no reply".to_string() } else { text.to_string() })?;
+    let (code, body) = rest.split_once('\n').unwrap_or((rest, ""));
+    let code = code.trim().parse::<u16>().map_err(|_| "post: no status".to_string())?;
+    Ok((code, body.as_bytes().to_vec()))
+}
+
 /// The validators a copy was fetched with: the server's `ETag` and `Last-Modified`, sent back as
 /// `If-None-Match` and `If-Modified-Since` so that an unchanged file answers 304 (no body).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -21,6 +21,7 @@ pub mod dt;
 pub mod gdrive;
 pub mod mirror;
 pub mod remote_config;
+pub mod telemetry;
 pub mod archive;
 pub mod parts;
 pub mod editor;

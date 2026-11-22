@@ -193,6 +193,38 @@ mod android {
         body
     }
 
+    /// One POST of `body` to `url` (the analytics' requests). The body goes through a file in the cache
+    /// folder, read by the Java side (`razdorPost`), which answers `HTTP <code>` and the reply's body.
+    pub fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>), String> {
+        secure(url)?;
+        let path = cache_dir()?.join(crate::update::fetch_temp_name());
+        std::fs::write(&path, body).map_err(|e| format!("post: {e}"))?;
+        let text = java_post(url, &path, seconds);
+        let _ = std::fs::remove_file(&path);
+        crate::update::parse_post_reply(&text?)
+    }
+
+    /// The Java side's `razdorPost`: the file `path` POSTed to `url` (see there for its reply).
+    fn java_post(url: &str, path: &Path, seconds: u32) -> Result<String, String> {
+        let path = path.to_str().ok_or("the file's path is not text")?;
+        // SAFETY: as in `cache_dir`.
+        unsafe {
+            let env = attach_jni_env();
+            let sig = "(Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
+            let mid = method(env, activity_class(env).obj, "razdorPost", sig, false);
+            if mid.is_null() || cleared(env) {
+                return Err("razdorPost is missing".into());
+            }
+            let (url, path) = (string(env, url), string(env, path));
+            let stall = crate::update::STALL_SECONDS as i32;
+            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32));
+            if cleared(env) {
+                return Err("the post failed".into());
+            }
+            to_text(env, reply.obj).ok_or_else(|| "no reply".into())
+        }
+    }
+
     /// A conditional request for `url` (`update::fetch_conditional`): the Java side sends the validators
     /// and gives "304", or "200" with the body's file and its validators (see `razdorFetchConditional`).
     pub fn get_conditional(url: &str, seconds: u32, have: &crate::update::Validators) -> Result<crate::update::Conditional, String> {
@@ -248,7 +280,13 @@ mod android {
 }
 
 #[cfg(target_os = "android")]
-pub use android::{cache_dir, download, download_cancel, download_range, get, get_conditional, install, installer_outcome};
+pub use android::{cache_dir, download, download_cancel, download_range, get, get_conditional, install, installer_outcome, post};
+
+/// iOS: no POST yet (the analytics stay queued there; `telemetry` retries later).
+#[cfg(target_os = "ios")]
+pub fn post(_url: &str, _body: &[u8], _seconds: u32) -> Result<(u16, Vec<u8>), String> {
+    Err("post: not on iOS yet".into())
+}
 
 /// iOS: a download is one `NSData` call that cannot be stopped in the middle (the caller's
 /// cancel is seen when it returns). Nothing to do.
