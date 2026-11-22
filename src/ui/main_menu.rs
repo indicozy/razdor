@@ -1803,7 +1803,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench],
+            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId],
         }
     }
 }
@@ -1887,11 +1887,19 @@ pub enum Row {
     DebugMode,
     /// Razdor's «Отправить журнал…» (Android: the log through the document creator; desktop: its folder).
     SendLog,
+    /// «Помогать Раздору» (`telemetry`): the statistics, crash reports and battle records, on or off.
+    Telemetry,
+    /// «Мой идентификатор»: the install id, shown and copied.
+    TelemetryId,
+    /// «Удалить мои данные»: the server deletes the install id's data; a new id is made.
+    TelemetryDelete,
+    /// «Новый идентификатор»: a new install id, the old one's queued data not sent.
+    TelemetryNewId,
 }
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 70] = [
+pub const ALL: [Row; 74] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1962,6 +1970,10 @@ pub const ALL: [Row; 70] = [
         Row::Bench,
         Row::DebugMode,
         Row::SendLog,
+        Row::Telemetry,
+        Row::TelemetryId,
+        Row::TelemetryDelete,
+        Row::TelemetryNewId,
     ];
 
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
@@ -2835,6 +2847,27 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             }
         }
         Row::SendLog => send_log_row(c, geo),
+        Row::Telemetry => {
+            // «Помогать Раздору»: the answer as yes or no; a click flips it (`telemetry_view`).
+            if labelled_row(c, geo, tr("Help Razdor (statistics, crash reports, battle records)"), yes_no(super::telemetry_view::consent_yes())).0 {
+                super::telemetry_view::toggle_consent();
+            }
+        }
+        Row::TelemetryId => {
+            if labelled_row(c, geo, tr("My id"), tr("Show")).0 {
+                super::telemetry_view::open(super::telemetry_view::Panel::Id);
+            }
+        }
+        Row::TelemetryDelete => {
+            if labelled_row(c, geo, tr("Delete my data"), tr("Delete…")).0 {
+                super::telemetry_view::open(super::telemetry_view::Panel::Delete);
+            }
+        }
+        Row::TelemetryNewId => {
+            if labelled_row(c, geo, tr("New id"), tr("New…")).0 {
+                super::telemetry_view::open(super::telemetry_view::Panel::NewId);
+            }
+        }
         Row::OldSaves => {
             // Razdor's (the owner's request, 2026-11-12): the saves of an older release come in through the picker.
             if labelled_row(c, geo, tr("Move saves from the old Razdor folder…"), tr("Choose")).0 {
