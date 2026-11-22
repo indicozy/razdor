@@ -1,0 +1,10 @@
+# Razdor interface in Russian: the analytics' questions and settings (`telemetry`, `ui::telemetry_view`).
+# "English = Russian", one per line; \n is a line break, {name} a value filled in by the game.
+
+Help Razdor? = Помочь Раздору?
+Razdor can send anonymous play statistics, performance figures, crash reports and battle records, to make it better. No names, no chat, no typed text. You can change this in Settings any time. = Раздор может отправлять анонимную статистику игры, данные о быстродействии, отчёты о вылетах и записи боёв, чтобы становиться лучше. Без имён, чатов и введённого текста. Это можно поменять в настройках в любой момент.
+What we send = Что мы отправляем
+The game crashed = Игра вылетела
+The game crashed last time. Send the report with the save, so the developer can repeat it? = В прошлый раз игра вылетела. Отправить отчёт с сохранением, чтобы разработчик мог повторить?
+The game crashed last time. Send the report, so the developer can look into it? = В прошлый раз игра вылетела. Отправить отчёт, чтобы разработчик мог разобраться?
+Send = Отправить

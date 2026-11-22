@@ -103,6 +103,7 @@ pub mod transfer;
 #[cfg(target_os = "ios")]
 pub mod ios;
 pub mod saves_move;
+pub mod telemetry_view;
 pub mod mobile;
 pub mod water;
 pub mod weather;
@@ -2088,6 +2089,8 @@ impl App {
         game_import::modal();
         // The saves of an older release (`ui::saves_move`): its popup or its result, over the screen.
         saves_move::modal();
+        // The analytics' questions («Помочь Раздору?», the crash report's question; `telemetry`).
+        telemetry_view::modal();
         // The note of a transfer started from Settings («Прочее», «Отправить журнал…»).
         #[cfg(target_os = "android")]
         {

@@ -28,6 +28,8 @@
 //! `RAZDOR_SCENE_PACK_AT=<cell>:<id>,…` puts items in those pack
 //! cells; `RAZDOR_SCENE_HELD=<id>` puts an item on the pointer (hero and army windows); `RAZDOR_SCENE_PREVIEW=1` in `message:` (with `RAZDOR_MOUSE` on an item and `RAZDOR_MOUSE_RIGHT=1`) shows the first item's card at the pointer over the window;
 //! `RAZDOR_SCENE_WEAR=<id>,…` wears those items on the squad member of `army:<map>:<n>:<unit>`.
+//! `RAZDOR_SCENE_CONSENT=1` draws the analytics' «Помочь Раздору?» question over any scene, and
+//! `RAZDOR_SCENE_CRASH=save|none` the crash question with or without its save (`telemetry_view`).
 //! `RAZDOR_SCENE_SIGN_OFF=1` switches that member's promotion sign off (`army:<map>:<n>:<unit>`).
 //! `RAZDOR_SCENE_DEAD=1` makes that member a corpse (`army:<map>:<n>`).
 //! `RAZDOR_SCENE_SELECT=<n>` selects squad member n in the `building:` window (its card shows).
