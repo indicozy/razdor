@@ -20,7 +20,9 @@ pub mod summary;
 
 use std::net::SocketAddr;
 
-use axum::extract::{DefaultBodyLimit, State};
+use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::http::{header, Method};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -28,6 +30,31 @@ use razdor_wire::{limits, paths};
 
 use crate::http::ApiError;
 use crate::state::AppState;
+
+/// Whether a request takes a permit of the large-body gate: a POST or PUT whose body is over the small
+/// cap or of unknown length (chunked). Every other request runs at once.
+pub fn needs_body_permit(method: &Method, content_length: Option<u64>) -> bool {
+    matches!(*method, Method::POST | Method::PUT)
+        && content_length.is_none_or(|n| n > limits::MAX_SMALL_BODY as u64)
+}
+
+/// Holds a permit for the whole request (its body is read by the handler), so at most
+/// `large_body_permits` large uploads run at once; the rest wait here, holding no database connection.
+async fn large_body_gate(State(st): State<AppState>, req: Request, next: Next) -> Response {
+    let len = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+    if !needs_body_permit(req.method(), len) {
+        return next.run(req).await;
+    }
+    let Ok(_permit) = st.body_gate.clone().acquire_owned().await else {
+        return ApiError::Internal("body gate closed".into()).into_response();
+    };
+    next.run(req).await
+}
+
 
 /// Every route with its body cap. A body over its cap is refused by the framework (413) before any
 /// handler reads it.
@@ -73,6 +100,7 @@ pub fn router(state: AppState) -> Router {
         .route("/admin/logout", post(admin::logout))
         .route("/admin/unban", post(admin::unban).layer(small))
         .route("/admin/api/summary.json", get(admin::summary_json))
+        .layer(middleware::from_fn_with_state(state.clone(), large_body_gate))
         .with_state(state)
 }
 
@@ -120,4 +148,19 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
     tracing::info!("shutting down");
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn only_large_or_unknown_posts_take_a_permit() {
+        let big = limits::MAX_SMALL_BODY as u64 + 1;
+        assert!(needs_body_permit(&Method::POST, Some(big)));
+        assert!(needs_body_permit(&Method::PUT, None), "chunked bodies wait for a permit");
+        assert!(!needs_body_permit(&Method::POST, Some(limits::MAX_SMALL_BODY as u64)));
+        assert!(!needs_body_permit(&Method::GET, None));
+        assert!(!needs_body_permit(&Method::DELETE, Some(big)));
+    }
 }

@@ -77,6 +77,7 @@ fn serve(args: &[String]) -> ExitCode {
         .with_ansi(false)
         .with_writer(std::io::stderr)
         .init();
+    let blocking_threads = cfg.blocking_threads;
     let state = match AppState::open(cfg, Clock::system()) {
         Ok(s) => s,
         Err(e) => {
@@ -84,7 +85,12 @@ fn serve(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let runtime = match tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .max_blocking_threads(blocking_threads)
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             tracing::error!("runtime: {e}");

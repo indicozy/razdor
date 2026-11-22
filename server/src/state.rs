@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
 
 use crate::abuse::{self, Abuse};
 use crate::budget::{self, Budget, FreeFn};
@@ -29,6 +30,10 @@ pub struct Inner {
     pub sessions: Mutex<HashMap<String, i64>>,
     /// The stored files' running total and the disk's free space (see `budget`).
     pub budget: Budget,
+    /// Permits for the requests with a large or unknown-length body (`config.large_body_permits`).
+    pub body_gate: Arc<Semaphore>,
+    /// One argon2 check at a time: a password check costs tens of megabytes and a CPU's worth of time.
+    pub hash_gate: Arc<Semaphore>,
 }
 
 #[derive(Clone)]
@@ -62,6 +67,7 @@ impl AppState {
         let ip_salt = load_or_create_salt(&root.join("ip_salt"))?;
         let used = budget::scan(&root);
         let budget = Budget::new(used, cfg.limits.max_data_bytes, cfg.limits.min_free_bytes, free);
+        let body_gate = Arc::new(Semaphore::new(cfg.large_body_permits));
         Ok(AppState(Arc::new(Inner {
             cfg,
             stats,
@@ -72,6 +78,8 @@ impl AppState {
             abuse: Mutex::new(Abuse::with_bans(bans)),
             sessions: Mutex::new(HashMap::new()),
             budget,
+            body_gate,
+            hash_gate: Arc::new(Semaphore::new(1)),
         })))
     }
 

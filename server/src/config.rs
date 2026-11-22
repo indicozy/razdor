@@ -93,6 +93,11 @@ pub struct Config {
     pub admin_token_sha256: Option<String>,
     /// If set, only these versions are accepted (exact strings). Empty: any `X.Y.Z` release.
     pub allowed_versions: Vec<String>,
+    /// Threads of the blocking pool (the database calls, the argon2 check, the file reads). A waiter for
+    /// a database connection waits in async, so it never holds one of these.
+    pub blocking_threads: usize,
+    /// Requests with a large or unknown-length body that the router runs at once. The rest wait.
+    pub large_body_permits: usize,
     pub limits: Limits,
 }
 
@@ -106,6 +111,8 @@ impl Default for Config {
             admin_password_hash: None,
             admin_token_sha256: None,
             allowed_versions: Vec::new(),
+            blocking_threads: 8,
+            large_body_permits: 4,
             limits: Limits::default(),
         }
     }
@@ -155,6 +162,9 @@ impl Config {
         if self.limits.ip_per_minute == 0 || self.limits.install_per_minute == 0 {
             return Err("the request limits must be above zero".into());
         }
+        if self.blocking_threads == 0 || self.large_body_permits == 0 {
+            return Err("blocking_threads and large_body_permits must be above zero".into());
+        }
         Ok(())
     }
 }
@@ -181,6 +191,16 @@ mod tests {
     fn bad_token_hash_is_refused() {
         let env = |k: &str| (k == "RAZDOR_ADMIN_TOKEN_SHA256").then(|| "XYZ".to_string());
         assert!(Config::load(None, env).is_err());
+    }
+
+    #[test]
+    fn pool_and_body_defaults_and_overrides() {
+        let cfg = Config::default();
+        assert_eq!((cfg.blocking_threads, cfg.large_body_permits), (8, 4));
+        let cfg: Config = toml::from_str("blocking_threads = 16\nlarge_body_permits = 2\n").expect("parses");
+        assert_eq!((cfg.blocking_threads, cfg.large_body_permits), (16, 2));
+        let zero: Config = toml::from_str("blocking_threads = 0\n").expect("parses");
+        assert!(zero.validate().is_err(), "no blocking thread is refused");
     }
 
     #[test]

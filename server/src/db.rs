@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OpenFlags};
+use tokio::sync::Semaphore;
 
 use crate::http::ApiError;
 
@@ -17,6 +18,10 @@ type Shared = Arc<Mutex<Connection>>;
 pub struct Db {
     conn: Shared,
     reader: Shared,
+    /// One permit per connection, taken in async before the blocking pool is used: a caller waiting
+    /// for the connection holds no blocking thread, so a burst of writes cannot starve the pool.
+    write_gate: Arc<Semaphore>,
+    read_gate: Arc<Semaphore>,
     /// Counts every query that goes through `call`, `read` or `setup` (the tests check the hot path).
     queries: Arc<AtomicU64>,
 }
@@ -34,6 +39,8 @@ impl Db {
         Ok(Db {
             conn: Arc::new(Mutex::new(conn)),
             reader: Arc::new(Mutex::new(reader)),
+            write_gate: Arc::new(Semaphore::new(1)),
+            read_gate: Arc::new(Semaphore::new(1)),
             queries: Arc::new(AtomicU64::new(0)),
         })
     }
@@ -45,8 +52,10 @@ impl Db {
         T: Send + 'static,
     {
         self.queries.fetch_add(1, Ordering::Relaxed);
+        let permit = self.write_gate.clone().acquire_owned().await.map_err(|_| closed())?;
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let mut guard = conn.lock().unwrap_or_else(|e| e.into_inner());
             f(&mut guard)
         })
@@ -62,8 +71,10 @@ impl Db {
         T: Send + 'static,
     {
         self.queries.fetch_add(1, Ordering::Relaxed);
+        let permit = self.read_gate.clone().acquire_owned().await.map_err(|_| closed())?;
         let conn = self.reader.clone();
         tokio::task::spawn_blocking(move || {
+            let _permit = permit;
             let guard = conn.lock().unwrap_or_else(|e| e.into_inner());
             f(&guard)
         })
@@ -93,11 +104,59 @@ impl Db {
     }
 }
 
+fn closed() -> ApiError {
+    ApiError::Internal("database closed".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn waiting_callers_hold_no_blocking_thread() {
+        // Two blocking threads only. One writer holds its connection; ten more queue behind it. They
+        // wait in async, so a blocking job of another kind still gets the second thread.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(2)
+            .enable_all()
+            .build()
+            .expect("a runtime");
+        let dir = scratch("pool");
+        let db = Db::open(&dir.join("t.sqlite"), "CREATE TABLE IF NOT EXISTS t (v INTEGER);").expect("opens");
+        rt.block_on(async {
+            let (in_tx, in_rx) = mpsc::channel::<()>();
+            let (hold_tx, hold_rx) = mpsc::channel::<()>();
+            let first = {
+                let db = db.clone();
+                tokio::spawn(async move {
+                    db.call(move |_c| {
+                        in_tx.send(()).expect("the test listens");
+                        hold_rx.recv().expect("the test sends");
+                        Ok(())
+                    })
+                    .await
+                })
+            };
+            tokio::task::spawn_blocking(move || in_rx.recv().expect("the writer starts")).await.expect("joins");
+            let mut waiters = Vec::new();
+            for _ in 0..10 {
+                let db = db.clone();
+                waiters.push(tokio::spawn(async move { db.call(|_c| Ok(())).await }));
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let quick = tokio::time::timeout(Duration::from_secs(2), tokio::task::spawn_blocking(|| 7)).await;
+            assert_eq!(quick.expect("a blocking thread is free").expect("runs"), 7);
+            hold_tx.send(()).expect("the writer is waiting");
+            first.await.expect("joins").expect("the first write");
+            for w in waiters {
+                w.await.expect("joins").expect("the queued write");
+            }
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("razdor-db-{name}-{}", std::process::id()));

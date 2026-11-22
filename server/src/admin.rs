@@ -323,7 +323,21 @@ pub async fn login(
     let Some(hash) = st.cfg.admin_password_hash.clone() else {
         return Ok(page(StatusCode::SERVICE_UNAVAILABLE, "Razdor stats", "<p>No admin password is set.</p>"));
     };
-    if !verify_password(&hash, &form.password) {
+    // The argon2 check runs on the blocking pool, one at a time (`hash_gate`): a flood of logins
+    // waits in async and cannot take every thread or all the memory at once.
+    let ok = {
+        let _permit = st
+            .hash_gate
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| ApiError::Internal("hash gate closed".into()))?;
+        let password = form.password;
+        tokio::task::spawn_blocking(move || verify_password(&hash, &password))
+            .await
+            .map_err(|e| ApiError::Internal(format!("argon2 task: {e}")))?
+    };
+    if !ok {
         return Ok(page(StatusCode::UNAUTHORIZED, "Razdor stats", "<p>Wrong password.</p>"));
     }
     let mut raw = [0u8; 32];
