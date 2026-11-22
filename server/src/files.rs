@@ -27,14 +27,27 @@ pub fn hex(bytes: &[u8]) -> String {
     s
 }
 
+/// Writes `bytes` to `path` so that a power cut leaves either the old file or the whole new one:
+/// the `.part` file is fsynced before the rename, and the folder is fsynced after it (the rename
+/// itself is durable only then).
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
+    use std::io::Write;
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    if let Some(parent) = parent {
         std::fs::create_dir_all(parent)?;
     }
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let part = path.with_file_name(format!("{name}.part"));
-    std::fs::write(&part, bytes)?;
-    std::fs::rename(&part, path)
+    {
+        let mut file = std::fs::File::create(&part)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    std::fs::rename(&part, path)?;
+    if let Some(parent) = parent {
+        std::fs::File::open(parent)?.sync_all()?;
+    }
+    Ok(())
 }
 
 pub fn remove_quiet(path: &Path) {
@@ -60,4 +73,21 @@ pub fn unzstd(data: &[u8]) -> io::Result<Vec<u8>> {
 /// `root/<folder>/<name>`.
 pub fn path(root: &Path, folder: &str, name: &str) -> PathBuf {
     root.join(folder).join(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_part() {
+        let dir = std::env::temp_dir().join(format!("razdor-files-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("save.bin");
+        write_atomic(&file, b"first").expect("writes");
+        write_atomic(&file, b"second").expect("overwrites");
+        assert_eq!(std::fs::read(&file).expect("reads"), b"second");
+        assert!(!dir.join("save.bin.part").exists(), "no .part file is left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

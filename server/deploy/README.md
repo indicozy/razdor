@@ -119,6 +119,38 @@ service runs. Run it daily from cron (`/etc/cron.d/razdor-backup`):
 Install it with `install -m 0750 server/deploy/backup.sh /usr/local/bin/backup.sh`. It keeps 14 days.
 Backups hold the account key hashes and the saves: the backup folder is mode 0700.
 
+A run writes into `.tmp-<date>-<pid>` and renames it to `<date>` only when every step succeeded, so a
+failed run leaves no dated folder and the next run tries again. The `links` table (link-code keys) is
+emptied in the copy.
+
+### Off-host copy (on the owner's PC)
+
+A backup on the same disk as the data does not survive a dead disk or a lost VPS. Run
+`server/deploy/pull-backup.sh` on the owner's PC once a day (cron or a systemd user timer). It pulls the
+newest dated folder over ssh into `/mnt/ai_models/razdor-backups/<date>` and keeps 30 days:
+
+    RAZDOR_VPS=backup@<vps-host> /path/to/razdor/server/deploy/pull-backup.sh
+
+The ssh key must be able to read `/var/backups/razdor-api` on the VPS (the owner sets it up).
+
+### Restore
+
+Restore into the data folder of the service, with the service stopped. The copy is whole: the SQLite
+files are consistent snapshots and the battle, crash and save folders are complete.
+
+1. `systemctl stop razdor-api` (or the quadlet's unit name on the host).
+2. Move the current data folder aside, for example `mv /var/lib/razdor-api /var/lib/razdor-api.broken`.
+3. Make a fresh folder and copy the dated backup into it:
+   `install -d -m 0700 /var/lib/razdor-api && cp -a /var/backups/razdor-api/<date>/. /var/lib/razdor-api/`
+   (or from the PC copy, with `rsync -a` over ssh).
+4. Keep `ip_salt` from the broken folder if the bans must keep matching: copy it back over
+   (`cp -a /var/lib/razdor-api.broken/ip_salt /var/lib/razdor-api/`). A new salt only forgets the hashed IPs.
+5. `systemctl start razdor-api`, then check `https://razdor.indicozy.dev/api/v1/...` (a cloud save of a
+   test account, or the dashboard's counts) against the numbers from before.
+
+Tested locally (2026-11-22): a backup of a data folder with saves restored into a fresh folder, and the
+server served the same saves.
+
 ## 7. Operate
 
 - Logs: `journalctl -u razdor-api -f` (the container's stderr goes to the journal through the unit).
