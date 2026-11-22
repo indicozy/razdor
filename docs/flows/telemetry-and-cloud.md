@@ -135,6 +135,18 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   ASCII case ignored.
 - `src/remote_config.rs`: `API_BUILTIN` (the one const for the API address, a placeholder), the `api`
   list and the `telemetry` kill switch (`false` stops every send). Both come from the config.
+- `src/telemetry/perf.rs`: the performance numbers (pure, time passed in). `Collector` keeps per screen a
+  histogram of frame times (0.5 ms bins up to 100 ms, then an overflow bin: median, p99, p99.9 within half a
+  bin) and the seconds there (a gap between frames counts at most 1 s); at most 16 screens, the rest fold into
+  `other`. Loads (at most 32), the low-memory warnings. `report` builds a `PerfReport` from a window, and
+  `take` empties it, so each report covers only its own window. `enqueue` queues it at `paths::PERF` with
+  `Class::Consent`. The peak RAM (`VmHWM`), the RAM total and the OS release are read on Linux only.
+- `src/ui/perf_analytics.rs`: the UI hooks for `telemetry::perf`. `frame` (`main.rs`, before the wait for the
+  next frame: the frame's work and drawing) records the frame time and screen, the `start` load at the first
+  frame and the device and quality settings once (the GL strings, the display, the catalog names of the
+  graphics preset and the map's parts). `map_requested` (`ui::analytics::campaign_started` and `save_loaded`)
+  and `battle_requested` (`saves::battle`) start the `map` and `battle_entry` loads. A window is sent every
+  ten minutes and at `session_end`; nothing is sent without the consent yes.
 - `src/telemetry/events.rs`: `Tracker`, the play events (pure, time-injected: every call takes `now` and the
   hub). Records only with the consent yes (`Hub::consent_now`, read without writing the state); batches at most
   once a minute (at once at 200 pending, and at the session's end) into `paths::EVENTS` with `Class::Consent`.
@@ -170,15 +182,22 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 
 - The session's end is the clean exit only (`exit_now`): there is no heartbeat file yet, so a crash, a killed
   process or an Android kill sends no SessionEnd, and the events still pending in memory are lost.
-- Performance reports (device, frame medians, loads, memory, the profiler pass) and battle records
-  (reusing `rules::recording`).
+- Performance: the profiler pass (10 s on the map, the top five frame parts, sessions over 5 min) is not
+  built: the frame probe times its stages only with profiling on, which changes the frame times, so the
+  reports leave `profile` empty. The Android low-memory warnings have no callback yet (the count stays 0).
+  The phone's model and the VRAM are None.
+  A window's `peak_ram_mb` is the process peak so far (`VmHWM` is not reset per window).
+- Battle records (reusing `rules::recording`).
 - Native crashes (signals, the Windows access violation): no pending file is written, so they are not
   reported.
 - The phones' `razdorPost` is written but not compiled or run here.
 
 ### Tests
 
-`cargo test --profile fasttest --lib -- telemetry:: remote_config::` covers the events tracker (consent off
+`cargo test --profile fasttest --lib -- telemetry:: remote_config::` covers the performance numbers (the
+percentiles of known distributions, the overflow bin, the 1 s gap cap, the 16-screen fold, the load cap, a
+window emptied by `take`, the report's validation, the consent gate of the queue and the `/proc` fields), and
+covers the events tracker (consent off
 records nothing, the batch validates, the 7-day sweep, the run's restart, progress every five days, the batch
 cadence, the counters once a session, the older save, the settings diff, the map hash), and covers the state file, the queue
 (reopen, cap, refusal, purge), the gates (before consent only the ping; no, delete and new id), the
