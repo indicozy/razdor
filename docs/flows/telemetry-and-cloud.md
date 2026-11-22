@@ -82,10 +82,11 @@ per route (`server/src/lib.rs`); a body over its cap is refused by the framework
 
 - The account key is 256 random bits, shown once to the game; the server keeps its SHA-256 only.
 - A link code's key stays in the `links` table only until the code is redeemed or expires.
-- Saves: 3 manual, 3 quick and 1 session per map (the client chooses; the server refuses over the
-  limit with a 409). The 20 MB quota per account is counted on the stored (zstd, from the client)
-  bytes; over it the server answers 413 «Облако заполнено, удалите старые сохранения». Nothing is
-  deleted to make room.
+- Saves: a cap per device (`saves_per_device`, 100; the account's `saves_per_account` is 400, a safety
+  net). Each row carries its device id and its raw hash. The 20 MB quota per account is counted on the
+  stored (zstd, from the client) bytes; past the device cap, the account cap or the quota the server answers
+  413 «Облако заполнено, удалите старые сохранения». Nothing is deleted to make room: the client deletes its
+  own stale rows first. Rows from before device ids carry an empty id and hash.
 - Marks: per map, the better level wins (Green is best, then Grey, Yellow, Red); a tie takes the later
   date. Settings: per key, the newer `changed_at` wins. Hub: the list replaces the stored one when it
   is not older.
@@ -269,12 +270,16 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
   file and a rename). `phrase` and `key_from_phrase` turn the key into 53 characters of the link alphabet
   (52 base-31 digits and a check digit) and back; a typo fails the check. The key is never the analytics
   install id.
-- `select.rs`: `choose` picks the saves that go up, per game, map and kind: 3 manual, 3 quick and 1 session,
-  pinned first, then the newest. Autosaves are not given to the cloud. `state` gives the load list's icon:
-  `InCloud` (the account holds the same file), `WaitingUpload` (chosen, not yet there), `LocalOnly`.
+- `device.id` (`account::device_id`): this device's random id, 32 hex, made once in the cloud folder. Its rows
+  are the only ones it uploads and deletes.
+- `select.rs`: `choose` picks this device's mirror: pinned first, then «Продолжить», then the newest, at most
+  the device's cap (`cloud_saves_per_device`) and the bytes left of the 20 MB after the other rows. A save
+  that does not fit stays local. Two local saves with one raw hash are one cloud save. `state` gives the load
+  list's icon: `InCloud` (a row of this device holds the same content), `WaitingUpload` (chosen, not yet
+  there), `LocalOnly`.
 - `merge.rs`: marks merge as a union (the better level per map; a tie takes the later date); synced settings
-  take the newest change per key; `session_name` gives «Продолжить (ПК, 21:40)»; `keeps_slot` picks the newer
-  «Продолжить»; `newer_version` finds the saves of a newer Razdor.
+  take the newest change per key; `session_name` gives «Продолжить (ПК, 21:40)» for a save downloaded from
+  another device; `newer_version` finds the saves of a newer Razdor.
 - `pack.rs`: zstd (level 9) on the client, the SHA-256 of the packed bytes (the hash the server checks), and
   the limits in both directions.
 - `http.rs`: the `Net` transport. Desktop runs `curl` (the key in the `x-razdor-key` header, the body on
@@ -282,18 +287,30 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
 - `api.rs`: the typed calls over `Net`, every body validated both ways. A status maps onto `CloudError`:
   409 `Conflict`, 413 `Full`, 404 `NotFound`, 401 and 403 `Unauthorized`, 408, 429 and 5xx `Offline`, any other
   4xx `Refused`, a bad answer `Bad`.
-- `sync.rs`: `pull` and `push` over the `Local` trait (this device's saves and documents, implemented by the
-  game's store). A save is matched by game, map, kind and the hash of its packed bytes, so nothing is uploaded
-  twice and nothing is overwritten. The cloud loses a save only as a stale one of a full per-map window, and
-  never a save of a newer Razdor. A «Продолжить» conflict keeps the newer as the slot and turns the other into
-  an ordinary save. The quota is checked before each upload (20 MB, after zstd).
-- `mod.rs`: `Cloud` runs the jobs (`Job::CreateAccount`, `Link`, `Redeem`, `DeleteAccount`, `Sync`, `Pull`,
-  `Push`) on one background thread. `request` only queues; `snapshot` gives the `Shared` state (phase,
-  states, newer saves, quota, the last link code, errors); `state_of` gives one save's icon. Offline, a sync
+- `sync.rs`: over the `Local` trait (this device's saves and documents, implemented by the game's store).
+  - `push` (the mirror): lists the account, deletes this device's own rows whose raw hash is no longer
+    chosen (a save deleted, overwritten or pushed out of the cap; a second row of one content too), then
+    uploads the chosen saves the account lacks. Deletes come first, so the device's cap is never passed.
+    Nothing is deleted while a local save cannot be read (its hash is unknown). Rows of a newer Razdor are
+    never touched. Then marks, settings, the Hub list and the benchmark reports.
+  - `refresh` (the «Облако» tab): the list only. `others` are the other devices' saves whose raw hash this
+    device does not hold; `newer` are the saves of a newer Razdor (listed locked).
+  - `pull`: `refresh` plus marks, settings and the Hub offer. `sync` is pull, then push.
+  - `download(id)`: one other device's save, on demand. It is checked (its raw hash, a newer Razdor refused,
+    this device's own rows refused), kept as an ordinary local save with its origin device (a session
+    lands as a manual save named after its device and time), and not written twice when the content is
+    already here.
+  - The quota is the account's 20 MB after zstd; `push` takes the bytes of the other rows off it first.
+- `mod.rs`: `Cloud` runs the jobs (`Job::CreateAccount`, `Link`, `Redeem`, `DeleteAccount`, `Sync` (start and
+  the button), `Pull`, `Push` (exit and minimise), `Refresh` (the «Облако» tab), `Download(id)`) on one
+  background thread. `request` only queues; `snapshot` gives the `Shared` state (phase, states, others,
+  newer saves, quota, the last link code, errors); `state_of` gives one save's icon. Offline, a sync
   retries after 1 minute, doubling up to 6 hours. Without an account nothing is sent.
 - Tests: `cargo test --profile fasttest cloud::`. `e2e.rs` runs `razdor-server`'s router on a local port with
-  two devices (linked by a code), the window, the session conflict, the quota, the marks and settings, the
-  account deletion, and the background worker.
+  two devices (linked by a code): a device's mirror and the other device's list (no download, same names kept
+  apart), the download on demand (kept once, then it joins the mirror), a deleted save leaving the cloud while
+  the other device's rows stay, the device cap (the oldest stays local), a newer Razdor's save listed locked,
+  the marks and settings, the account deletion, and the background worker.
 
 The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not the lib):
 
@@ -307,9 +324,9 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
 - `cloud_store::Store` implements `sync::Local` over this device. Saves: the install's manual folder
   (`save::games_dir`), where a quick save is a manual save named «Quick save» and the «Продолжить» slot
   is the auto folder's `session.rzsave`; the map is the save's scenario (`demo` or the map's slot key).
-  A pulled save is written as its own `cloud-<hash>.rzsave` beside the local ones; its origin device
-  and a session's title live in a `<save>.rzsave.cloud` sidecar (the load list reads it). A session from
-  the cloud lands as an ordinary save (approximated: the session slot is one per install, not per map).
+  A save downloaded from another device is written as its own `cloud-<hash>.rzsave` beside the local ones;
+  its origin device and a session's title live in a `<save>.rzsave.cloud` sidecar (the load list reads it).
+  A «Продолжить» from the cloud lands as an ordinary save; the session slot stays this device's own.
   Marks: `rules::marks::Records` (merged in `set_marks`, written by the worker). Synced settings: the
   language (`ui::language::Settings`, settings.json), the speeds, hints, keys and AI strength (`audio.json`);
   `cloud/synced.json` keeps each key's value and when this device first saw it. A pulled value reaches the
@@ -342,8 +359,10 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
   delete|saves|hub-offer` shows made-up states (no worker, no key); `saves` also marks the save files by name
   and lists one made-up newer save.
 
-Not built (approximated or left for later): the phone's transport (Android and iOS are offline until `http.rs`
-gets one); a cloud session lands as an ordinary save, and the session slot is one per install.
+Not built (left for part 2 of the minimal design): the «Облако» tab of the load window (the list, the download
+on demand through `Job::Download`, and the refresh on open through `Job::Refresh`), and the per-device list
+marks («не в облаке» for saves past the cap). The phone's transport is also not built (Android and iOS are
+offline until `http.rs` gets one).
 
 ## Server status mark (main menu)
 

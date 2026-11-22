@@ -83,12 +83,14 @@ pub fn newer_saves() -> Vec<SaveEntry> {
                     game: "demo".to_string(),
                     map: "demo".to_string(),
                     kind: SaveKind::Manual,
+                    device_id: String::new(),
                     device: device_name().to_string(),
                     name: "Newer save".to_string(),
                     saved_at: 1_700_000_000,
                     razdor: String::new(),
                     size: 0,
                     sha256: String::new(),
+                    raw_sha256: String::new(),
                     pinned: false,
                 },
             }]
@@ -309,18 +311,12 @@ impl Local for Store {
         Ok(path.to_string_lossy().into_owned())
     }
 
-    fn relabel(&mut self, id: &str, kind: SaveKind, name: &str) -> Result<(), String> {
-        let path = own_save(id).ok_or("no such save")?;
-        let mut side = side_of(&path);
-        side.title = name.to_string();
-        let session = save::games_dir().map(|d| save::session_path(&d));
-        if kind == SaveKind::Session || session.as_deref() != Some(path.as_path()) {
-            return write_side(&path, &side);
-        }
-        // The session slot becomes an ordinary save: the file moves to the manual folder.
-        let target = new_save_file(&std::fs::read(&path).map_err(|e| e.to_string())?)?;
-        std::fs::rename(&path, &target).map_err(|e| e.to_string())?;
-        write_side(&target, &side)
+    fn device_id(&self) -> String {
+        cloud_dir().and_then(|d| account::device_id(&d).ok()).unwrap_or_default()
+    }
+
+    fn saves_per_device(&self) -> usize {
+        razdor::remote_config::cloud_saves_per_device()
     }
 
     fn marks(&self) -> Marks {

@@ -7,11 +7,14 @@ use razdor_wire::cloud::{MarkLevel, MarkRecord, Marks, SaveKind, SettingValue, S
 use razdor_wire::cloud::{BenchReport, HubList};
 use razdor_wire::SCHEMA;
 
+use super::pack::sha256_hex;
 use super::sync::{Local, LocalSave};
 
 pub struct MemLocal {
     pub device: String,
     pub offset: i64,
+    /// The cap per device (`cloud_saves_per_device`).
+    pub cap: usize,
     saves: Vec<(LocalSave, Vec<u8>)>,
     next: u64,
     marks: Marks,
@@ -26,6 +29,7 @@ impl MemLocal {
         MemLocal {
             device: device.to_string(),
             offset: 0,
+            cap: 100,
             saves: Vec::new(),
             next: 0,
             marks: Marks { schema: SCHEMA, updated_at: 0, maps: BTreeMap::new() },
@@ -52,6 +56,11 @@ impl MemLocal {
         };
         self.saves.push((save, bytes.to_vec()));
         id
+    }
+
+    /// Deletes a local save (the player removed it on this device).
+    pub fn remove(&mut self, name: &str) {
+        self.saves.retain(|(s, _)| s.name != name);
     }
 
     /// The local save called `name`.
@@ -84,8 +93,16 @@ impl MemLocal {
 }
 
 impl Local for MemLocal {
+    fn device_id(&self) -> String {
+        sha256_hex(self.device.as_bytes())[..32].to_string()
+    }
+
     fn device(&self) -> String {
         self.device.clone()
+    }
+
+    fn saves_per_device(&self) -> usize {
+        self.cap
     }
 
     fn offset_secs(&self) -> i64 {
@@ -107,13 +124,6 @@ impl Local for MemLocal {
         let id = save.id.clone();
         self.saves.push((save, bytes.to_vec()));
         Ok(id)
-    }
-
-    fn relabel(&mut self, id: &str, kind: SaveKind, name: &str) -> Result<(), String> {
-        let (save, _) = self.saves.iter_mut().find(|(s, _)| s.id == id).ok_or("no such save")?;
-        save.kind = kind;
-        save.name = name.into();
-        Ok(())
     }
 
     fn marks(&self) -> Marks {

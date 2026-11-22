@@ -61,6 +61,9 @@ pub struct Config {
     /// default: the built-in config and a config without the key both say `false`; the owner turns it
     /// on when the cloud server is live.
     pub cloud: bool,
+    /// The cloud saves a device mirrors (its cap): `cloud_saves_per_device`, 100 by default, and never
+    /// more than the server takes (`razdor_wire::limits::SAVES_PER_DEVICE`), nor less than one.
+    pub cloud_saves_per_device: usize,
 }
 
 /// The config as the file spells it. Unknown fields are ignored (a newer config keeps working).
@@ -79,6 +82,8 @@ struct Raw {
     telemetry: Option<bool>,
     #[serde(default)]
     cloud: Option<bool>,
+    #[serde(default)]
+    cloud_saves_per_device: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -103,6 +108,9 @@ pub struct Pick {
 /// The fetch the first-start race runs on each address at once (`update::fetch` in the app).
 pub type Fetch = Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send + Sync>;
 
+/// The default cloud cap per device (the server's own cap is the same number).
+pub const CLOUD_SAVES_PER_DEVICE: usize = razdor_wire::limits::SAVES_PER_DEVICE;
+
 impl Config {
     /// The built-in config: today's addresses (`mirror`).
     pub fn builtin() -> Config {
@@ -118,6 +126,7 @@ impl Config {
             api: vec![API_BUILTIN.to_string()],
             telemetry: false,
             cloud: false,
+            cloud_saves_per_device: CLOUD_SAVES_PER_DEVICE,
         }
     }
 
@@ -146,7 +155,17 @@ impl Config {
         let api = addresses("api", raw.api).unwrap_or(built.api);
         let telemetry = raw.telemetry.unwrap_or(false);
         let cloud = raw.cloud.unwrap_or(false);
-        Ok(Config { update_feed, hub, game, api, telemetry, cloud })
+        let cloud_saves_per_device = match raw.cloud_saves_per_device {
+            None => CLOUD_SAVES_PER_DEVICE,
+            Some(n) => {
+                let max = razdor_wire::limits::SAVES_PER_DEVICE;
+                if n == 0 || n as usize > max {
+                    crate::diag!("remote config: cloud_saves_per_device {n} is out of 1..={max}; it is clamped");
+                }
+                (n as usize).clamp(1, max)
+            }
+        };
+        Ok(Config { update_feed, hub, game, api, telemetry, cloud, cloud_saves_per_device })
     }
 }
 
@@ -279,6 +298,11 @@ pub fn telemetry_allowed() -> bool {
 /// Whether the cloud saves show and run (the `cloud` switch; `false` unless the config turns it on).
 pub fn cloud_allowed() -> bool {
     current().cloud
+}
+
+/// The cloud saves this device mirrors (`cloud_saves_per_device`, clamped to what the server takes).
+pub fn cloud_saves_per_device() -> usize {
+    current().cloud_saves_per_device
 }
 
 /// The game archive as the config gives it (`gdrive::game`).
@@ -454,6 +478,15 @@ mod tests {
         assert!(!Config::parse(br#"{"schema":1}"#).unwrap().telemetry);
         assert!(!Config::parse(br#"{"schema":1,"telemetry":false}"#).unwrap().telemetry);
         assert!(Config::parse(br#"{"schema":1,"telemetry":true}"#).unwrap().telemetry);
+    }
+
+    #[test]
+    fn the_cloud_cap_per_device_defaults_to_100_and_is_clamped() {
+        assert_eq!(Config::builtin().cloud_saves_per_device, 100);
+        assert_eq!(Config::parse(br#"{"schema":1}"#).unwrap().cloud_saves_per_device, 100);
+        assert_eq!(Config::parse(br#"{"schema":1,"cloud_saves_per_device":40}"#).unwrap().cloud_saves_per_device, 40);
+        assert_eq!(Config::parse(br#"{"schema":1,"cloud_saves_per_device":0}"#).unwrap().cloud_saves_per_device, 1);
+        assert_eq!(Config::parse(br#"{"schema":1,"cloud_saves_per_device":5000}"#).unwrap().cloud_saves_per_device, 100);
     }
 
     #[test]

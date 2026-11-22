@@ -27,6 +27,28 @@ pub fn new_key() -> Result<String, String> {
     Ok(hex(&raw))
 }
 
+/// The device file's name in the cloud folder.
+pub const DEVICE_FILE: &str = "device.id";
+
+/// This device's id: 16 random bytes as 32 lowercase hex, made once and kept in the cloud folder. A
+/// missing or bad file gets a new id (the account sees a new device, and the old device's rows stay
+/// as they are: they are never deleted by this one).
+pub fn device_id(cloud_dir: &Path) -> Result<String, String> {
+    let path = cloud_dir.join(DEVICE_FILE);
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        let id = text.trim();
+        if id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Ok(id.to_string());
+        }
+    }
+    let mut raw = [0u8; 16];
+    getrandom::fill(&mut raw).map_err(|e| format!("random: {e}"))?;
+    let id = hex(&raw);
+    std::fs::create_dir_all(cloud_dir).map_err(|e| e.to_string())?;
+    std::fs::write(&path, &id).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
 /// The key file's path in `cloud_dir`.
 pub fn key_path(cloud_dir: &Path) -> PathBuf {
     cloud_dir.join(KEY_FILE)

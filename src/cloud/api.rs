@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use razdor_wire::cloud::{
-    AccountCreated, AccountNew, BenchReport, HubList, LinkIssued, LinkRedeem, LinkRedeemed, Marks, SaveEntry,
+    AccountCreated, AccountNew, BenchReport, HubList, LinkIssued, LinkRedeem, LinkRedeemed, Marks,
     SaveList, SaveMeta, SavePut, SyncedSettings,
 };
 use razdor_wire::{frame, paths, Validate, SCHEMA};
@@ -204,14 +204,6 @@ fn message(body: &[u8]) -> String {
         .ok()
         .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
         .unwrap_or_default()
-}
-
-/// The saves of a list that belong to one map, kind and game (the sync's window).
-pub fn in_group<'a>(saves: &'a [SaveEntry], game: &str, map: &str, kind: razdor_wire::cloud::SaveKind) -> Vec<&'a SaveEntry> {
-    saves
-        .iter()
-        .filter(|e| e.meta.game == game && e.meta.map == map && e.meta.kind == kind)
-        .collect()
 }
 
 /// The server's confirmation of a write (`{"ok":true}`). A silent answer (`{}`) is not one: the write

@@ -2,11 +2,11 @@
 //! macroquad: the UI phase calls [`Cloud`], and never waits on it.
 //!
 //! - [`account`]: the account key (0600 in the cloud folder) and the recovery phrase.
-//! - [`select`]: which local saves go up (per map: 3 manual, 3 quick, 1 session; pinned, then
-//!   newest) and each save's state (☁, ⏳, 💾).
-//! - [`merge`]: marks (union), settings (newest change per key), «Продолжить» (the newer keeps the
-//!   slot; the other becomes a save named after its device and time), newer-Razdor detection.
-//! - [`sync`]: pull and push over a [`sync::Local`] store (this device's saves and documents).
+//! - [`select`]: which local saves this device mirrors (pinned, then «Продолжить», then newest; the
+//!   device's cap and the quota) and each save's state (☁, ⏳, 💾).
+//! - [`merge`]: marks (union), settings (newest change per key), newer-Razdor detection.
+//! - [`sync`]: the device's mirror (push deletes its own stale rows, uploads the chosen ones), the list
+//!   of other devices' saves (metadata only), and the download on demand, over a [`sync::Local`].
 //! - [`api`] and [`http`]: the typed calls and the transport (curl on desktop).
 //! - [`pack`]: zstd on the client, and the hash the server checks.
 //!
@@ -67,9 +67,14 @@ pub enum Job {
     DeleteAccount,
     /// Pull, then push. The start of the game and «Синхронизировать сейчас» use it.
     Sync,
+    /// The list, the marks, the settings and the Hub offer (no upload).
     Pull,
-    /// On exit and on minimising.
+    /// On exit and on minimising: this device's mirror only.
     Push,
+    /// The «Облако» tab's list of the other devices' saves (no download, no upload).
+    Refresh,
+    /// A save of another device, downloaded on demand (its cloud id); it becomes a local save.
+    Download(String),
 }
 
 /// Where the cloud stands, for the settings row and the load list's notice.
@@ -97,7 +102,9 @@ pub struct Shared {
     pub last_sync: Option<u64>,
     /// Each local save's state, by the store's id.
     pub states: HashMap<String, SaveState>,
-    /// The account's saves from a newer Razdor: listed, never downloaded.
+    /// Other devices' saves this device does not hold: listed in the «Облако» tab, downloaded on demand.
+    pub others: Vec<SaveEntry>,
+    /// The account's saves from a newer Razdor: listed locked, never downloaded or deleted.
     pub newer: Vec<SaveEntry>,
     /// The quota in use (bytes, after zstd) at the last round.
     pub used_bytes: u64,
@@ -231,7 +238,7 @@ impl Worker {
 
     fn execute(&mut self, job: Job) {
         lock(&self.shared).phase = Phase::Working;
-        let retryable = matches!(job, Job::Sync | Job::Pull | Job::Push);
+        let retryable = matches!(job, Job::Sync | Job::Pull | Job::Push | Job::Refresh);
         match self.run_job(&job) {
             Ok(()) => {
                 let mut sh = lock(&self.shared);
@@ -288,6 +295,21 @@ impl Worker {
                 sh.newer.clear();
                 Ok(())
             }
+            Job::Download(id) => {
+                let api = self.api().ok_or(CloudError::Unauthorized)?;
+                sync::download(&api, self.local.as_mut(), id)?;
+                // The list changed: the downloaded save is no longer «on another device».
+                let report = sync::refresh(&api, self.local.as_ref())?;
+                self.show_list(report);
+                Ok(())
+            }
+            Job::Refresh => {
+                // Without an account nothing is sent, and nothing fails.
+                let Some(api) = self.api() else { return Ok(()) };
+                let report = sync::refresh(&api, self.local.as_ref())?;
+                self.show_list(report);
+                Ok(())
+            }
             Job::Sync | Job::Pull | Job::Push => {
                 // Without an account nothing is sent, and nothing fails.
                 let Some(api) = self.api() else { return Ok(()) };
@@ -299,6 +321,7 @@ impl Worker {
                 let full = report.full;
                 let mut sh = lock(&self.shared);
                 sh.states = report.states;
+                sh.others = report.others;
                 sh.newer = report.newer;
                 sh.used_bytes = report.used_bytes;
                 sh.errors = report.errors;
@@ -311,6 +334,14 @@ impl Worker {
                 }
             }
         }
+    }
+
+    /// Shows a list read on its own (the «Облако» tab's refresh, or after a download).
+    fn show_list(&self, report: sync::Report) {
+        let mut sh = lock(&self.shared);
+        sh.others = report.others;
+        sh.newer = report.newer;
+        sh.used_bytes = report.used_bytes;
     }
 
     /// Stores the account's key on this device and marks it linked.

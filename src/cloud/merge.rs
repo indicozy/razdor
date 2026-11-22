@@ -1,7 +1,7 @@
 //! The merge rules of the cloud, pure (the server applies the same ones to what it stores):
 //! marks merge as a union (the better level wins per map), synced settings take the newest change
-//! of each key, and two «Продолжить» saves on one map keep the newer one as the slot and turn the
-//! other into an ordinary save named after its device and time.
+//! of each key. A save downloaded from another device is named after its device and time (see
+//! [`session_name`]); there is no merge of «Продолжить» (each device keeps its own).
 
 use razdor_wire::cloud::{MarkLevel, Marks, SyncedSettings};
 use razdor_wire::SCHEMA;
@@ -50,12 +50,6 @@ pub fn merge_settings(local: &SyncedSettings, cloud: &SyncedSettings) -> SyncedS
 pub fn session_name(device: &str, saved_at: u64, offset_secs: i64) -> String {
     let local = (saved_at as i64 + offset_secs).rem_euclid(86_400) as u64;
     format!("Продолжить ({device}, {:02}:{:02})", local / 3600, (local / 60) % 60)
-}
-
-/// Two session saves of one map: true when the first is the newer one (it keeps the slot). A tie
-/// keeps the first's id order, so every device picks the same one.
-pub fn keeps_slot(a_saved_at: u64, a_id: &str, b_saved_at: u64, b_id: &str) -> bool {
-    (a_saved_at, a_id) > (b_saved_at, b_id)
 }
 
 /// True when `theirs` is a newer Razdor than `ours`: dotted numbers compared in order, so 1.10.0
@@ -144,14 +138,6 @@ mod tests {
         assert_eq!(session_name("ПК", saved, 0), "Продолжить (ПК, 21:40)");
         assert_eq!(session_name("телефон", saved, 3 * 3600), "Продолжить (телефон, 00:40)");
         assert_eq!(session_name("ПК", saved, -22 * 3600), "Продолжить (ПК, 23:40)");
-    }
-
-    #[test]
-    fn the_newer_session_keeps_the_slot_and_a_tie_is_decided_by_id() {
-        assert!(keeps_slot(200, "a", 100, "b"));
-        assert!(!keeps_slot(100, "b", 200, "a"));
-        assert!(keeps_slot(100, "b", 100, "a"));
-        assert!(!keeps_slot(100, "a", 100, "b"));
     }
 
     #[test]
