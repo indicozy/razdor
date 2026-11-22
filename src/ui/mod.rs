@@ -59,6 +59,7 @@ pub mod minimap;
 pub mod living;
 pub mod holiday;
 pub mod holiday_start;
+pub mod en_pack;
 pub mod holiday_windows;
 pub mod cloud_shadow;
 pub mod crt;
@@ -390,6 +391,11 @@ pub struct App {
     /// The Christmas mod the holiday switch is switching to (`holiday_start`), until the game plays it
     /// (`holiday_switch_check`).
     holiday_awaiting: Option<String>,
+    /// The English maps pack's worker (`en_pack`), whether it was tried for this trigger (a launch, a switch to
+    /// English) and the interface language the App last saw.
+    en_job: Option<std::sync::mpsc::Receiver<Result<bool, String>>>,
+    en_tried: bool,
+    en_seen: Option<razdor::i18n::Lang>,
     /// Modal windows waiting to be read (noon reports, victories), first on top.
     pub dialogs: VecDeque<Dialog>,
     pub map_view: MapView,
@@ -523,6 +529,9 @@ impl App {
             holiday_greet: false,
             holiday_generation: 0,
             holiday_awaiting: None,
+            en_job: None,
+            en_tried: false,
+            en_seen: None,
             dialogs: VecDeque::new(),
             map_view: MapView::default(),
             pending_load: None,
@@ -1731,6 +1740,7 @@ impl App {
         // The season start (once a season, on the main menu only; nothing is loaded yet).
         if matches!(self.screen, Screen::MainMenu) {
             self.holiday_switch_tick();
+            self.en_pack_tick();
         }
         // The mods updated in the Hub while it was open: the one played is loaded again, as the holiday path does.
         for id in std::mem::take(&mut self.hub_updated) {

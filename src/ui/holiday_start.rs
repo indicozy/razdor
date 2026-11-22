@@ -47,11 +47,11 @@ pub fn loader_label() -> Option<&'static str> {
             _ => None,
         };
     }
-    loading_label(START_RUNNING.load(Ordering::Relaxed), files_busy(), super::launch::fetching())
+    loading_label(START_RUNNING.load(Ordering::Relaxed), files_busy(), super::launch::fetching()).or_else(super::en_pack::loader_label)
 }
 
 /// Whether the holiday files are being checked and downloaded right now.
-fn files_busy() -> bool {
+pub fn files_busy() -> bool {
     FILES.with(|s| matches!(*s.borrow(), Files::Installing(_)))
 }
 
@@ -209,7 +209,7 @@ pub fn files_tick(start_due: bool, game_ready: bool) {
     let state = FILES.with(|s| std::mem::replace(&mut *s.borrow_mut(), Files::Done));
     let next = match state {
         Files::Done => Files::Done,
-        Files::Waiting if !game_ready || !holiday::setting() || start_due => Files::Waiting,
+        Files::Waiting if !game_ready || !holiday::setting() || start_due || super::en_pack::busy() => Files::Waiting,
         Files::Waiting => match launch::fresh() {
             Some((catalog, _)) => match catalog.holiday.clone() {
                 Some(h) => start_files(h),
@@ -339,7 +339,7 @@ impl App {
         if launch::fetching() {
             return;
         }
-        if self.mod_switch.is_some() || super::saves_move::busy() || super::game_import::busy() {
+        if self.mod_switch.is_some() || super::saves_move::busy() || super::game_import::busy() || super::en_pack::busy() {
             return;
         }
         let Some(local) = razdor::hub::local_dir() else { return };
