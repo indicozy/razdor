@@ -500,6 +500,52 @@ public String razdorDownload(String url, String path, int stallSeconds, int tota
     }
 }
 
+// POSTs the file `bodyPath` (JSON, or a framed body) to `url` for the analytics (`telemetry`). Returns
+// "HTTP <code>" and a newline, then the reply's body, whatever the status; a failure returns its text
+// (the Rust side reads the first line: `update::parse_post_reply`). The stall and total limits are as
+// razdorDownload's. Not compiled here: the first device run tests it.
+public String razdorPost(String url, String bodyPath, int stallSeconds, int totalSeconds) {
+    HttpURLConnection connection = null;
+    try {
+        connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setRequestMethod("POST");
+        connection.setDoOutput(true);
+        connection.setConnectTimeout(stallSeconds * 1000);
+        connection.setReadTimeout(stallSeconds * 1000);
+        connection.setRequestProperty("User-Agent", "razdor");
+        connection.setRequestProperty("Content-Type", "application/json");
+        connection.setFixedLengthStreamingMode(new java.io.File(bodyPath).length());
+        try (java.io.InputStream in = new java.io.FileInputStream(bodyPath); java.io.OutputStream out = connection.getOutputStream()) {
+            byte[] buffer = new byte[65536];
+            int n;
+            while ((n = in.read(buffer)) > 0) {
+                out.write(buffer, 0, n);
+            }
+        }
+        int code = connection.getResponseCode();
+        java.io.InputStream reply = code / 100 == 2 ? connection.getInputStream() : connection.getErrorStream();
+        StringBuilder body = new StringBuilder();
+        if (reply != null) {
+            try (java.io.Reader reader = new java.io.InputStreamReader(reply, java.nio.charset.StandardCharsets.UTF_8)) {
+                char[] chars = new char[4096];
+                int n;
+                while ((n = reader.read(chars)) > 0) {
+                    body.append(chars, 0, n);
+                }
+            }
+        }
+        return "HTTP " + code + "\n" + body;
+    } catch (java.net.SocketTimeoutException e) {
+        return "stalled: " + e;
+    } catch (Exception e) {
+        return e.toString();
+    } finally {
+        if (connection != null) {
+            connection.disconnect();
+        }
+    }
+}
+
 // Fetches `url` for a copy the app keeps: `etag` and `lastModified` ("" when there is none) are sent as
 // If-None-Match and If-Modified-Since. Returns "304" when the copy is current (nothing is written), else
 // "200\n<ETag>\n<Last-Modified>" (empty lines for the headers the server did not send) with the body written
