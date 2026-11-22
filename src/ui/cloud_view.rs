@@ -302,7 +302,9 @@ fn link_step() {
     let until = link.map(|(_, at)| format!("{} {}", tr("Valid for 10 minutes, once. Until"), hhmm(at)));
     let mut lines = vec![format!("{}: {code}", tr("Code for the other device"))];
     lines.push(until.unwrap_or_default());
-    lines.push(tr("On the other device: Settings, Other, Cloud saves, Enter a code.").to_string());
+    // Two lines: the path's own line does not leave a lone word on the desktop's window.
+    lines.push(tr("On the other device:").to_string());
+    lines.push(tr("Settings, Other, Cloud saves, Enter a code.").to_string());
     let (inner, closed) = map_import::frame(tr("Link a device"), &lines, true);
     match map_import::buttons(inner, &[tr("Copy"), tr("Close")]) {
         Some(0) => {
