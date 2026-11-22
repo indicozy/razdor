@@ -46,24 +46,23 @@ Downloaded mods and maps are untrusted: never run them, and run any Python that 
    ```
    List the assets explicitly, or pick them with `find <out> -maxdepth 1 -type f ! -name report.md`.
    `report.md` holds local paths: never upload it. Check the release with `gh release view`.
-6a. **Pages mirror** (the owner's decision, 2026-11-22; with the same yes as step 6; spec: the "Pages layout"
-   section of `docs/specs/2026-11-13-gitverse-mirrors.md`): the same catalog goes to the `razdor-community`
-   Pages on both hosts, with the release copies kept as they are. Every hub file and the game are bare Pages
-   files `files/<sha256>.dat` (no zip; Pages refuses `.zip`), the pictures under `previews/`:
-   `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host gitverse --dry-run`, then
-   without `--dry-run` to push; then `--host github` the same way once GitHub's Pages is on (the setup in
-   `tools/gitverse/README.md`). The `index-v2.json` of each host names its own files by absolute address. No
-   release is made or deleted by this layout (no `--keep`, no `--tag`).
-   - **Check the routing first**: `--dry-run` prints the counts and the site size (the GitVerse index is written
-     into `<out>/pages-gitverse/`) and sends nothing. The site must stay under 500 MB (it warns above 400 MB;
-     the 2026-11-22 catalog is about 395 MB, so a larger catalog warns).
-   - **It stops, before anything is fetched or pushed, when a file has no place** (a picture that is a
-     `.zip`/`.exe`/`.py`, a file with no SHA-256). It lists them. Do not rename files on your own.
-   - The push replaces the site's catalog files: a file that is not in the new catalog is removed. The update
-     feed (`releases.json`) and the remote config (`config.json`) are never touched here.
+6a. **Game on Pages** (the owner's decision, 2026-11-22; part of the same publish as step 6, spec: the
+   "Pages layout" section of `docs/specs/2026-11-13-gitverse-mirrors.md`). The zipped publish of
+   `tools/gitverse/publish_hub.py` (the default `--layout zipped`) also copies the game archive to the
+   `razdor-community` Pages on both hosts as `files/<sha256>.dat` (a bare file), and the catalog's `game` entry
+   then reads `url` = GitVerse's Pages copy, `mirrors` = GitHub's Pages copy, the GitVerse attachment and the
+   GitHub release file. The Hub files (maps, campaigns, mods) stay on release attachments; their move to Pages
+   is postponed. Each Hub file's `mirrors` list its GitHub release copy.
+   - **Dry run first**: `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --dry-run` writes the
+     GitVerse index into `<out>/gitverse/` and sends nothing. Check the game's line in its output.
+   - Without `--dry-run` it pushes the game's Pages copy to both hosts (waits until each serves the bytes), then
+     the release and the index. Pass `--no-game-pages` to keep the game as before (no Pages copy).
+   - The GitHub host needs GitHub's Pages set up first (the setup in `tools/gitverse/README.md`); the run
+     fails at that step otherwise.
+   - After the publish, `data/remote/config.json`'s `game.links` is set by hand (a separate publish, see the
+     README): the GitVerse Pages copy, the GitHub Pages copy, then the current attachment and release file.
    - Never run it against a catalog nobody has checked: it writes the public Pages site.
-   - Report the result (the site's files and size per host, the index address) to the owner.
-   - The legacy zipped layout (`--layout zipped`, the release `catalog-YYYY-MM-DD` on `razdor-community`) is
-     still there for a catalog that needs release files; it is GitVerse-only.
+   - Report the result (the game's address on each host, the index address) to the owner.
+   - `--layout pages` (every Hub file as a Pages file) is kept for later; it is not part of this step.
 7. **Afterwards**: the app reads the new catalog at its next start; no code change is needed.
    Keep the `out/` folder and the scratch data (they are the next run's inputs).

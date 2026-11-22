@@ -214,6 +214,55 @@ class MirrorTests(HermeticTestCase):
                 ph.check_pages_index(idx, GV_BASE)
 
 
+class ZippedGameTests(HermeticTestCase):
+    """The zipped layout (the owner's decision 2026-11-22): the Hub files stay on release attachments, the game
+    archive is also a Pages file on both hosts, and each Hub file names its GitHub release copy as a mirror."""
+
+    def args(self, folder, game_pages):
+        return types.SimpleNamespace(catalog_dir=folder, tag=None, dry_run=True, no_pages=False, wait=0,
+                                     replace=False, keep=2, layout="zipped", host="gitverse", game_pages=game_pages)
+
+    def test_the_game_is_on_both_pages_and_its_mirrors_are_the_copies_in_order(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, game = real_catalog(d)
+            self.assertEqual(ph.publish(self.args(d, True)), 0)
+            with open(os.path.join(d, "gitverse", "index-v2.json"), encoding="utf-8") as f:
+                idx = json.load(f)
+            where = "files/" + sha(game) + ".dat"
+            self.assertEqual(idx["game"]["url"], GV_BASE + "/" + where)
+            self.assertEqual(idx["game"]["mirrors"], [GH_BASE + "/" + where, ph.GAME_URL, ph.GAME_GITHUB_URL])
+            self.assertEqual(idx["game"]["size"], len(game))
+            self.assertEqual(idx["game"]["sha256"], sha(game))
+            with open(os.path.join(d, "gitverse", *where.split("/")), "rb") as f:
+                self.assertEqual(f.read(), game, "the Pages file holds the archive's bytes")
+
+    def test_every_hub_file_names_its_github_release_copy_and_keeps_its_zip_fields(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            self.assertEqual(ph.publish(self.args(d, True)), 0)
+            with open(os.path.join(d, "gitverse", "index-v2.json"), encoding="utf-8") as f:
+                idx = json.load(f)
+            files = [f for e in idx["entries"] for f in e.get("files") or []]
+            self.assertEqual(len(files), 3)
+            for f in files:
+                name = f["member"] if f.get("wrapped") else f["name"]
+                self.assertEqual(f["mirrors"], [ph.GITHUB_HUB_RELEASE + "/" + name])
+                self.assertTrue(f["path"].startswith("https://gitverse.ru/api/attachments/DRY-RUN"))
+            wrapped = [f for f in files if f.get("wrapped")]
+            self.assertEqual(len(wrapped), 2, "the two maps are zipped; the mod is a release asset as it is")
+
+    def test_without_game_pages_the_game_keeps_its_attachment_and_no_pages_file_is_staged(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, game = real_catalog(d)
+            self.assertEqual(ph.publish(self.args(d, False)), 0)
+            with open(os.path.join(d, "gitverse", "index-v2.json"), encoding="utf-8") as f:
+                idx = json.load(f)
+            self.assertEqual(idx["game"]["url"], ph.GAME_URL)
+            self.assertEqual(idx["game"]["mirrors"], ["https://github.example/game-cu.zip"],
+                             "the catalog's own game address is the mirror, as before")
+            self.assertFalse(os.path.exists(os.path.join(d, "gitverse", "files")))
+
+
 class PublishDryRunTests(HermeticTestCase):
     def args(self, folder, host):
         return types.SimpleNamespace(catalog_dir=folder, tag=None, dry_run=True, no_pages=False, wait=0,

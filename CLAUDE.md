@@ -192,11 +192,11 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   mirror for Russia. Its release files are `https://gitverse.ru/api/attachments/<uuid>` (Range works; about
   4 GB of release files per account, ~140–500 KB/s per connection). GitVerse Pages is the website
   (site + wiki, `indicozy.gitverse.site/razdor`) and the community's Pages (`razdor-community`).
-  The owner's decision (2026-11-22): the Hub files and the game archive are served from the
-  `razdor-community` Pages on both hosts (`indicozy.gitverse.site/razdor-community`,
-  `indicozy.github.io/razdor-community`), because GitVerse throttles release downloads (HTTP 429);
-  the release files stay as the fallback mirrors. From 1.5.2 on, the app tries GitVerse first and GitHub
-  as the fallback for app updates, the hub and the game download.
+  The owner's decision (2026-11-22): the game archive is also a Pages file on both hosts
+  (`indicozy.gitverse.site/razdor-community`, `indicozy.github.io/razdor-community`), because GitVerse
+  throttles release downloads (HTTP 429); its release copies stay as the fallback mirrors. The Hub files
+  (maps, campaigns, mods) stay on release attachments; moving them to Pages is postponed. From 1.5.2 on,
+  the app tries GitVerse first and GitHub as the fallback for app updates, the hub and the game download.
 - "release" / "make a release": the `release` skill. The Discord release post goes out together with
   the release's start (right after the tag is pushed), without waiting for the release pipeline to
   finish (the owner's decision, 2026-10-27).

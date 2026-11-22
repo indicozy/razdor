@@ -180,13 +180,25 @@ no macroquad):
 - The website (site + wiki) on the `razdor` Pages: pushed from this machine by the `wiki` /
   `release` skills (no GitVerse token on GitHub, unless the owner asks for it).
 
-## Pages layout (the owner's decision, 2026-11-22)
+## Game on Pages (the owner's decision, 2026-11-22)
 
-GitVerse answers HTTP 429 to anonymous release downloads (about 2 minutes); its Pages did not. So the Hub files
-and the game archive move from the release attachments to the `razdor-community` Pages, on both hosts
-(`indicozy.gitverse.site/razdor-community/` and `indicozy.github.io/razdor-community/`). The release files
-stay: they are the fallback copies. This replaces the 2026-11-13 rule for the hub and the game («the hub and
-the game stay on releases»).
+GitVerse answers HTTP 429 to anonymous release downloads (about 2 minutes); its Pages did not. So the game
+archive is also a Pages file on both hosts (`indicozy.gitverse.site/razdor-community/` and
+`indicozy.github.io/razdor-community/`), `files/<sha256>.dat`, bare. The release copy stays the fallback.
+The zipped publish (`publish_hub.py`, the default layout) does it: the game's Pages file is pushed to both hosts
+and checked before the index moves; the catalog's `game` entry reads `url` = GitVerse's Pages copy and `mirrors`
+= the GitHub Pages copy, the GitVerse attachment and the GitHub release file (`zipped_game`). `--no-game-pages`
+keeps the old entry. `data/remote/config.json`'s `game.links` is not changed by the publish; the order to set
+after it is in `tools/gitverse/README.md` («Game on Pages»).
+
+The Hub files (maps, campaigns, mods) stay on release attachments in the zipped layout. Each one's entry gets
+`mirrors` = its GitHub release file (plus, for an archive, its attachment), so a throttled attachment falls back
+to GitHub. Moving them to Pages (`--layout pages`, below) is postponed; the text below describes that layout.
+
+## Pages layout (postponed for the Hub files)
+
+Not in use for the Hub files yet (the owner's decision, 2026-11-22). The layout as written: the Hub files and the
+game archive as bare Pages files on both hosts, with the release files as the fallback copies.
 
 - **Files**: every hub file is `files/<sha256>.dat`, bare (the bytes of the file, no zip). Pages refuses `.zip`,
   `.exe` and `.py`; a mod's zip is served under `.dat` too, and its catalog flag `archive` still unpacks it.

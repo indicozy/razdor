@@ -10,7 +10,7 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the site changed, a commit as the owner, a push, and a wait until the anonymous URLs serve exactly the new bytes. Host `gitverse` (default): the `docs/` folder of `main`. Host `github` (the pages layout only): the root of the `gh-pages` branch, the token from `gh auth token -u indicozy`. Every push writes `config.json` from `data/remote/config.json`. Not run directly. |
 | `publish_config.py` | The remote config only: checks `data/remote/config.json` as the app reads it, pushes `docs/config.json` to the `razdor-community` Pages, waits until it is served. `--dry-run` checks only. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
-| `publish_hub.py` | The hub catalog. Default `--layout zipped` (the 2026-11-13 design): zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. `--layout pages` (the owner's decision, 2026-11-22): every hub file and the game archive is a bare Pages file `files/<sha256>.dat` on `--host gitverse` (the `docs/` of `main`) or `--host github` (the root of `gh-pages`); no release is made or removed. See «Pages layout» below. |
+| `publish_hub.py` | The hub catalog. Default `--layout zipped` (the 2026-11-13 design): zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. `--layout pages` (the owner's decision, 2026-11-22): every hub file and the game archive is a bare Pages file `files/<sha256>.dat` on `--host gitverse` (the `docs/` of `main`) or `--host github` (the root of `gh-pages`); no release is made or removed. The zipped default also copies the game archive to Pages on both hosts and gives each Hub file its GitHub release copy as a mirror (see «Game on Pages»). `--layout pages` is postponed (see «Pages layout»). |
 | `publish_site.py` | The website on GitVerse Pages (`https://indicozy.gitverse.site/razdor/`): builds the committed wiki (`npm ci && npm run build`, pinned to CPUs 8-19) and assembles it with the gh-pages site and `config.json` as pages.yml does, pushes the `site` branch of `razdor` (the folder `site/` and `.github/workflows/gitverse-pages.yaml` from `site-pages.yaml`; force, that branch only), waits for its workflow run and for the bytes, then checks the live pages and their assets. `--assemble-only`, `--check-only`. |
 | `site-pages.yaml` | The workflow file pushed with the site (`actions/upload-pages-artifact@v1.0.0` on `site/`, `actions/deploy-pages@v1.0.0`, `ubuntu-latest`). |
 | `testkit.py` | The hermetic base every test class uses, and its guards (see Tests). |
@@ -49,11 +49,35 @@ python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --ho
 python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host github     # after the GitHub setup
 ```
 
-## Pages layout (2026-11-22)
+## Game on Pages (zipped layout, 2026-11-22)
 
-The owner's decision: the Hub files and the game archive are served from the `razdor-community` Pages on
-both hosts (`https://indicozy.gitverse.site/razdor-community/` and `https://indicozy.github.io/razdor-community/`).
-The release copies stay where they are, as the catalog's fallback.
+The owner's decision: the zipped publish (the default `--layout zipped`) also serves the game archive from the
+`razdor-community` Pages on both hosts, as the bare file `files/<sha256>.dat`. The Hub files (maps, campaigns,
+mods) stay on release attachments; their move to Pages is postponed.
+
+- **The publish** pushes the game's Pages file to both hosts first (`gitverse`: `docs/` of `main`; `github`: the
+  root of `gh-pages`), then checks the bytes on each host's Pages, then makes the release and moves the index.
+  The GitVerse site is written in full by the same publish, which keeps the game's file.
+- **The catalog's `game` entry** (`index-v2.json` of GitVerse): `url` = GitVerse's Pages copy, `mirrors` = the
+  GitHub Pages copy, the GitVerse release attachment and the GitHub release file, in that order.
+- **Each Hub file's `mirrors`** (zipped layout): its GitHub release file (`releases/latest/download/<name>`, the
+  community catalog's bare file). For an archive (a mod's zip) also its GitVerse attachment, which is the file as
+  it is. A wrapped file's attachment is a zip, so it is not listed. The app checks a mirror with the file's own
+  size and SHA-256, so a wrapped file's mirror is the bare file.
+- **`--no-game-pages`** keeps the old zipped output (the game as its GitVerse attachment, no Pages copy).
+- **`--dry-run`** writes the index into `<out>/gitverse/` and prints the game's address and mirrors. Nothing is
+  sent, and the release state file is not written.
+- **The remote config** (`data/remote/config.json`, `game.links`) is NOT changed by the publish. After the publish,
+  set it by hand, as a separate `publish_config.py` run, in this order: the GitVerse Pages copy, the GitHub Pages
+  copy, then the current attachment and the release file (the links the app downloads the game from, in order).
+  Old apps read `game.links` as they are; the Pages copies come first only once that is set.
+- **Setup for the GitHub copy**: GitHub's Pages must be on for `razdor-community` (the setup below). Until then the
+  GitHub Pages address does not answer and the app moves on to the next mirror.
+
+## Pages layout (2026-11-22, postponed for the Hub files)
+
+The layout for every Hub file as a Pages file (`--layout pages`) is kept for later. The owner's decision for now:
+only the game archive is on Pages (see above). The text below describes the `--layout pages` layout.
 
 - **Files**: each hub file (a map, a campaign, a mod's zip, any file) is `files/<sha256>.dat`, the bytes as they are
   (bare, no zip). The name is by the SHA-256 (two entries with the same bytes share one file), the extension is

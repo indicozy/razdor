@@ -254,7 +254,7 @@ class HubFlowTests(HermeticTestCase):
     def test_catalog_is_pushed_with_previews_and_web_page_and_old_catalogs_go(self):
         import publish_hub as ph
         args = argparse.Namespace(catalog_dir=self.cat, tag="catalog-2026-11-13", no_pages=False, replace=False,
-                                  keep=2, wait=0, dry_run=False, unpublish=None)
+                                  keep=2, wait=0, dry_run=False, unpublish=None, game_pages=False)
         self.assertEqual(ph.publish(args), 0)
 
         def show(path):

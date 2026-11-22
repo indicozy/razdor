@@ -262,9 +262,12 @@ pub struct FileRef {
     pub archive_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive_sha256: Option<String>,
-    /// Other addresses of the same bytes as `path` (the same file, the same size and SHA-256), tried in
-    /// order when `path` fails: a file's copies on the other host. Absent in the old catalogs (they read as
-    /// none); an old app ignores the field. Each is an https address (see [`check_mirrors`]).
+    /// Other addresses of the file's own bytes, tried in order when `path` fails (any error, a 429 included):
+    /// a copy on the other host. Each is checked with the file's own `size` and `sha256`. For an archive (a
+    /// mod's zip) `path` and the mirror are the zip itself; for a wrapped file the mirror is the bare file, not
+    /// the wrapping zip (`archive_size` / `archive_sha256` are then the zip's and are not checked for a mirror).
+    /// Absent in the old catalogs (they read as none); an old app ignores the field. Each is an https address
+    /// (see [`check_mirrors`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirrors: Vec<String>,
 }
@@ -1398,16 +1401,38 @@ impl Hub {
     fn fetch_wrapped(&self, id: &str, f: &FileRef, n: usize, downloads: &Path) -> Result<Vec<u8>, String> {
         std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
         let zip = downloads.join(format!("{id}-{n}.wrapped.zip"));
-        let result = self.download_checked(f, &zip, MAX_ARCHIVE_DOWNLOAD, f.archive_size, &|path| check_archive(path, f)).and_then(|()| {
-            let member = f.member.as_deref().unwrap_or_default();
-            archive::member(&zip, member).map_err(|e| format!("{}: {e}", f.path))
-        });
+        let bare = downloads.join(format!("{id}-{n}.bare"));
+        // `path` is the wrapping zip; a mirror is a copy of the file itself (the bare file, checked by its own
+        // size and SHA-256), so the mirrors are tried with `bare_from`, never as a zip.
+        let result = if mirrored(f) {
+            mirror::first_ok(&f.path, &file_addresses(f), |url| {
+                if url == f.path { self.wrapped_from(f, url, &zip, true) } else { bare_from(f, url, &bare) }
+            })
+        } else {
+            self.wrapped_from(f, &f.path, &zip, false)
+        };
         let _ = std::fs::remove_file(&zip);
+        let _ = std::fs::remove_file(&bare);
         let bytes = result?;
         if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
             return Err(format!("{}: the file in the archive does not match the catalog", f.path));
         }
         Ok(bytes)
+    }
+
+    /// The file's bytes from the wrapping zip at `url` (`f.path`): downloaded to `zip`, checked against the
+    /// archive's size and SHA-256, and its member taken out (the file's own check is the caller's). `direct`
+    /// (the mirrored case) is one attempt with no retry, so a throttled address gives way to the next at once.
+    fn wrapped_from(&self, f: &FileRef, url: &str, zip: &Path, direct: bool) -> Result<Vec<u8>, String> {
+        let _ = std::fs::remove_file(zip);
+        if direct {
+            crate::update::download_known(url, zip, 900, MAX_ARCHIVE_DOWNLOAD, f.archive_size)?;
+        } else {
+            self.download(url, zip, MAX_ARCHIVE_DOWNLOAD, f.archive_size)?;
+        }
+        check_archive(zip, f)?;
+        let member = f.member.as_deref().unwrap_or_default();
+        archive::member(zip, member).map_err(|e| format!("{url}: {e}"))
     }
 
     /// Writes a mod's files: the files it ships and its archives' entries, built in
@@ -1578,6 +1603,15 @@ fn check_sum(path: &Path, size: u64, sha256: &str, what: &str) -> Result<(), Str
         return Err(format!("{what}: the file does not match the catalog"));
     }
     Ok(())
+}
+
+/// A wrapped file's mirror: the file itself at `url` (a bare copy, not the zip), downloaded to `bare` and checked
+/// against the file's own size and SHA-256. One attempt; the caller tries the next address on a failure.
+fn bare_from(f: &FileRef, url: &str, bare: &Path) -> Result<Vec<u8>, String> {
+    let _ = std::fs::remove_file(bare);
+    crate::update::download_known(url, bare, 900, MAX_ARCHIVE_DOWNLOAD, Some(f.size))?;
+    Hub::check_file(bare, f)?;
+    std::fs::read(bare).map_err(|e| format!("{url}: {e}"))
 }
 
 /// The wrapping zip of a wrapped file is the catalog's (`archive_size`, `archive_sha256`).

@@ -77,6 +77,7 @@ PREVIEWS = "previews/"
 GITHUB_HUB_RELEASE = "https://github.com/indicozy/razdor-community/releases/latest/download"
 STATE = "gitverse-state.json"
 STAGE = "gitverse"
+COPIES_STAGE = "gitverse-copies"   # the Pages copies alone (the game archive), pushed to both hosts before the index
 ZIPS = "gitverse-zips"
 REMOTE = "remote-pictures"   # the https pictures the index rewrites, fetched here during publishing
 INDEX_V2 = "index-v2.json"
@@ -315,12 +316,23 @@ def check_stage(stage, idx):
     return named
 
 
-def gitverse_index(cat, links):
+def zipped_game(game_where):
+    """The zipped layout's game entry (--game-pages, the owner's decision 2026-11-22): `url` is GitVerse's Pages
+    copy of the game (`files/<sha256>.dat`), and `mirrors` are the GitHub Pages copy, the GitVerse release
+    attachment and the GitHub release file, in that order. Old apps read `url` and `mirrors` (ui/game_import)."""
+    return {"url": GITVERSE_BASE + "/" + game_where,
+            "mirrors": [GITHUB_BASE + "/" + game_where, GAME_URL, GAME_GITHUB_URL]}
+
+
+def gitverse_index(cat, links, game=None):
     """The GitVerse copy of the catalog (index-v2.json). links: catalog name -> {'url', 'size', 'sha256'} of
     the release asset that carries it (the zip of a wrapped file, the file itself for an archive). A
     wrapped file keeps its own size and SHA-256 and names its zip (`archive_size`, `archive_sha256`) and its
-    member (its catalog name). A picture is under previews/, relative; the game keeps its GitVerse address
-    with the GitHub one as a mirror."""
+    member (its catalog name). A file's `mirrors` are its GitHub release copy (the bare file, the community
+    catalog's latest release): the app tries it when the file's own address fails, checked with the file's own
+    size and SHA-256 (for a wrapped file that copy is the bare file, not the zip). A picture is under previews/,
+    relative. `game` (see zipped_game) replaces the game entry; without it the game keeps its GitVerse
+    attachment, with the GitHub release file as its mirror."""
     out = copy.deepcopy(cat)
     for e in out["entries"]:
         for f in e.get("files") or []:
@@ -329,6 +341,7 @@ def gitverse_index(cat, links):
                 continue
             ln = links[name]
             f["path"] = ln["url"]
+            f["mirrors"] = [GITHUB_HUB_RELEASE + "/" + name]
             if ext_of(name) not in ARCHIVE_EXT:
                 f["wrapped"] = "zip"
                 f["member"] = name
@@ -341,19 +354,45 @@ def gitverse_index(cat, links):
     ad = out.get("ad")
     if isinstance(ad, dict):
         ad["image"] = PREVIEWS + os.path.basename(ad["image"])
-    game = out.get("game")
-    if isinstance(game, dict):
+    game_entry = out.get("game")
+    if isinstance(game_entry, dict) and game is not None:
+        game_entry["url"] = game["url"]
+        game_entry["mirrors"] = list(game["mirrors"])
+    elif isinstance(game_entry, dict):
         mirrors = []
-        original = game.get("url", "")
+        original = game_entry.get("url", "")
         if original.startswith("https://") and original != GAME_URL:
             mirrors.append(original)
-        for m in game.get("mirrors") or []:
+        for m in game_entry.get("mirrors") or []:
             if m not in mirrors and m != GAME_URL:
                 mirrors.append(m)
-        game["url"] = GAME_URL
-        game["mirrors"] = mirrors
+        game_entry["url"] = GAME_URL
+        game_entry["mirrors"] = mirrors
     check_index(out)
     return out
+
+
+def push_pages_copies(args, folder, items):
+    """The Pages copies ({site path: local name in DIR}, the game archive) as
+    Pages files on both hosts, added before the catalog moves: each host gets these files alone (no removal),
+    then their bytes are checked on that host's Pages. The GitVerse site is then written in full by the zipped
+    publish, which keeps them (they are in its site too)."""
+    stage = os.path.join(folder, COPIES_STAGE)
+    if os.path.exists(stage):
+        shutil.rmtree(stage)
+    stamp = datetime.date.today().isoformat()
+    for where, local in sorted(items.items()):
+        dst = os.path.join(stage, *where.split("/"))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(folder, local), dst)
+    for host in HOSTS:
+        with pages.Pages(gv.HUB_REPO, host=host) as pg:
+            pg.sync_site_dir(stage, remove=False)
+            pushed = pg.commit_push(f"Pages copies of the hub's files ({stamp})")
+            print(f"{host} Pages, copies: {'pushed ' + pushed if pushed else 'unchanged'}")
+            expected = {pg._in_repo(where): read_bytes(os.path.join(stage, *where.split("/"))) for where in items}
+            waited = pg.wait_served(expected, wait=args.wait)
+            print(f"{host} Pages serves {len(items)} copies byte for byte (waited {waited:.0f} s)")
 
 
 def check_index(idx):
@@ -706,6 +745,13 @@ def publish(args):
         return 2
     release, wrap, site = pl["release"], pl["wrap"], dict(pl["pages"])
     site.update(fetch_remote_pictures(folder, cat, site))
+    game = None
+    pages_items = {}
+    if getattr(args, "game_pages", True) and isinstance(cat.get("game"), dict):
+        game_where, game_local = fetch_game(folder, cat)
+        game = zipped_game(game_where)
+        pages_items[game_where] = game_local
+    site.update(pages_items)
     cache = {}
 
     def sha_of(path):
@@ -747,9 +793,11 @@ def publish(args):
     if args.dry_run:
         links = {a["catalog"]: {"url": "https://gitverse.ru/api/attachments/DRY-RUN", "size": a["size"],
                                 "sha256": a["sha256"]} for a in assets}
-        idx = gitverse_index(cat, links)
+        idx = gitverse_index(cat, links, game)
         stage = write_stage(folder, idx, site)
         check_stage(stage, idx)
+        if game:
+            print(f"the game archive on Pages: {game['url']} (mirrors: {', '.join(game['mirrors'])})")
         print("dry run: nothing sent; the GitVerse index is in", os.path.join(folder, STAGE, INDEX_V2))
         return 0
 
@@ -794,7 +842,7 @@ def publish(args):
             print(f"verified {a['name']}")
 
     links = {a["catalog"]: {"url": done[a["name"]]["url"], "size": a["size"], "sha256": a["sha256"]} for a in assets}
-    idx = gitverse_index(cat, links)
+    idx = gitverse_index(cat, links, game)
     stage = write_stage(folder, idx, site)
     check_stage(stage, idx)
     with open(os.path.join(stage, INDEX_V2), "rb") as f:
@@ -806,6 +854,8 @@ def publish(args):
 
     site_files = stage_files(stage)
     site_files.update(pages.web_files())
+    if pages_items:
+        push_pages_copies(args, folder, pages_items)
     with pages.Pages(gv.HUB_REPO) as pg:
         pg.sync_site(site_files)
         pushed = pg.commit_push(f"Catalog {tag}")
@@ -865,6 +915,8 @@ def main(argv):
     ap.add_argument("--layout", choices=LAYOUTS, default="zipped",
                     help="zipped (default): the release catalog of the 2026-11-13 design; pages: every hub file and "
                          "the game as Pages files under files/ (no release is made or removed)")
+    ap.add_argument("--no-game-pages", dest="game_pages", action="store_false",
+                    help="zipped layout only: keep the game as before (its GitVerse attachment, no Pages copy)")
     ap.add_argument("--host", choices=HOSTS, default="gitverse",
                     help="pages layout only: the Pages site to write (gitverse: docs/ of main; github: gh-pages)")
     args = ap.parse_args(argv)
