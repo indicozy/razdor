@@ -93,6 +93,13 @@ without an Android or iOS file gets no offer on that system.
    run, and only with a release-signed APK the owner has here: `python3 -I tools/release/android_update_check.py
    --from vPREV --new-apk <that APK> --static-only`. Otherwise say in the step-8 report that the emulator check
    follows in 6c.
+3d. Old releases read the published files (the feed, the config, the hub catalog). Before any publish that
+   changes them: the contract tests (`python3 -I -m unittest discover -s tools/release -p 'test_*.py'`, the
+   gate; they cover each file's rules at v1.4.1 to v1.5.4). Before a catalog publish, the candidate check on the
+   dry run's folder (community-pack step 6a): `python3 -I tools/release/hub_candidate_check.py --catalog-dir <out>`.
+   Exit 0 = the old releases read the candidate and get the game; 1 = do not publish; 2 = the check could not run
+   (rerun, report if it persists). A feed-only release has no catalog to check: the contract tests and step 6b
+   (`update_check.py`, after the release) cover it.
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to
    `changelog/X.Y.Z.md` under the heading `## X.Y.Z — YYYY-MM-DD`, leave `unreleased.md` empty
    (its header only), and regenerate `CHANGELOG.md` with `scripts/changelog.sh`. Sections inside

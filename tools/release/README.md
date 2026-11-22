@@ -9,7 +9,9 @@ Checks run by the release skill on a Razdor release. Plain Python 3, standard li
 | `from_list.py` | prints the `--from` list for `update_check.py` from the download stats | 3b, 6b |
 | `android_update_check.py` | the Android APK over the previous one: signatures, package, versionCode, and a headless emulator install with the data kept | 6c (after the release) |
 | `rollback.py` | withdraws a bad release from the update feeds (dry run by default) | Rollback |
-| `testkit.py`, `test_*.py` | hermetic tests of the four tools above (fakes; no network, no emulator, no gh, no token) | the gate |
+| `hub_candidate_check.py` | a candidate hub catalog (the publish dry run's folder), served on 127.0.0.1 over TLS, read and used by the old Linux releases v1.5.2 to v1.5.4 | community-pack 6a, release 3d |
+| `contracts/`, `test_contracts.py` | the parser rules of the old releases for each published file (feed, config, hub catalog), checked against the publishers' own output | release 3d, the gate |
+| `testkit.py`, `test_*.py` | hermetic tests of the tools above (fakes; no network, no emulator, no gh, no token) | the gate |
 
 Tests (about a second):
 
@@ -179,6 +181,52 @@ asset addresses.
 - A player already on the bad release is not moved back: the updaters never offer an older release. Those players
   get the next fixed release.
 - `--apply` needs `gh` logged in as indicozy (`gh auth token -u indicozy`) and `GITVERSE_TOKEN` (in `.env`).
+
+## hub_candidate_check.py: the old releases and a candidate catalog
+
+Serves a candidate hub catalog from a local HTTPS server and runs the old Linux releases against it. Run it
+before any catalog publish (community-pack step 6a; release step 3d). Give it the publish dry run's folder:
+
+    python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --dry-run
+    python3 -I tools/release/hub_candidate_check.py --catalog-dir <out>
+
+The check reads `<out>/gitverse/index-v2.json` and the files beside it. Nothing is published.
+
+- Every address the index names is rewritten to `https://127.0.0.1:<port>/cand/...`. Each file is matched by
+  its size and SHA-256 in the candidate's folders; a wrapped file's zip is checked by the archive fields and
+  its member by the file's own size and SHA-256. A missing or wrong file stops the run before anything is launched.
+- v1.5.2, v1.5.3 and v1.5.4 (downloaded from their GitHub releases and checked against `SHA256SUMS`) run on a
+  private Xvfb with `RAZDOR_HUB` on the candidate, fresh HOME and XDG folders and `updates: off`. Every
+  address other than the local server goes to a closed local port. Without an install, a program reads the
+  catalog at launch and starts the game download from the catalog's `game` entry by itself. The check passes
+  when the log says the catalog was read with a game in it, offers the game at the catalog's size, and ends
+  with `installed`, and when the server served the game's bytes.
+- Trust: `CURL_CA_BUNDLE` and `SSL_CERT_FILE` point at a self-signed certificate made in the scratch folder.
+  The program calls the system curl, which reads `CURL_CA_BUNDLE`, so the programs need no change.
+- Exit codes: 0 every version passed; 1 a version or the candidate refused (the log says why); 2 the check
+  could not run (input, network, tools).
+- Scratch: `--work` (default under `/mnt/ai_models/razdor-scratch/release-checks2/`). Without `--keep` only
+  `result.json` is left there.
+- Not covered: the Hub window. A map, a campaign and a mod are downloaded by clicking in the Hub, and no
+  option starts a Hub download. The check verifies their bytes on the server (size, SHA-256, and the zip
+  member's) but does not run the app's own download of them. An app hook would close the gap: an environment
+  variable (for example `RAZDOR_HUB_INSTALL=<id>`) that starts a Hub install at launch and logs its result.
+  No hook was added: this check changes no app code.
+
+## contracts/: what the old releases read
+
+`contracts/rules.py` has the parser rules that each old release applies to the files it reads: the update feed
+(`releases.json`), the remote config (`config.json`, schema 1) and the hub catalog (`index-v2.json`, and the
+flat `index.json`). The rules come from the release tags v1.4.1, v1.5.0 and v1.5.2 to v1.5.4; the last three
+read the same hub, update and config sources.
+
+`test_contracts.py` makes each file with the publishers' own functions in a temp folder and checks it against
+the rules. It also checks that every rule refuses its bad case, and that unknown fields are ignored (no version
+denies them). `contracts/samples/` holds made-up files for each format.
+
+Two rules to remember. v1.4.1 and v1.5.0 need the sums asset named exactly `SHA256SUMS`; v1.5.2 also accepts
+`SHA256SUMS.txt`. A catalog's `game` must be an https address with a 64-digit SHA-256 and a size up to 256 MB,
+or the old programs refuse the whole catalog.
 
 ## Tests
 

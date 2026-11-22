@@ -55,6 +55,14 @@ Downloaded mods and maps are untrusted: never run them, and run any Python that 
    is postponed. Each Hub file's `mirrors` list its GitHub release copy.
    - **Dry run first**: `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --dry-run` writes the
      GitVerse index into `<out>/gitverse/` and sends nothing. Check the game's line in its output.
+   - **Candidate check before publishing a catalog** (run it on the dry run's folder, never skip it):
+     `python3 -I tools/release/hub_candidate_check.py --catalog-dir <out>`. It serves the candidate on
+     127.0.0.1 over TLS and runs the old Linux releases v1.5.2, v1.5.3 and v1.5.4 on a private Xvfb, each
+     with `RAZDOR_HUB` on the candidate: it must read the catalog, offer the game at its size, and install it
+     from the server (about 5 min for the three). Exit 0 = every version passes; 1 = a version or the
+     candidate refuses (do not publish; the log names why); 2 = the check could not run (rerun, and say so).
+     It does not cover the maps, campaigns and mods (their download needs the Hub window): the release skill's
+     `tools/release/README.md` says what is not covered.
    - Without `--dry-run` it pushes the game's Pages copy to both hosts (waits until each serves the bytes), then
      the release and the index. Pass `--no-game-pages` to keep the game as before (no Pages copy).
    - The GitHub host needs GitHub's Pages set up first (the setup in `tools/gitverse/README.md`); the run
