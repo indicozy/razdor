@@ -100,3 +100,76 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 - Load: `cargo run --release -p razdor-server --example load -- <addr> <installs> <batches> <concurrency> <pid>`
   (`server/tools/load.rs`; run the server with `trust_proxy = true`).
 - The helpers `razdor-server hash-password` and `razdor-server token-hash` print the config's hashes.
+
+## Client
+
+### Shape
+
+- `src/telemetry/mod.rs`: `Hub` (the state, the queue, the enqueue gates, the daily ping, the delete and
+  new-id actions), `start` (called from `main.rs` after `remote_config::start`), `active` (off under
+  `cargo test`, in the snapshots and scenes, and with `RAZDOR_TELEMETRY=off`), `WHAT_WE_SEND_URL`.
+- `src/telemetry/state.rs`: `<app data>/telemetry/state.json`: the install id (32 hex digits), the consent
+  (`unknown`/`yes`/`no`), the version the question was last asked in, the last ping day, the crash
+  reports' server ids by local token. A file of its own: not the saves, not the settings.
+- `src/telemetry/queue.rs`: `<app data>/telemetry/queue/<seq>.item`. One line of JSON (the item's
+  `Meta`: path, class, frame header, token, `after`, tries, `not_before`), then the body. Cap
+  `razdor_wire::limits::CLIENT_QUEUE_BYTES` (5 MB); the oldest go first; an item bigger than the cap is
+  refused.
+- `src/telemetry/worker.rs`: `step` sends at most one due item. It takes the item under the queue's lock,
+  releases the lock, posts, then takes the lock again to record the answer. `run` is the thread's loop
+  (kill switch first; sleeps until a kick or the next due time).
+- `src/telemetry/transport.rs`: `Transport` (a trait, so the tests inject their own) and `Live`, which
+  calls `update::post`.
+- `src/update.rs` `post` (desktop: `curl` with the body on stdin) and `src/update/phone.rs` `post`
+  (Android: `razdorPost` in `android/MainActivityInject.java`, the body through a cache file; iOS: no
+  POST yet, the items stay queued).
+- `src/telemetry/crash.rs`: `note_panic` (from `diag.rs`'s panic hook, after the quiet check), `collect`
+  (at start: queues the pending report with the consent yes, with the cleaned last 200 lines of
+  `razdor.previous.log`), `answer` and `queue_save` (the save item waits for the report's server id).
+- `src/telemetry/sanitize.rs`: `Paths` replaces the home folder, the install folder, the saves folder and
+  the save names by `<home>`, `<dt>`, `<saves>`, `<save>`. The longest names go first, both separators,
+  ASCII case ignored.
+- `src/remote_config.rs`: `API_BUILTIN` (the one const for the API address, a placeholder), the `api`
+  list and the `telemetry` kill switch (`false` stops every send). Both come from the config.
+- `src/ui/telemetry_view.rs`: the consent window (`«Помочь Раздору?»`, asked at the first start and once
+  after an update), the crash question, and the three Settings panels (show id with copy, delete my data,
+  new id). `src/ui/main_menu.rs` `Row::Telemetry*`: the four rows in the Other group.
+
+### Rules that hold (tests pin them)
+
+- Only the daily ping is queued without consent (`Class::Always`). Everything else is `Class::Consent`
+  and is refused at queueing unless the consent is yes, and sent only while it is yes. A no (or a new
+  id, or a delete) purges the queued consent items.
+- The ping is once a UTC day (`last_ping_day`).
+- The sender never holds the queue's lock during a request, so a frame never waits for the network.
+- 2xx sends. 408, 429 and 5xx, and transport failures, wait: 1 minute, doubled each time, at most six
+  hours. Any other 4xx is dropped (a refused body is never sent again: the server bans senders that
+  keep sending invalid data). A 429 or 503 also pauses the host (`mirror::throttled`).
+- The mirror's pauses are per host: `worker::step` takes the first address of the `api` list that is not
+  paused.
+- The panic hook writes a file only. Nothing is queued from the hook; the next start queues it.
+
+### Not built yet (the client, phase 3)
+
+- Play events beyond the session: map start and end, progress every five game days, abandoned maps,
+  older saves, changed settings, UI counters. The `wire::EventKind` values exist; the hooks do not.
+- Session start and end (the length) and the heartbeat file that derives the end of a session.
+- Performance reports (device, frame medians, loads, memory, the profiler pass) and battle records
+  (reusing `rules::recording`).
+- Native crashes (signals, the Windows access violation): no pending file is written, so they are not
+  reported.
+- The newest save for a crash (`collect` gets `None`), the game and mod id (`start` passes «dt»), the
+  language (the system's), `set_screen` (no caller yet, so the report's screen is «unknown»).
+- The phones' `razdorPost` is written but not compiled or run here.
+
+### Tests
+
+`cargo test --profile fasttest --lib -- telemetry:: remote_config::` covers the state file, the queue
+(reopen, cap, refusal, purge), the gates (before consent only the ping; no, delete and new id), the
+sender (2xx, refusal, throttle backoff, consent items never sent without consent, an unreachable host
+that does not block enqueueing and keeps the queue under 5 MB), the crash report (cleaned log, no
+question without a yes, the save only on «Отправить») and the sanitizer. `ui::main_menu::tests` covers
+the new rows' list.
+
+Off-screen: `RAZDOR_SCENE_CONSENT=1`, `RAZDOR_SCENE_CRASH=save|none`, `RAZDOR_SCENE_TELEMETRY=id|delete|newid`
+(with `RAZDOR_SNAPSHOT`), and `RAZDOR_SCENE=options:other` for the rows.
