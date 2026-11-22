@@ -1226,6 +1226,22 @@ never written, only the look is restored (`photo::leave` returns it).
 - **Tests.** `ui::photo::tests` (the limits, the drag's slop and its turn, the strip's phone targets, the stamp,
   the file name, the flip, the PNG round trip, the entry and leave with the look given back, the pause gate).
 
+## How to draw a button
+
+A marble button is drawn one of two ways, never a third:
+
+1. **The game's own picture.** When the button's width is one the game's art serves (`Graphics/Windows/Btn1`,
+   `Btn2`, `Btn3`, `Up` and `Down`), draw that picture: `chrome::marble_button` and its variants.
+2. **A composed button.** Otherwise (a square, a button narrower or wider than the art) build it as the game's own
+   six buttons are built (`ui/marble_button.rs`): a cut of the tiling `Windows/Win-marble` under the bevel, the
+   1-px outline from `Windows/SteelLine` walked as the original frames its windows (0x48d1d4). `marble_button::button`
+   makes the picture at the art's height; `chrome::composed_button` (`composed_button_sized` for a label at a set
+   size) draws it, cached per size and state. Examples: the tree's «[ ]», «Добавить карту…», the new game's «...»,
+   the rules window's choices and «Ок».
+3. **Never** stretch or squeeze the marble texture or a button picture to another size, and never glue pieces
+   of ready buttons together. A selected state (a chosen tab) is the same `Up` button with its outline in
+   `chrome::GOLD` instead of the steel (`marble_button::ring`, the `ring` argument of `composed_button_sized`).
+
 ## How to add a window
 
 1. Add a `Screen` variant (or a field on an existing view) in `src/ui/mod.rs`.

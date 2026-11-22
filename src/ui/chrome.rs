@@ -2679,8 +2679,8 @@ fn marble_frame(r: Rect, enabled: bool, hover: bool, quest_red: bool) {
     }
 }
 
-/// A marble button of any size with `label`, for Razdor's buttons the game has no art for (the tree's «[ ]» and
-/// «Добавить карту…»): [`composed_frame`] under the label, as [`marble_button`] draws its label. The game's own
+/// A marble button of any size with `label`, for Razdor's buttons the game has no art for (the tree's «[ ]»,
+/// «Добавить карту…», the new game's «...» and its rules window's buttons): [`composed_frame`] under the label, as [`marble_button`] draws its label. The game's own
 /// buttons keep their art ([`marble_button`]).
 pub fn composed_button(r: Rect, label: &str, enabled: bool, hover: bool) {
     if !composed_frame(r, enabled, hover) {
@@ -2694,6 +2694,23 @@ pub fn composed_button(r: Rect, label: &str, enabled: bool, hover: bool) {
 /// the art's size (36 high, as wide as `r` at the height's scale, the scale the game's buttons are drawn at), kept
 /// per size and state, drawn over `r`. False without the art (no install).
 pub fn composed_frame(r: Rect, enabled: bool, hover: bool) -> bool {
+    composed_frame_ringed(r, enabled, hover, None)
+}
+
+/// [`composed_button`] with its label drawn at `size` px, as [`marble_button_sized`] draws it, and its outline in
+/// `ring` instead of the steel when given (Razdor's chosen tab).
+pub fn composed_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, size: f32, ring: Option<Color>) {
+    if !composed_frame_ringed(r, enabled, hover, ring) {
+        marble_frame(r, enabled, hover, false);
+        if let Some(c) = ring {
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, c);
+        }
+    }
+    button_label_at(r, label, enabled, size);
+}
+
+/// [`composed_frame`] with its outline in `ring` instead of `SteelLine` when given (`marble_button::ring`).
+pub fn composed_frame_ringed(r: Rect, enabled: bool, hover: bool, ring: Option<Color>) -> bool {
     use super::marble_button::{self as mb, State};
     const ART_H: u32 = 36;
     let s = r.h / ART_H as f32;
@@ -2702,13 +2719,17 @@ pub fn composed_frame(r: Rect, enabled: bool, hover: bool) -> bool {
     }
     let w = ((r.w / s).round() as u32).max(mb::BEVEL_DEPTH * 2);
     let state = if hover && enabled { State::Down } else { State::Up };
-    let key = format!("composed:{w}:{state:?}:{enabled}");
+    let ring = ring.map(|c| [c.r, c.g, c.b].map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8));
+    let key = format!("composed:{w}:{state:?}:{enabled}:{ring:?}");
     let cached = CHROME.with(|c| c.borrow().as_ref().and_then(|c| c.animations.get(&key).cloned()));
     let t = match cached {
         Some(t) => t.and_then(|v| v.first().cloned()),
         None => {
             let t = image("Windows/Win-marble.lit").zip(image("Windows/SteelLine.lit")).and_then(|(marble, steel)| {
                 let mut img = mb::button(&marble, mb::offset(state), w, ART_H, state, &steel);
+                if let Some(rgb) = ring {
+                    mb::ring(&mut img, rgb);
+                }
                 if !enabled {
                     transform(&mut img, Fx::Grey);
                 }

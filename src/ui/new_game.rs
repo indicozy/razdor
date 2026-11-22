@@ -194,6 +194,14 @@ fn button_rect(r: Rect, label: &str, enabled: bool) -> bool {
     pressed
 }
 
+/// [`button_rect`] made as the game's own buttons are made ([`chrome::composed_button`]), for a button narrower
+/// than the game's button pictures, which would be squeezed to it.
+fn composed_rect(r: Rect, label: &str, enabled: bool) -> bool {
+    let (_, down, pressed) = button_state(r, enabled);
+    chrome::composed_button(r, label, enabled, down);
+    pressed
+}
+
 /// The dp of a phone held upright (`None` elsewhere): the scenario window's own layout there (the
 /// owner's order of 2026-11-02, see [`Portrait`]).
 fn upright_dp() -> Option<f32> {
@@ -1589,7 +1597,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         None => (win.rect(dots_x, win.foot_y, dots_w, FOOT_H * grow), win.rect(cancel_x, win.foot_y, cancel_w, FOOT_H * grow)),
     };
     let next_r = win.rect(next_x, win.foot_y, next_w, FOOT_H * grow);
-    if button_rect(dots_r, "...", can) {
+    if composed_rect(dots_r, "...", can) {
         RULES_OPEN.with(|p| p.set(true));
         draw_later();
         return None;
@@ -1880,8 +1888,8 @@ fn experimental_menu() {
         if row_press(pressed, dragging) && view.contains(crate::ui::widgets::pointer().into()) { *value = !*value; }
     };
     let clip = super::widgets::Clip::new(view);
-    // The «Правила» choice: DT (every fix off) or Razdor's rules (every fix on), each drawn pressed
-    // while it is the choice; a mix has neither. A press sets the fixes only; the cheats stay.
+    // The «Правила» choice: DT (every fix off) or Razdor's rules (every fix on), the choice ringed in
+    // gold; a mix has neither. A press sets the fixes only; the cheats stay.
     let half = (iw - gap) / 2.0;
     let choice_rects = [
         (Rect::new(r.x + 20.0 * big, content_top, half, row_h), tr("Rules DT"), Preset::Dt),
@@ -1894,12 +1902,9 @@ fn experimental_menu() {
             chosen = Some(choice);
         }
         let size = match dp { Some(d) => 17.0 * d, None => normal };
-        chrome::marble_button_sized(rect, label, true, preset == choice, size);
-        // The choice is ringed in gold, as the picked tab is (`hub_view`'s tab buttons): the pressed
-        // frame alone looks the same as the other button's.
-        if preset == choice {
-            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 3.0 * big, chrome::GOLD);
-        }
+        // Made as the game's own buttons are made, both up; the choice's outline is gold instead of the
+        // steel, as the picked tab is ringed (`hub_view`'s tab buttons).
+        chrome::composed_button_sized(rect, label, true, false, size, choice_ring(preset, choice));
     }
     if let Some(choice) = chosen {
         rules.set_fixes(choice == Preset::Razdor);
@@ -1946,7 +1951,7 @@ fn experimental_menu() {
     };
     let b = Rect::new(r.center().x - ok_w / 2.0, r.bottom() - 12.0 * big - ok_h, ok_w, ok_h);
     let (_, down, pressed) = button_state(b,true);
-    chrome::marble_button(b,"",true,down);
+    chrome::composed_button(b,"",true,down);
     if dp.is_some() {
         // Its label at 17 dp on a phone, held sideways too: the marble's own label is at the desktop's
         // scale (11 sp on a phone, the mobile check of 2026-11-10).
@@ -1954,13 +1959,18 @@ fn experimental_menu() {
         let d = measure(tr("OK"), size);
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(tr("OK"), b.center().x - d.width / 2.0, b.y + (b.h + d.offset_y) / 2.0 - 1.0, size, chrome::CREAM));
     } else {
-        chrome::marble_button(b,tr("OK"),true,down);
+        chrome::composed_button(b,tr("OK"),true,down);
     }
     if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) {
         RULES_OPEN.with(|p| p.set(false));
         RULES_DRAG.with(|d| d.set(None));
         keep_rules(rules);
     }
+}
+
+/// The outline of a «Правила» choice's button: gold while it is the choice, else none (the steel).
+fn choice_ring(preset: Preset, choice: Preset) -> Option<Color> {
+    (preset == choice).then_some(chrome::GOLD)
 }
 
 /// Razdor's «Добавить карту…» on the extras row under the buttons (`at`: window units), with the
@@ -2838,5 +2848,31 @@ mod tests {
         for f in [LangFilter::Russian, LangFilter::English] {
             assert!(f.keeps(MapLang::Unknown), "{f:?} keeps an unknown map");
         }
+    }
+
+    /// «...» and the rules window's buttons (the DT and Razdor choices, OK) are made as the game's own buttons are
+    /// made (`chrome::composed_button`), not the button picture stretched or squeezed to their width.
+    #[test]
+    fn the_dots_and_the_rules_windows_buttons_are_made_as_the_games_own() {
+        let src = include_str!("new_game.rs");
+        let screen = &src[src.find("fn scenario_select_screen(").unwrap()..src.find("enum PickTap").unwrap()];
+        let dots = screen.lines().find(|l| l.contains("dots_r, \"...\"")).expect("the «...» button");
+        assert!(dots.contains("composed_rect(dots_r"), "«...» is composed: {dots}");
+        let menu = &src[src.find("fn experimental_menu(").unwrap()..src.find("fn add_map_button(").unwrap()];
+        assert!(!menu.contains("chrome::marble_button"), "no stretched marble in the rules window");
+        assert_eq!(menu.matches("chrome::composed_button(").count(), 2, "OK (its label drawn apart on a phone)");
+        assert_eq!(menu.matches("chrome::composed_button_sized(").count(), 1, "the two choices");
+    }
+
+    /// The chosen rules are ringed in gold (the outline of their button), the other choice and a mix are not.
+    #[test]
+    fn the_chosen_rules_take_the_gold_outline() {
+        let gold = Some(chrome::GOLD);
+        assert_eq!(choice_ring(Preset::Dt, Preset::Dt), gold);
+        assert_eq!(choice_ring(Preset::Razdor, Preset::Razdor), gold);
+        assert_eq!(choice_ring(Preset::Dt, Preset::Razdor), None);
+        assert_eq!(choice_ring(Preset::Razdor, Preset::Dt), None);
+        assert_eq!(choice_ring(Preset::Mixed, Preset::Dt), None);
+        assert_eq!(choice_ring(Preset::Mixed, Preset::Razdor), None);
     }
 }

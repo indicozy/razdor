@@ -308,6 +308,19 @@ pub fn button(marble: &Image, offset: (i32, i32), w: u32, h: u32, state: State, 
     assemble(marble, offset, &bevel(w, h, state, steel))
 }
 
+/// `img`'s outline (the pixels [`perimeter_step`] walks) in `rgb` instead of the steel: Razdor's chosen tab.
+pub fn ring(img: &mut Image, rgb: [u8; 3]) {
+    let (w, h) = (img.width, img.height);
+    for y in 0..h {
+        for x in 0..w {
+            if perimeter_step(x, y, w, h).is_some() {
+                let i = ((y * w + x) * 4) as usize;
+                img.rgba[i..i + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,5 +597,22 @@ mod tests {
             }
         }
         assert!(over.is_empty(), "over the bounds (middle {MIDDLE_MAX}, bevel middle + {BEVEL_OVER_MIDDLE_MAX}): {over:#?}");
+    }
+
+    /// A ringed button is the button with every outline pixel in the ring's colour, opaque; nothing inside changes.
+    #[test]
+    fn a_ring_recolours_the_outline_only() {
+        let m = synthetic_marble(10, 8);
+        let steel = Image { width: 8, height: 2, rgba: (0..16u8).flat_map(|i| [i * 10, i, 255 - i, 255]).collect() };
+        let (w, h) = (40, 36);
+        let plain = button(&m, offset(State::Up), w, h, State::Up, &steel);
+        let mut ringed = plain.clone();
+        ring(&mut ringed, [255, 209, 107]);
+        for y in 0..h {
+            for x in 0..w {
+                let want = if perimeter_step(x, y, w, h).is_some() { [255, 209, 107, 255] } else { px(&plain, x, y) };
+                assert_eq!(px(&ringed, x, y), want, "({x}, {y})");
+            }
+        }
     }
 }
