@@ -377,6 +377,9 @@ pub struct App {
     /// The holiday switch's worker (`holiday_start`), and whether it was tried since the last turn-on.
     holiday_job: Option<std::sync::mpsc::Receiver<Result<holiday_start::Start, String>>>,
     holiday_tried: bool,
+    /// The holiday update check waited for the cached catalog (`holiday_start::Start::stale`): it runs again
+    /// when the launch's fresh catalog comes.
+    holiday_stale: bool,
     /// The switch as the App last acted on it (`holiday::edge`), and whether the welcome opens on success.
     holiday_seen: bool,
     holiday_greet: bool,
@@ -512,6 +515,7 @@ impl App {
             message: None,
             holiday_job: None,
             holiday_tried: false,
+            holiday_stale: false,
             holiday_seen: false,
             holiday_greet: false,
             holiday_generation: 0,

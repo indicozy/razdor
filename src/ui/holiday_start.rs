@@ -63,12 +63,47 @@ pub fn take_landed() -> bool {
 
 use super::{finished, holiday, holiday_windows, launch, App};
 
-/// The switch's result: the mod's id, whether it was downloaded (not on the disk before), and whether an
-/// installed copy was downloaded again because its files differ from the catalog's (`hub::mod_needs_update`).
+/// The switch's result: the mod's id, whether it was downloaded (not on the disk before), whether an
+/// installed copy was downloaded again because its files differ from the catalog's (`hub::update_available`),
+/// and whether that check had to wait: only the cached catalog was there (`stale`), so it runs again when the
+/// launch's fresh catalog comes (`rerun_due`).
 pub struct Start {
     pub id: String,
     pub downloaded: bool,
     pub updated: bool,
+    pub stale: bool,
+}
+
+/// What the worker's update check does with the catalog it has (pure): an installed Christmas mod that is
+/// pending or played is checked against the launch's fresh catalog; with only the cached one the check waits.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UpdateCheck {
+    /// Compare the installed files with the fresh catalog now.
+    Now,
+    /// Only the cached catalog is there: the check is due and runs once the fresh catalog comes.
+    WaitForFresh,
+    /// Not due: the mod is not installed, or it is neither pending nor played.
+    NotDue,
+}
+
+pub fn update_check(installed: bool, fresh: bool, pending: bool, played_is_mod: bool) -> UpdateCheck {
+    if !installed || !(pending || played_is_mod) {
+        UpdateCheck::NotDue
+    } else if fresh {
+        UpdateCheck::Now
+    } else {
+        UpdateCheck::WaitForFresh
+    }
+}
+
+/// Whether a waiting check runs now (pure): it waited for the cached catalog and the fresh one has come.
+pub fn rerun_due(stale: bool, fresh_now: bool) -> bool {
+    stale && fresh_now
+}
+
+/// A catalog's date for the log: the unix time it was read or saved, `?` when unknown.
+fn dated(at: Option<std::time::SystemTime>) -> String {
+    at.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or("?".to_string(), |d| format!("unix {}", d.as_secs()))
 }
 
 /// Whether the worker runs this launch (pure): the holiday switch is pending (a turn-on or a launch that left
@@ -95,34 +130,42 @@ fn install_files(hub: &Hub, h: &HolidayRef) -> Result<usize, String> {
     hub.install_holiday(h)
 }
 
-/// The worker: the hub's catalog (fresh from the address, else the cached one when offline), the mod it
-/// names, and its download and install when it is not on the disk (only while the switch is pending). An
-/// installed copy whose files differ from the catalog's (`hub::mod_needs_update`, by SHA-256) is downloaded
-/// again through the Hub's install, when the switch is pending or the mod is the one played (`played`). The
-/// whole catalog is read, so the listing's `visible_from` does not hide the mod from the switch. Runs on a thread.
+/// The worker: the launch's fresh catalog (`launch::fresh`, read by the launch's one fetch and its retries),
+/// else the cached one, and the mod it names. It downloads the mod when it is not on the disk (only while the
+/// switch is pending). An installed copy whose files differ from the catalog's (`hub::update_available`, by
+/// SHA-256) is downloaded again through the Hub's install, when the switch is pending or the mod is the one
+/// played (`played`). With the cached catalog only, the check is left for `Start::stale`. The whole catalog is
+/// read, so the listing's `visible_from` does not hide the mod from the switch. Runs on a thread.
 fn run(local: PathBuf, pending: bool, played: Option<String>) -> Result<Start, String> {
     let hub = Hub { source: Source::from_env(), local };
-    let (catalog, fresh) = match hub.fetch_catalog() {
-        Ok(c) => (c, true),
-        Err(why) => (hub.cached_catalog().ok_or(why)?, false),
+    let (catalog, fresh_at) = match launch::fresh() {
+        Some((c, at)) => (c.clone(), Some(at)),
+        None => (hub.cached_catalog().ok_or("the hub cannot be read and no catalog is cached")?, None),
     };
     let id = catalog.holiday.as_ref().and_then(|h| h.mod_id.clone()).ok_or_else(|| "the hub names no Christmas mod".to_string())?;
     let installed = hub.installed().has(&id);
     if !installed && !pending {
-        return Ok(Start { id, downloaded: false, updated: false });
+        return Ok(Start { id, downloaded: false, updated: false, stale: false });
     }
     if !installed {
         hub.install(&catalog, &id, lang())?;
     }
+    let played_is_mod = played.as_deref() == Some(id.as_str());
     let mut updated = false;
-    if installed && fresh && (pending || played.as_deref() == Some(id.as_str())) {
-        if let Some(entry) = catalog.entry(&id) {
+    let mut stale = false;
+    match update_check(installed, fresh_at.is_some(), pending, played_is_mod) {
+        UpdateCheck::NotDue => {}
+        UpdateCheck::WaitForFresh => {
+            stale = true;
+            razdor::diag!("holiday: the update check of the Christmas mod {id} waits: only the cached catalog (saved {}) is here", dated(hub.cache_time()));
+        }
+        UpdateCheck::Now => {
+            razdor::diag!("holiday: the update check of the Christmas mod {id} uses the fresh catalog (fetched {})", dated(fresh_at));
             let code = match lang() {
                 razdor::i18n::Lang::En => "en",
                 razdor::i18n::Lang::Ru => "ru",
             };
-            let sources = razdor::hub::read_manifest(&hub.local, &id).map(|m| m.sources);
-            if razdor::hub::mod_needs_update(entry, code, sources.as_deref()) {
+            if razdor::hub::update_available(&hub.local, &catalog, &hub.installed(), &id, code) {
                 match hub.install(&catalog, &id, lang()) {
                     Ok(_) => {
                         updated = true;
@@ -130,17 +173,19 @@ fn run(local: PathBuf, pending: bool, played: Option<String>) -> Result<Start, S
                     }
                     Err(why) => razdor::diag!("holiday: the Christmas mod {id} could not be updated ({why}); the installed copy stays"),
                 }
+            } else {
+                razdor::diag!("holiday: the Christmas mod {id} has the catalog's files; nothing is downloaded");
             }
         }
     }
     // The bell, the music and the sleigh come with the switch. A failure is not fatal: the look's copy
     // (`files_tick`) tries them again on the next launch. Offline (the cached catalog) they wait.
-    if let (true, true, Some(h)) = (fresh, pending, &catalog.holiday) {
+    if let (Some(_), true, Some(h)) = (fresh_at, pending, &catalog.holiday) {
         if let Err(why) = install_files(&hub, h) {
             razdor::diag!("holiday: the files are not all there ({why}); they are tried again on the next launch");
         }
     }
-    Ok(Start { id, downloaded: !installed, updated })
+    Ok(Start { id, downloaded: !installed, updated, stale })
 }
 
 /// The holiday files' copy for this launch (see [`files_tick`]).
@@ -165,16 +210,17 @@ pub fn files_tick(start_due: bool, game_ready: bool) {
     let next = match state {
         Files::Done => Files::Done,
         Files::Waiting if !game_ready || !holiday::setting() || start_due => Files::Waiting,
-        Files::Waiting => match launch::catalog() {
-            None => Files::Waiting,
-            Some(Err(why)) => {
-                razdor::diag!("holiday: no catalog this launch: {why}");
-                Files::Done
-            }
-            Some(Ok(catalog)) => match catalog.holiday.clone() {
+        Files::Waiting => match launch::fresh() {
+            Some((catalog, _)) => match catalog.holiday.clone() {
                 Some(h) => start_files(h),
                 None => Files::Done,
             },
+            // No fresh catalog yet: the launch's fetch or a retry may still bring one.
+            None if !launch::settled() => Files::Waiting,
+            None => {
+                razdor::diag!("holiday: no catalog this launch; the look's files are tried on the next launch");
+                Files::Done
+            }
         },
         Files::Installing(rx) => match rx.try_recv() {
             Err(TryRecvError::Empty) => Files::Installing(rx),
@@ -242,7 +288,10 @@ impl App {
             START_RUNNING.store(false, Ordering::Relaxed);
             LANDED.store(true, Ordering::Relaxed);
             match done {
-                Ok(Ok(start)) => self.holiday_started(start),
+                Ok(Ok(start)) => {
+                self.holiday_stale = start.stale;
+                self.holiday_started(start);
+            }
                 Ok(Err(why)) => razdor::diag!("holiday: the Christmas mod is not ready ({why}); the switch waits for the next launch or turn-on"),
                 Err(()) => razdor::diag!("holiday: the worker ended without a result; the switch waits for the next launch or turn-on"),
             }
@@ -273,11 +322,21 @@ impl App {
         self.holiday_seen = setting;
         let pending = self.audio.settings.holiday_pending || holiday::env_forced();
         let played = self.active_mod.clone();
+        // A check that waited for the cached catalog runs again once the launch's fresh catalog has come.
+        if rerun_due(self.holiday_stale, launch::fresh().is_some()) {
+            self.holiday_stale = false;
+            self.holiday_tried = false;
+            razdor::diag!("holiday: the launch's fresh catalog came; the update check runs again");
+        }
         if !setting || !check_due(pending, played.is_some()) || self.holiday_tried {
             return;
         }
         // The game first: the steps wait for the install to be loaded (a first launch's download, `game_import`).
         if !game_ready(self.assets.dt.is_some(), super::game_import::busy()) {
+            return;
+        }
+        // The launch's one catalog fetch is still running: the check reads its result, not the cache.
+        if launch::fetching() {
             return;
         }
         if self.mod_switch.is_some() || super::saves_move::busy() || super::game_import::busy() {
@@ -420,5 +479,22 @@ mod tests {
         assert!(!pickup_due(false, true, false), "no landing this frame");
         assert!(!pickup_due(true, false, false), "still no file");
         assert!(!pickup_due(true, true, true), "the holiday track already plays");
+    }
+
+    #[test]
+    fn the_update_check_uses_the_fresh_catalog_or_waits_for_it_never_the_cache_alone() {
+        assert_eq!(update_check(true, true, true, false), UpdateCheck::Now, "installed, pending, fresh catalog");
+        assert_eq!(update_check(true, true, false, true), UpdateCheck::Now, "installed and played, fresh catalog");
+        assert_eq!(update_check(true, false, true, false), UpdateCheck::WaitForFresh, "only the cached catalog: wait for the fresh one");
+        assert_eq!(update_check(true, false, false, true), UpdateCheck::WaitForFresh, "played, cached catalog only");
+        assert_eq!(update_check(false, true, true, false), UpdateCheck::NotDue, "not installed: nothing to compare");
+        assert_eq!(update_check(true, true, false, false), UpdateCheck::NotDue, "neither pending nor played");
+    }
+
+    #[test]
+    fn a_waiting_check_runs_again_only_once_the_fresh_catalog_has_come() {
+        assert!(rerun_due(true, true), "it waited and the fresh catalog came");
+        assert!(!rerun_due(true, false), "it waits: no fresh catalog yet");
+        assert!(!rerun_due(false, true), "nothing waited: no second check");
     }
 }

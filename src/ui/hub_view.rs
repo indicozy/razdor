@@ -197,10 +197,10 @@ impl HubView {
     /// Shows the cached catalog at once (`show_cache`) and reads the current one on a thread
     /// (`fetching`); a catalog already on the screen stays until the new one lands (`landed`).
     /// Also reads what is installed.
-    /// Opens the window: the launch's catalog when it has come (one catalog fetch a session), else a
-    /// fetch. Refresh still fetches (`reload`).
+    /// Opens the window: the launch's fresh catalog when it has come (the launch's fetch or a retry; no
+    /// fetch per opening), else a fetch. Refresh still fetches (`reload`).
     fn open(&mut self) {
-        if let (Some(hub), Some(Ok(c))) = (self.hub.clone(), crate::ui::launch::catalog()) {
+        if let (Some(hub), Some((c, _))) = (self.hub.clone(), crate::ui::launch::fresh()) {
             self.installed = hub.installed();
             self.offline = false;
             self.picked = keep_pick(self.picked.as_deref(), c);
