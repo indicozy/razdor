@@ -361,7 +361,8 @@ fn backdrop_with(menu: bool) {
     let _scale = super::display::enter_window_scale(None);
     // Timed for the other screens too (`ui::hub_view`, `new_game`, `saves`, ...): their stage lines name them.
     frame_probe::time(frame_probe::Stage::MenuBackground, background);
-    if menu && super::holiday::on() {
+    // The snow shows only while the Christmas mod is the one the game plays (`holiday::mod_running`).
+    if menu && super::holiday::on() && super::holiday::mod_running() {
         // The snow is the map's snow pass (`weather::draw_menu_snow`): its cost is the menu's frame time.
         let t = super::clock::now();
         let cheap = super::holiday::cheap();

@@ -27,6 +27,8 @@ local! {
     static CHEAP: Cell<bool> = Cell::new(false);
     /// `RAZDOR_HOLIDAY=1` turns the look on whatever the setting says (read once).
     static ENV_ON: bool = std::env::var("RAZDOR_HOLIDAY").is_ok_and(|v| v.trim() == "1");
+    /// Whether the game plays the Christmas mod, taken in on each mod change (`set_running_mod`).
+    static MOD_RUNNING: Cell<bool> = Cell::new(false);
 }
 
 /// Takes the setting «Новогодний вид» in, and whether the cheap path applies (every frame, from
@@ -39,6 +41,27 @@ pub fn set_pref(on: bool, cheap: bool) {
 /// Whether the look is on this frame (the setting, or `RAZDOR_HOLIDAY=1`).
 pub fn on() -> bool {
     ON.get()
+}
+
+/// Whether the game plays the Christmas mod: the mod it plays (`active`, None for the base game) is the
+/// catalog's holiday mod (`christmas`, the `holiday.mod` id; None when the catalog names none).
+pub fn is_christmas_mod(active: Option<&str>, christmas: Option<&str>) -> bool {
+    matches!((active, christmas), (Some(a), Some(c)) if a == c)
+}
+
+/// Takes in the mod the game plays (called on each mod change). The Christmas mod's id is read from the
+/// hub's cached catalog, so no network is needed; without a cache the mod is not the Christmas one.
+pub fn set_running_mod(active: Option<&str>) {
+    let christmas = razdor::hub::local_dir()
+        .and_then(|local| razdor::hub::Hub { source: razdor::hub::Source::from_env(), local }.cached_catalog())
+        .and_then(|c| c.holiday)
+        .and_then(|h| h.mod_id);
+    MOD_RUNNING.set(is_christmas_mod(active, christmas.as_deref()));
+}
+
+/// Whether the game plays the Christmas mod (the main menu's snow shows only then).
+pub fn mod_running() -> bool {
+    MOD_RUNNING.get()
 }
 
 /// Whether the look runs its cheap path: on, and the light quality is «Низкое» or the battery saver is on.
@@ -311,6 +334,15 @@ pub fn sleigh() -> Option<Sleigh> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_christmas_mod_is_the_one_the_game_plays_and_the_catalog_names() {
+        assert!(is_christmas_mod(Some("christmas-2026"), Some("christmas-2026")));
+        assert!(!is_christmas_mod(Some("evolution"), Some("christmas-2026")), "another mod plays");
+        assert!(!is_christmas_mod(None, Some("christmas-2026")), "the base game plays");
+        assert!(!is_christmas_mod(Some("christmas-2026"), None), "the catalog names no Christmas mod");
+        assert!(!is_christmas_mod(None, None));
+    }
 
     #[test]
     fn the_season_runs_from_1_december_to_15_january() {

@@ -534,6 +534,7 @@ impl App {
         };
         app.follow_row_setting();
         app.record_played_mod();
+        holiday::set_running_mod(app.active_mod.as_deref());
         app
     }
 
@@ -555,6 +556,7 @@ impl App {
     fn refresh_mods(&mut self) {
         self.mods = hub_mods();
         self.active_mod = hub_active();
+        holiday::set_running_mod(self.active_mod.as_deref());
         self.record_played_mod();
     }
 
