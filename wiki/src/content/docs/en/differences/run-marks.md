@@ -14,11 +14,12 @@ To the left of the favorite star in the new games list, every defeated card gain
 Marks progress from worst to best:
 
 *   **Red**: cheats were used. The tooltip names the command of the first cheat used.
-*   **Yellow**: an experimental scenario rule was enabled. The tooltip indicates the first such rule.
+*   **Yellow**: a cheat from the "Cheats" group of the "Experimental rules" window was enabled. The tooltip names the first cheat on.
 *   **Grey**: gameplay settings differ from the originals. The tooltip indicates the first modified setting.
-*   **Green**: "Completed honestly." No cheats, experimental rules, or setting changes were used.
+*   **Green with an "R"**: completed under Razdor's rules, meaning only fixes from the "Fixes" group were on. A fix is not a cheat, so the mark stays green. The tooltip names the first fix on.
+*   **Green**: "Completed honestly." No cheats, fixes, or setting changes were used.
 
-If you are playing from a save file created before the marks appeared, the completion history is unknown. Such a game counts as completed honestly: the mark is green, unless the save itself contains cheats (red), experimental rules (yellow) or changed gameplay settings (grey). The tooltip then says that the game's history is unknown.
+If you are playing from a save file created before the marks appeared, the completion history is unknown. Such a game counts as completed honestly: the mark is green, unless the save itself contains cheats (red), a cheat from the Cheats group (yellow) or changed gameplay settings (grey). The tooltip then says that the game's history is unknown.
 
 :::note
 If you lose a card, no mark is placed.

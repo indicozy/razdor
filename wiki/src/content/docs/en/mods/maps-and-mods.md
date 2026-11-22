@@ -45,7 +45,16 @@ On a phone held vertically, the description opens as a card instead of the list:
 
 * **"Install"** downloads the entry along with any mods it requires.
 * **"Remove"** removes the entry. A mod will not be removed as long as an installed entry requires it.
-* **"Refresh"** re-reads the catalog.
+* **"Refresh"** at the bottom of the window re-reads the catalog.
+
+## Updates
+
+Each installed map or mod is compared with the catalog by the checksums of its files. When the Hub has a new version, the entry's row shows **"Update available"**. In the entry's details, the **"Update (size)"** button sits to the left of "Remove". Press it, and the new version installs over the old one.
+
+* Saves and your own data stay as they are.
+* If you are playing a mod that has been updated, the game reloads it when you close the Hub window.
+* On a phone where the buttons do not fit in one row, "Update" shares the row with "Remove".
+
 
 ## Where maps come from
 

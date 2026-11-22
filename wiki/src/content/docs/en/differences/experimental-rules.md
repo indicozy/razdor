@@ -1,44 +1,58 @@
 ---
-title: Experimental Scenario Rules
-description: Experimental scenario rule toggles in Razdor and what each one changes.
+title: Experimental scenario rules
+description: Scenario rules in Razdor — "DT rules" and "Razdor's rules", fixes and cheats, and what each switch changes.
 sidebar:
   order: 2
 ---
 
-On the scenario screen, next to the "Next" button, there is a "..." button. It opens seventeen independent toggles that change the game rules. The first eight are Razdor's additions; they are not in the original game. The next six ("Bless once a turn", "Poison spares the Undead", "No spell book limit", "Merchant discount from an item", "Rear Service always −30%", "Store in your own buildings") and the last three, "Death curse on counter blows", "No corpses in garrisons" and "Strict initiative order", cover rules where Razdor differed from the original: by default the game plays as the original does, and a toggle turns on Razdor's rule.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens the "Experimental rules" window with seventeen switches that change the game rules. They are in two groups: **"Fixes"** and **"Cheats"**.
+
+The original game has none of these switches. For a new game all of them are off by default, so the game follows the original's rules.
 
 :::caution
-By default, for a new game, all seventeen are turned off. Your selection is remembered: it is saved in the settings when closing the window ("OK", Esc, Enter, or the close button) and upon starting a game, so when you next open the list of new games, the toggles will be as you left them, and will remain so after restarting the game. In the scenario list, an orange "Experimental rules enabled" label indicates that a toggle is on. Returning from the hero selection window preserves it. For an already started game, toggles cannot be changed through this menu.
+Your choice is remembered. It is saved to the settings when you close the window ("OK", Esc, Enter or its close button), and it is loaded when the game starts. Returning from the hero selection keeps it too. An ongoing game does not change through this menu. Each new playthrough starts from the saved choice.
 :::
 
-![Scenario Selection](../../../../assets/shots/scenarios.webp)
+## DT rules and Razdor's rules
 
-## Toggles
+Two buttons sit at the top of the window:
 
-* **All special bonuses simultaneously:** the fighter retains their type abilities and the abilities of equipped items. Identical abilities do not stack: a duplicate copy does not enhance the effect.
-* **Six equipment slots:** the fighter has six item slots instead of four (a third pair is added).
-* **No item limits:** any wearable item can be worn by any living fighter while they have a free slot. The class (shield, melee and ranged weapon, staff), magic school and holy item restrictions are lifted, as are the one-weapon rule, the one-item-per-kind rule and the crown restriction (only the hero and noble warriors). Anyone can wear the crown. Potions and other goods still cannot be worn, and the dead wear nothing.
-* **No more than two potions per character:** between army battles, you can drink no more than two potions (including healing and resurrection potions).
-* **Free units:** the hero's army asks for no daily wages (neither gold nor mana). Hiring costs as usual.
-* **Automatic promotion:** as soon as a fighter of the hero's army can be promoted, it is promoted on its own, along a random branch of its upgrade tree. The hero is not promoted this way.
-* **Units don't die:** fighters of the hero's army killed in a battle come back with 1 hit point after it, if the army survived the battle.
-* **Faster AI:** armies think faster on big maps (from 300×300 cells): there they search for a path only within a 64-cell square around themselves, and an army with a single target takes the shortest path to it. They move slightly differently from the original.
-* **Bless once a turn:** a fighter receives a blessing at most once a turn, and a blessed ally is healed or blessed only when that does something. Off (as in the original): blessings can be repeated and their effects add up.
-* **Poison spares the Undead:** the Undead are not poisoned by any poison. Off (as in the original): poison works on every fighter.
-* **No spell book limit:** any spell in the book can be cast. Off (as in the original): only the first 15 spells of the book can be cast; a spell taught by an event past the 15th is known but cannot be cast. In the sanctuary, a book of exactly 15 spells cannot be added to (a bug of the original, kept).
-* **Merchant discount from an item:** an item with the Merchant property in the hero's pack also gives the merchant discount. Off (as in the original): only fighters in the army with that property do.
-* **Rear Service always −30%:** Rear Service always cuts wages by 30%. Off (as in the original): when the player has no income from towns, the cut is larger, about 70%.
-* **Store in your own buildings:** in your castle, fort or town with the hero in it, a "Store" tab shows the loot your garrison could not wear; a click puts the item into the hero's pack. Off (as in the original): no tab, the loot stays in the building.
-* **Death curse on counter blows:** when a counter blow or a preventive strike kills a fighter with a death curse (or a Ghost under its condition, as in a normal kill), the fighter who struck back dies too, and its remaining hit points count as its side's losses. Off (as in the original): a counter blow does not work like a normal kill, and the striker survives.
-* **No corpses in garrisons:** a fallen fighter (0 hit points) cannot be left in a castle or fort garrison, nor swapped into one. Off (as in the original): a fallen fighter goes into the garrison and comes out again, as the original allows.
-* **Strict initiative order:** the next fighter to act is always the one with the highest current initiative; on a tie your side goes first, then the fighter higher in the line. A fighter whose initiative rises during the battle (for example from a blessing) acts at once. Off (as in the original): the turn runs down through the initiative values, fighter by fighter in line order, so a fighter whose initiative rises after the turn has passed its place waits.
+* **"DT rules"**: every fix is off. The rules are the original's.
+* **"Razdor's rules"**: every fix is on.
 
-The "Razdor's rules" row above the toggles turns on eight at once: the six former Razdor rules (from "Bless once a turn" to "Store in your own buildings"), "Death curse on counter blows", "No corpses in garrisons" and "Strict initiative order". It leaves the first eight toggles alone. The row shows on when all nine are on; press it again to turn them all off. Afterwards each toggle can be switched on or off on its own.
+The pressed button shows which set is active. If you turned fixes on one by one, neither button is pressed, and the line below them says "Mixed".
 
-On a phone, when the window does not fit, the list of toggles scrolls.
+The buttons change only the fixes. The cheats stay as they were.
+
+## Fixes
+
+Fixes change behaviour that the original shows as a bug or as something that does not work as designed. Each fix can be turned on on its own. A fix that is off gives the original's rule.
+
+* **Faster AI:** on maps of 300×300 cells or more, armies search for a path only in a square around themselves. An army with one target goes to it by the shortest path. Armies move a little differently from the original.
+* **Bless once a turn:** a unit gets a blessing at most once per turn. In the original, blessings stack.
+* **Poison spares the Undead:** Undead cannot be poisoned. In the original, poison works on every unit.
+* **No spell book limit:** any spell in the book can be cast. In the original, only the first 15 spells of a book can be cast.
+* **Merchant discount from an item:** a Merchant item in the hero's pack gives the discount. In the original, only units in the army do.
+* **Rear Service always −30%:** the wage cut is always 30%. In the original, with no income from towns, the cut is nearly 70%.
+* **Store in your own buildings:** in your castle, fort or town where the hero stands, a "Store" tab appears with the loot that the garrison could not equip. In the original, the loot stays in the building.
+* **Death curse on counter blows:** if a counter blow kills a unit with the death curse, the attacker dies too. In the original, the attacker survives.
+* **No corpses in garrisons:** a fallen unit cannot enter a castle or fort garrison, and cannot be swapped with one. In the original, it can.
+* **Strict initiative order:** the next to act is always the group with the highest initiative, even if it rose during the battle. In the original, a group whose initiative rose after its place in the queue had passed waits for its turn.
+
+## Cheats
+
+Cheats give the player an edge or remove a limit. A cheat that is on marks the run yellow (see [completion marks](/razdor/wiki/differences/run-marks/)).
+
+* **All special bonuses at once:** a unit keeps the abilities of its type and of its equipped items. Identical abilities do not stack.
+* **Six equipment slots:** a unit has six item slots instead of four.
+* **No item limits:** any item can go on any living unit while a slot is free. Potions and other goods still cannot be worn, and the dead wear nothing.
+* **At most two potions per character:** between battles a character can drink at most two potions, healing and revival ones included. The limit resets after a battle.
+* **Free units:** units of the hero's army pay no daily wage. Hiring costs the same as usual.
+* **Automatic promotion:** a unit of the hero's army is promoted by itself, along a random branch of its tree, as soon as a promotion opens. The hero is not promoted this way.
+* **Units don't die:** a fallen unit of the hero's army comes back with 1 HP after a battle, if the army survives the battle.
 
 :::tip
-The item and potion rules apply to all armies: your troops, opponents, and garrisons. "Free units", "Automatic promotion" and "Units don't die" apply to the hero's army only.
+The item and potion rules apply to all armies: yours, your opponents' and the garrisons'. "Free units", "Automatic promotion" and "Units don't die" apply only to the hero's army.
 :::
 
 ## Warrior Participation in Battles

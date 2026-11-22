@@ -24,6 +24,18 @@ The names and descriptions of warriors, items, and spells are pulled from the fi
 
 The language selection is saved in the `settings.json` file in the saves folder. On the first start the language follows the system language: Russian for Russian, Ukrainian, Belarusian and Kazakh, English for the others. Until you pick a language in the list, a change of the system language changes the game's language too. If no suitable font is found for Russian, the game launches in English.
 
+## English maps
+
+The original maps have been translated into English by machine. There are 15 of them. When the interface is English, Razdor downloads them by itself: in the background, when the game starts, and when you switch the language to English. While they download, the main menu says "English maps…". The download needs an installed game and a connection to the Hub.
+
+To find them, open "New game". The map language list has three choices: "All languages", "Russian" and **"English"**. The interface language is selected by default. Maps whose text does not show a clear language are shown for every choice.
+
+Switching back to Russian removes nothing: the maps stay and show under "English". If a download fails, Razdor tries again at the next start or the next language switch.
+
+:::note
+The translation is machine-made, so it can be inaccurate.
+:::
+
 ## Fonts
 
 In the Sound, Graphics, and Gameplay settings window, there is a "Font" item. It changes the font of the entire interface at once.
