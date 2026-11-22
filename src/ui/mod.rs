@@ -71,6 +71,7 @@ pub mod static_draw;
 pub mod popup;
 pub mod prep_line;
 pub mod rest;
+pub mod cloud_store;
 pub mod saves;
 pub mod screens;
 pub mod session;

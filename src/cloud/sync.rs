@@ -30,6 +30,9 @@ pub struct LocalSave {
     pub name: String,
     pub saved_at: u64,
     pub pinned: bool,
+    /// The device that made the save («ПК», «телефон») for a save pulled from the cloud; empty for
+    /// a save made here. The load list shows «… — телефон, 22:10» for it.
+    pub device: String,
 }
 
 /// This device's saves and synced documents. The game's own store implements it (the UI phase):
@@ -147,6 +150,7 @@ fn keep_as_save(api: &Api, local: &mut dyn Local, theirs: &SaveEntry, offset: i6
         name: session_name(&meta.device, meta.saved_at, offset),
         saved_at: meta.saved_at,
         pinned: false,
+        device: meta.device.clone(),
     };
     match local.store(&save, &bytes) {
         Ok(_) => Ok(true),
@@ -198,6 +202,7 @@ pub fn pull(api: &Api, local: &mut dyn Local) -> Result<Report, CloudError> {
             name: meta.name.clone(),
             saved_at: meta.saved_at,
             pinned: meta.pinned,
+            device: meta.device.clone(),
         };
         if meta.kind == SaveKind::Session {
             // «Продолжить» is one slot: the newer of the two keeps it, the other becomes a save.

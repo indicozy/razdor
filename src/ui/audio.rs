@@ -691,7 +691,7 @@ impl Settings {
         Settings { music_volume: fix(self.music_volume), sfx_volume: fix(self.sfx_volume), ui_scale, text_size, map_zoom, anim_speed, scroll_speed: pct(self.scroll_speed), walk_speed: walk(self.walk_speed), map_sprite_size, map_render_scale: super::map_scale::valid(self.map_render_scale), frame_cap: super::frame_cap::valid(self.frame_cap), map_third_tune, map_first_tune, ..self }
     }
 
-    fn save(&self) {
+    pub fn save(&self) {
         // The performance test plays with its own settings for the run: they are not written (`bench`).
         if super::bench::running() {
             return;

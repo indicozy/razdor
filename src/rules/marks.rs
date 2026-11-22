@@ -124,6 +124,16 @@ fn key(file: &str) -> String {
 }
 
 impl Records {
+    /// Every map's record, by its key (the file name lower-cased).
+    pub fn entries(&self) -> impl Iterator<Item = (&String, &Record)> {
+        self.maps.iter()
+    }
+
+    /// Sets map `key`'s record (the cloud's merged marks, `cloud_store`).
+    pub fn put_key(&mut self, key: String, record: Record) {
+        self.maps.insert(key, record);
+    }
+
     /// The record of map `file`, if it was won.
     pub fn get(&self, file: &str) -> Option<&Record> {
         self.maps.get(&key(file))

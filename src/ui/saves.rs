@@ -305,7 +305,7 @@ fn local_real_time(secs: u64, offset: i64) -> String {
 /// then). The original shows the computer's local time (0x49c94c), not Greenwich time; 0 when
 /// the zone cannot be read.
 #[cfg(unix)]
-fn local_offset(secs: u64) -> i64 {
+pub(crate) fn local_offset(secs: u64) -> i64 {
     let t = secs as libc::time_t;
     // SAFETY: `tm` is plain old data, zeroed before `localtime_r` fills it in.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
@@ -321,7 +321,7 @@ fn local_offset(secs: u64) -> i64 {
 /// The same as `local_offset` on Windows, through kernel32 (no extra crate): the UTC time as a
 /// FILETIME, its local SYSTEMTIME, and both back as FILETIMEs; the difference is the offset.
 #[cfg(windows)]
-fn local_offset(secs: u64) -> i64 {
+pub(crate) fn local_offset(secs: u64) -> i64 {
     use std::ffi::c_void;
 
     #[repr(C)]
@@ -360,7 +360,7 @@ fn local_offset(secs: u64) -> i64 {
 
 /// Any other target: UTC.
 #[cfg(not(any(unix, windows)))]
-fn local_offset(_secs: u64) -> i64 {
+pub(crate) fn local_offset(_secs: u64) -> i64 {
     0
 }
 

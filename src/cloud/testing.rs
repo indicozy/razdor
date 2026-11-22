@@ -48,6 +48,7 @@ impl MemLocal {
             name: name.into(),
             saved_at,
             pinned: false,
+            device: String::new(),
         };
         self.saves.push((save, bytes.to_vec()));
         id
