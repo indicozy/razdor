@@ -8,6 +8,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Main menu: Direct3D 7 defaults the menu's blending relies on** (2026-11-22, E7.S8). The original never sets
+  `ALPHAARG1`/`ALPHAARG2` or stage 0's `COLOROP` around the menu (0x4c7774, 0x4c7d40), so Razdor takes the
+  defaults (`TEXTURE`, `CURRENT`, `MODULATE`): the oval buttons keep what is below by one minus texture alpha
+  squared (`chrome::menu_frame`), and the menu's fire adds each frame at `d + d · (1 − d)` of its vertex alpha `d`
+  (`main_menu::fire_frames`). Not checked against a frame of the original: under Wine 10 on the VM the game dies
+  at start ("Exception frame is not in stack limits", 32- and 64-bit prefixes, no `ru_RU` locale). A screenshot
+  of the original's menu (or a run under Wine 11 with the locale) settles it.
 - **Phone records of 1.5.2 still heal after the watch fixes** (2026-11-17, backlog 1662). Over the 19 records
   the watching pass that skips every battle heals 43 times on `main` and 36 now (the straight pass heals fewer
   on five files and more on none); `replay-1794859112996` has 1 heal left, cause (b). (a) is fixed: the screen

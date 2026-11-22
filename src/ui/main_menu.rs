@@ -1,9 +1,9 @@
 //! The original's main menu (the 18:08 frame of the gameplay video): the burning ruins
 //! (`Windows/Castle.lit`) over the whole screen, the silver "Времена Раздора" logo
-//! (`Title_RUS.ugs`) with flames rising off its letters (`TitleFlame_RUS.lit`), and five oval
-//! buttons (`mb2.ugs`, the last one pointed) whose marble middles swirl in violet
-//! (`MenuFlame.lit`) under the words of `SMText_RUS.lit`; the button under the mouse turns
-//! gold. Razdor's own extras, the custom battle and the mods,
+//! (`Title_RUS.ugs`) with flames rising off its letters (`TitleFlame_RUS.lit`), one fire
+//! (`MenuFlame.lit`) behind the whole column of buttons, and five oval buttons over it (`mb2.ugs`,
+//! the last one pointed: silver frames round a violet marble middle) with the words of
+//! `SMText_RUS.lit`; the button under the mouse turns gold. Razdor's own extras, the custom battle and the mods,
 //! sit small in the bottom corners. Layout numbers are pixels of the 960×720 video, scaled by [`chrome::k`].
 
 use std::cell::Cell;
@@ -84,18 +84,107 @@ const LOGO_FLAME_WIDTH: f32 = 0.95;
 const LOGO_FLAME_HEIGHT: f32 = 1.52;
 const LOGO_FLAME_GLOW: f32 = 0.85;
 
-/// The burning ruins over the whole screen, a little warmer where the fire glows. Not panned:
-/// the screen behind a panned title stays covered (`ui::pan`).
+/// «Фон меню» (`audio::Settings::menu_frame`, Razdor's, the owner's decision 2026-11-22): how the
+/// menu's picture meets a screen of another shape. «Растянуто», the default, stretches it over the
+/// whole screen as before; «Обрезано» keeps its proportions, fills the screen and cuts off what does
+/// not fit, nearer the top (`MENU_CROP_TOP`), so the towers' roofs stay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum MenuFrame {
+    #[default]
+    Stretched,
+    Cropped,
+}
+
+impl MenuFrame {
+    /// The other choice, on a click of the row.
+    pub fn next(self) -> MenuFrame {
+        match self {
+            MenuFrame::Stretched => MenuFrame::Cropped,
+            MenuFrame::Cropped => MenuFrame::Stretched,
+        }
+    }
+
+    /// The row's value.
+    pub fn label(self) -> &'static str {
+        match self {
+            MenuFrame::Stretched => tr("Stretched"),
+            MenuFrame::Cropped => tr("Cropped"),
+        }
+    }
+}
+
+/// How far down the rows a cropped menu picture keeps (`chrome::crop_source`'s `top`): on a 16:9
+/// screen the 512×512 `Castle.lit` shows its rows 30 to 318, the band picked by looking at the
+/// picture (the towers' roofs stay; above them is only sky).
+const MENU_CROP_TOP: f32 = 30.0 / 224.0;
+
+local! {
+    /// The menu's frame in use (`set_menu_frame`, from the settings every frame).
+    static MENU_FRAME: Cell<MenuFrame> = const { Cell::new(MenuFrame::Stretched) };
+}
+
+/// Sets the menu picture's frame (`display::follow_settings`).
+pub fn set_menu_frame(frame: MenuFrame) {
+    MENU_FRAME.with(|f| f.set(frame));
+}
+
+/// The part of the menu's picture (`pic`: width, height) drawn over the `screen` (width, height) in
+/// `frame`, in picture pixels; None draws the whole picture stretched over the screen. Stretched is
+/// the frame as it always was: stretched, but a phone in portrait gets the centre
+/// (`chrome::cover_source`).
+fn menu_source(frame: MenuFrame, pic: (f32, f32), screen: (f32, f32)) -> Option<Rect> {
+    match frame {
+        MenuFrame::Stretched => chrome::cover_source(pic, screen),
+        MenuFrame::Cropped => chrome::crop_source(pic, screen, MENU_CROP_TOP),
+    }
+}
+
+/// A layer of the main menu, for its texture filter ([`layer_filter`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Layer {
+    /// `Castle.lit`, the burning ruins.
+    Background,
+    /// `TitleFlame_RUS.lit`, the flames behind the logo's letters.
+    TitleFlame,
+    /// `MenuFlame.lit`, the fire behind the column of buttons.
+    MenuFire,
+    /// `Title_RUS.ugs`, the silver letters.
+    Logo,
+    /// `mb2.ugs`, the ovals' frames and marble.
+    Frames,
+    /// `SMText_RUS.lit`, the buttons' words.
+    Words,
+}
+
+/// How the original filters each layer of its main menu (0x4c7774 and 0x4c7d40): stage 0's
+/// MAGFILTER and MINFILTER are set to LINEAR at 0x4c77b4–0x4c77d6 for the background and the two
+/// flames (drawn 0x4c77f2–0x4c7b9c), back to POINT at 0x4c7bab–0x4c7be1 for the logo's seven tiles
+/// and the ovals' frames (0x4c7d40), and to LINEAR again at 0x4c7e65 for the words. LINEAR is drawn
+/// plain bilinear, POINT with Razdor's sharp sampler (crisp texels, as POINT is, at uneven scales too).
+fn layer_filter(layer: Layer) -> chrome::Filter {
+    match layer {
+        Layer::Background | Layer::TitleFlame | Layer::MenuFire | Layer::Words => chrome::Filter::Smooth,
+        Layer::Logo | Layer::Frames => chrome::Filter::Sharp,
+    }
+}
+
+/// The burning ruins over the whole screen, a little warmer where the fire glows, framed as the
+/// settings say (`MenuFrame`), enlarged with Lanczos and sharpened (`menu_backdrop`). Not panned: the screen behind a panned title stays covered (`ui::pan`).
 fn background() {
     super::pan::unpanned(|| match chrome::win("Castle") {
         Some(t) => {
-            // A phone in portrait covers the screen with the picture's centre (keeping its
-            // aspect), not stretched; other screens stretch it as before.
             let (sw, sh) = (screen_width(), screen_height());
             let screen = Rect::new(0.0, 0.0, sw, sh);
-            match chrome::cover_source((t.width(), t.height()), (sw, sh)) {
-                Some(src) => chrome::tex_src(&t, src, screen, WHITE),
-                None => chrome::tex(&t, screen, WHITE),
+            let pic = (t.width(), t.height());
+            let src = menu_source(MENU_FRAME.with(|f| f.get()), pic, (sw, sh));
+            // The owner's choice (2026-11-22): the picture enlarged with Lanczos and sharpened
+            // (`menu_backdrop`); until that is made, as the original filters it.
+            let crop = src.unwrap_or(Rect::new(0.0, 0.0, pic.0, pic.1));
+            if !super::menu_backdrop::show(crop, screen) {
+                chrome::filtered(layer_filter(Layer::Background), || match src {
+                    Some(src) => chrome::tex_src(&t, src, screen, WHITE),
+                    None => chrome::tex(&t, screen, WHITE),
+                });
             }
         }
         None => clear_background(Color::from_rgba(60, 30, 12, 255)),
@@ -109,9 +198,10 @@ fn flame_phase(t: f64, fps: f64, frames: usize) -> (usize, usize, f32) {
     (current, (current + 1) % frames, phase.fract() as f32)
 }
 
-/// One cell of the 4×4 sheet of 128×128 flame frames.
+/// One cell of the 4×4 sheet of 128×128 flame frames (`MenuFlame.lit`), counted down the columns
+/// as the original does (0x4c7a64–0x4c7ac5): frame `f` is column `f / 4`, row `f % 4`.
 fn flame_frame(frame: usize) -> Rect {
-    Rect::new((frame % 4) as f32 * 128.0, (frame / 4) as f32 * 128.0, 128.0, 128.0)
+    Rect::new((frame / 4) as f32 * 128.0, (frame % 4) as f32 * 128.0, 128.0, 128.0)
 }
 
 /// Cross-fades consecutive frames so the additive flame grows and dies away smoothly.
@@ -126,7 +216,7 @@ fn draw_flame_frames(
 ) {
     frame_probe::time(frame_probe::Stage::MenuFlames, || {
         let (current, next, blend) = flame_phase(t, fps, frames);
-        chrome::additive(|| {
+        chrome::additive_filtered(layer_filter(Layer::TitleFlame), || {
             let mut current_tint = tint;
             current_tint.a *= 1.0 - blend;
             chrome::tex_src(texture, source(current), dest, current_tint);
@@ -182,7 +272,7 @@ fn logo() {
         }
     }
     match chrome::win_ugs("Title_RUS") {
-        Some(t) => chrome::tex(&t, Rect::new(x, y, w, h), WHITE),
+        Some(t) => chrome::filtered(layer_filter(Layer::Logo), || chrome::tex(&t, Rect::new(x, y, w, h), WHITE)),
         None => text_centered(tr("A time of discord"), screen_width() / 2.0, y + h * 0.7, 64.0 * k, chrome::SILVER),
     }
 }
@@ -192,8 +282,62 @@ local! {
     static HOVERED: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
-/// An oval button: the violet swirl, the frame (gold under the mouse) and its word. Returns
-/// true when clicked.
+/// The original's one fire behind the whole column of buttons (`MenuFlame.lit`, loaded
+/// 0x4dd965–0x4dd9c3, drawn 0x4c7a02–0x4c7b9c): x 312–712, y 150–740 of its 1024 × 768 screen. Its
+/// buttons' centres there are 247.5 + 98.1 · i ([`button_centre`] / [`VIDEO_PER_ORIGINAL`]), so the
+/// fire is 400 px wide on the column, from 97.5 px above the first centre to 100 px below the last.
+const FIRE_W: f32 = 400.0;
+const FIRE_ABOVE: f32 = 97.5;
+const FIRE_BELOW: f32 = 100.0;
+/// Video px per px of the original's 1024 × 768 screen.
+const VIDEO_PER_ORIGINAL: f32 = 0.9375;
+/// The fire's colour: the vertex colour 0x00FFA000 times the texture (stage 0's default `MODULATE`,
+/// 0x4c78ff), added to what is below (`SRCALPHA` / `ONE`, 0x4c7864–0x4c78ae).
+const FIRE_TINT: Color = Color::new(1.0, 160.0 / 255.0, 0.0, 1.0);
+
+/// The fire's two frames at `t` seconds and how much of each is added (0x4c7a02–0x4c7a4b): frame
+/// `(ms / 100) mod 16` and the next one (the 16th wraps to the first), cross-faded by
+/// `a = (ms mod 100) · 128 / 100` (integer): vertex alpha `(128 − a) / 255` and `a / 255`. The stage's
+/// alpha op is `BLENDDIFFUSEALPHA` over an opaque texture (`MenuFlame.lit` has no alpha plane) with
+/// the default `ALPHAARG2 = CURRENT`, the vertex alpha `d` itself, so a frame is added at
+/// `d + d · (1 − d)`, not `d`: up to 0.75 of a frame, about 0.88 of the two together mid-fade.
+fn fire_frames(t: f64) -> (usize, usize, f32, f32) {
+    let ms = (t * 1000.0).max(0.0) as u64;
+    let frame = ((ms / 100) % 16) as usize;
+    let a = (ms % 100 * 128 / 100) as f32;
+    let added = |d: f32| d + d * (1.0 - d);
+    (frame, (frame + 1) % 16, added((128.0 - a) / 255.0), added(a / 255.0))
+}
+
+/// The screen rect of the menu's fire for the column of `buttons` (as [`oval_rect`] gives them) at
+/// `k` screen px per video px (the column's own: [`PORTRAIT_SCALE`] times more held upright): on
+/// the column's centre, from above the first oval to below the last.
+fn fire_rect(buttons: &[Rect], k: f32) -> Rect {
+    let u = VIDEO_PER_ORIGINAL * k;
+    let (first, last) = (buttons[0].center(), buttons[buttons.len() - 1].center());
+    let top = first.y - FIRE_ABOVE * u;
+    Rect::new(first.x - FIRE_W / 2.0 * u, top, FIRE_W * u, last.y + FIRE_BELOW * u - top)
+}
+
+/// The fire behind the menu's buttons: one for the column, drawn before the logo and the buttons
+/// ([`backdrop_layers`]), so it never lies over a frame.
+fn menu_fire() {
+    let k = chrome::k() * upright_menu().map_or(1.0, |m| m.scale);
+    let buttons: Vec<Rect> = (0..BUTTONS.len()).map(oval_rect).collect();
+    if let Some(fl) = chrome::win_fx("MenuFlame", Fx::Glow) {
+        let dst = fire_rect(&buttons, k);
+        let (f, next, a, b) = fire_frames(crate::ui::clock::now());
+        frame_probe::time(frame_probe::Stage::MenuFlames, || {
+            chrome::additive_filtered(layer_filter(Layer::MenuFire), || {
+                chrome::tex_src(&fl, flame_frame(f), dst, Color { a, ..FIRE_TINT });
+                chrome::tex_src(&fl, flame_frame(next), dst, Color { a: b, ..FIRE_TINT });
+            });
+        });
+    }
+}
+
+/// An oval button over the menu's fire ([`menu_fire`]): its picture (the frame and the marble middle,
+/// gold under the mouse) and its word. Returns true when clicked.
 fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     let k = chrome::k() * upright_menu().map_or(1.0, |m| m.scale);
     let r = oval_rect(i);
@@ -210,47 +354,18 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
             h.set(None);
         }
     });
-    // Fire behind the button (the glow around the column of buttons in the video).
-    if let Some(fl) = chrome::win_fx("MenuFlame", Fx::Glow) {
-        let f = Rect::new(c.x - 190.0 * k, c.y - 130.0 * k, 380.0 * k, 260.0 * k);
-        draw_flame_frames(
-            &fl,
-            // The previous per-button offset jumped almost four frames at a time;
-            // keep a small ordered phase step down the menu instead.
-            crate::ui::clock::now() * 0.8 + i as f64 * 0.10,
-            6.0,
-            16,
-            flame_frame,
-            f,
-            Color::new(1.0, 0.55, 0.2, 0.5),
-        );
-    }
-    // `mb2.ugs`: the round oval on top, the pointed one (the last button) below.
+    // `mb2.ugs`: the round oval on top, the pointed one (the last button) below. The marble middle
+    // is in the picture (an ARGB 4444 texture, `gfx::UGS_TEXTURE_STILLS`), 11/15 opaque, drawn as the
+    // original does ([`chrome::menu_frame`]): the fire shows through it, and the button under the
+    // mouse is added to what is below, lighter.
     if let Some(t) = chrome::win_ugs("mb2") {
         let pointed = i + 1 == BUTTONS.len();
-        let frame = if hover { Color::new(1.0, 0.80, 0.42, 1.0) } else { WHITE };
-        let (src, dst) = oval_picture(c, k * 0.9375, t.width(), t.height(), pointed);
-        chrome::tex_src(&t, src, dst, frame);
+        let (src, dst) = oval_picture(c, k * VIDEO_PER_ORIGINAL, t.width(), t.height(), pointed);
+        // The frames stay sharp (POINT, 0x4c7bab–0x4c7be1): `menu_frame` samples sharply.
+        debug_assert_eq!(layer_filter(Layer::Frames), chrome::Filter::Sharp);
+        chrome::menu_frame(|| chrome::tex_src(&t, src, dst, frame_colour(hover)));
     } else {
         draw_ellipse_lines(c.x, c.y, size.x / 2.0, size.y / 2.0, 0.0, 3.0, if hover { chrome::GOLD } else { chrome::SILVER });
-    }
-    // The marble middle glows violet (warm under the mouse), a flame swirling in it.
-    let pointed = i + 1 == BUTTONS.len();
-    let (iw, ih) = if pointed { (0.54, 0.42) } else { (0.62, 0.46) };
-    let inner = Rect::new(c.x - r.w * iw / 2.0, c.y - r.h * ih / 2.0, r.w * iw, r.h * ih);
-    let wash = if hover { Color::new(0.75, 0.40, 0.45, 0.40) } else { Color::new(0.30, 0.26, 0.90, 0.42) };
-    draw_ellipse(inner.center().x, inner.center().y, inner.w / 2.0, inner.h / 2.0, 0.0, wash);
-    if let Some(fl) = chrome::win_fx("MenuFlame", Fx::Glow) {
-        let tint = if hover { Color::new(1.0, 0.8, 0.7, 0.5) } else { Color::new(0.8, 0.65, 1.0, 0.5) };
-        draw_flame_frames(
-            &fl,
-            crate::ui::clock::now() + i as f64 * 0.37,
-            12.0,
-            16,
-            flame_frame,
-            inner,
-            tint,
-        );
     }
     word(i, label, c, hover, k);
     if pressed {
@@ -260,33 +375,70 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     false
 }
 
-/// How much bigger than the sheet the words of `SMText_RUS` are drawn.
+/// The vertex colour of an oval's picture for [`chrome::menu_frame`] (0x4c7d40): white with the
+/// texture's alpha kept, or, under the mouse, 0x00C4C4C4 with alpha 0, added to what is below.
+fn frame_colour(hover: bool) -> Color {
+    if hover {
+        Color::new(196.0 / 255.0, 196.0 / 255.0, 196.0 / 255.0, 0.0)
+    } else {
+        WHITE
+    }
+}
+
+/// A button's word colour, the vertex colour of its quad (0x4c7d40): 0x96AADC, under the mouse the
+/// yellowish 0xE6E68C (0x4c7e22, 0x4c7dc5). The original adds it to what is below ([`word`]).
+fn word_colour(hover: bool) -> Color {
+    if hover {
+        Color::from_rgba(0xE6, 0xE6, 0x8C, 255)
+    } else {
+        Color::from_rgba(0x96, 0xAA, 0xDC, 255)
+    }
+}
+
+/// An English word (Razdor's: the original has only the Russian sheet) is drawn this much bigger
+/// than the Russian words' capital height and widest width below.
 const WORD_SCALE: f32 = 1.05;
 /// The engraved words' capital height and the widest word's width (sheet pixels of
 /// `SMText_RUS`: «Н» of «Новая Игра» is 16 rows, «Н» of «Настройки» 15; «Новая Игра» 124
 /// columns): an English word is drawn as tall, and at most as wide.
 const WORD_CAP: f32 = 15.5;
 const WORD_WIDTH: f32 = 124.0;
-/// The dark rim round a word (video pixels).
+/// The dark rim round an English word (video pixels).
 const WORD_RIM: f32 = 1.5;
 const WORD_EDGE: Color = Color::new(0.12, 0.05, 0.25, 0.8);
 
-/// The button's word: its row of `SMText_RUS` in Russian, else the text, as large and with
-/// the same rim.
+/// The original's word quad on its 1024 × 768 screen (loaded at 0x4dd6e1…, the loop over 0x65a2c0):
+/// 138 × 25.875 px (0x48c4c0 with 0x41cf0000, 0x430a0000), its left 45 px and top 35 px inside the
+/// oval's frame (x 442.5 against the frame's 397.5, y 234.5 + 98 · i against 199.5 + 98 · i), the
+/// sheet's whole width and a band of 0.1875 of the texture's height per word. The texture is the
+/// picture padded to a power of two (the frames' quad takes u 0.890625 of `mb2.ugs`, 228 of 256), so
+/// for `SMText_RUS` (128 × 120 in a 128 × 128 texture) a band is 24 rows: the five words at rows 4,
+/// 27, 51, 75 and 99 each sit in their own 24.
+const ORIGINAL_WORD: (f32, f32, f32, f32) = (45.0, 35.0, 138.0, 25.875);
+const ORIGINAL_WORD_BAND: f32 = 0.1875;
+
+/// Where a button's word is drawn (row `i` of a `sheet` of (width, height) texels) for the button centred at
+/// `c`, at `k` screen px per video px: (the band of the sheet, the screen rect), as the original's quad
+/// ([`ORIGINAL_WORD`]): the frame's left and top as `oval_picture` places it (114 and 46 original px
+/// from the centre), then the word's offset and size inside it.
+fn word_quad(i: usize, c: Vec2, k: f32, sheet: (f32, f32)) -> (Rect, Rect) {
+    let u = k * VIDEO_PER_ORIGINAL;
+    let (dx, dy, w, h) = ORIGINAL_WORD;
+    let dst = Rect::new(c.x - 114.0 * u + dx * u, c.y - 46.0 * u + dy * u, w * u, h * u);
+    let band = (sheet.1 as u32).next_power_of_two() as f32 * ORIGINAL_WORD_BAND;
+    (Rect::new(0.0, i as f32 * band, sheet.0, band), dst)
+}
+
+/// A button's word as the original draws it (0x4c7d40, after the frames): one quad of `SMText_RUS`
+/// ([`word_quad`]), no rim, filtered LINEAR (0x4c7e65), the texture times the vertex colour
+/// ([`word_colour`]) with vertex alpha 0 under `BLENDDIFFUSEALPHA` and `ONE / INVSRCALPHA`: added to
+/// what is below. Without the Russian sheet (English) Razdor's engraved text, in the same colours.
 fn word(i: usize, label: &str, c: Vec2, hover: bool, k: f32) {
-    let color = if hover { Color::new(1.0, 0.93, 0.80, 1.0) } else { Color::new(0.93, 0.90, 1.0, 1.0) };
-    let sheet = (i18n::lang() == Lang::Ru).then(|| chrome::win_fx("SMText_RUS", Fx::Glow)).flatten();
-    match sheet {
+    let color = word_colour(hover);
+    match (i18n::lang() == Lang::Ru).then(|| chrome::win("SMText_RUS")).flatten() {
         Some(t) => {
-            let rh = t.height() / BUTTONS.len() as f32;
-            let src = Rect::new(0.0, i as f32 * rh, t.width(), rh);
-            let (w, h) = (t.width() * WORD_SCALE * k, rh * WORD_SCALE * k);
-            let dst = Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h);
-            // A dark rim, then the word.
-            for (dx, dy) in [(-WORD_RIM, 0.0), (WORD_RIM, 0.0), (0.0, -WORD_RIM), (0.0, WORD_RIM)] {
-                chrome::tex_src(&t, src, Rect::new(dst.x + dx * k, dst.y + dy * k, dst.w, dst.h), WORD_EDGE);
-            }
-            chrome::tex_src(&t, src, dst, color);
+            let (src, dst) = word_quad(i, c, k, (t.width(), t.height()));
+            chrome::additive_filtered(layer_filter(Layer::Words), || chrome::tex_src(&t, src, dst, color));
         }
         None => {
             let box_ = (WORD_CAP * WORD_SCALE * k, WORD_WIDTH * WORD_SCALE * k);
@@ -346,30 +498,55 @@ fn link(label: &str, x: f32, y: f32, right: bool, size: f32) -> bool {
 
 /// The menu's ruins and logo without the buttons (behind the load and new-game windows).
 pub fn backdrop() {
-    backdrop_with(false);
+    draw_backdrop(false);
 }
 
-/// The main menu's backdrop: as [`backdrop`], and with the holiday look on, the snow over the ruins
-/// and under the logo, the buttons and the windows.
-fn menu_backdrop() {
-    backdrop_with(true);
+/// A layer of the title screens' backdrop.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Backdrop {
+    Ruins,
+    /// The holiday snow over the ruins, under the fire and the logo ([`weather::draw_menu_snow`]).
+    Snow,
+    /// The main menu's fire behind its buttons ([`menu_fire`]).
+    MenuFire,
+    Logo,
+    Foot,
 }
 
-fn backdrop_with(menu: bool) {
+/// The backdrop's layers in drawing order, as the original's (the ruins 0x4c7834, the menu's fire
+/// 0x4c7a02, the logo up to 0x4c7774; the buttons' frames after all of them, 0x4c7d40). Only the main
+/// menu (`main_menu`) has the fire: under the logo, under every button. The snow is the main menu's
+/// too, and only while the holiday look is on (`holiday`: the setting and the Christmas mod played).
+fn backdrop_layers(main_menu: bool, holiday: bool) -> Vec<Backdrop> {
+    [Backdrop::Ruins, Backdrop::Snow, Backdrop::MenuFire, Backdrop::Logo, Backdrop::Foot]
+        .into_iter()
+        .filter(|l| match l {
+            Backdrop::Snow => main_menu && holiday,
+            Backdrop::MenuFire => main_menu,
+            _ => true,
+        })
+        .collect()
+}
+
+fn draw_backdrop(main_menu: bool) {
     // The ruins, the logo and the foot are the interface's own: a title window's scale (set by
     // the window's frame, `window_layout::title_scale`) does not reach them.
     let _scale = super::display::enter_window_scale(None);
     // Timed for the other screens too (`ui::hub_view`, `new_game`, `saves`, ...): their stage lines name them.
-    frame_probe::time(frame_probe::Stage::MenuBackground, background);
-    // The snow shows only while the look is on: the setting and the Christmas mod played (`holiday::on`).
-    if menu && super::holiday::on() {
-        // The snow is the map's snow pass (`weather::draw_menu_snow`): its cost is the menu's frame time.
-        let t = super::clock::now();
-        let cheap = super::holiday::cheap();
-        frame_probe::time(frame_probe::Stage::MenuBackground, || super::weather::draw_menu_snow(screen_width(), screen_height(), cheap, t));
+    for layer in backdrop_layers(main_menu, super::holiday::on()) {
+        match layer {
+            Backdrop::Ruins => frame_probe::time(frame_probe::Stage::MenuBackground, background),
+            // The snow is the map's snow pass: its cost is the menu's frame time.
+            Backdrop::Snow => {
+                let t = super::clock::now();
+                let cheap = super::holiday::cheap();
+                frame_probe::time(frame_probe::Stage::MenuBackground, || super::weather::draw_menu_snow(screen_width(), screen_height(), cheap, t));
+            }
+            Backdrop::MenuFire => menu_fire(),
+            Backdrop::Logo => frame_probe::time(frame_probe::Stage::MenuLogo, logo),
+            Backdrop::Foot => frame_probe::time(frame_probe::Stage::MenuWidgets, foot_lines),
+        }
     }
-    frame_probe::time(frame_probe::Stage::MenuLogo, logo);
-    frame_probe::time(frame_probe::Stage::MenuWidgets, foot_lines);
 }
 
 /// The dots of the loader's spinning mark.
@@ -719,7 +896,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     let sideways = screen_width() > screen_height() && super::display::dp_px().is_some();
     SIDE_TILES.with(|t| t.set(sideways && !no_install));
     let mod_choice = (!mods.is_empty()).then(|| super::new_game::mod_choice(mods, active, busy));
-    menu_backdrop();
+    draw_backdrop(true);
     let mut pick = None;
     // The holiday windows (the season's welcome, the letter) are modals over the menu: no button under them.
     let asking = super::holiday_windows::up();
@@ -1868,7 +2045,7 @@ impl Group {
         match self {
             Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
-            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
+            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::MenuFrame, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId, Row::CloudSaves, Row::CloudState, Row::CloudSpace, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
         }
@@ -1934,6 +2111,8 @@ pub enum Row {
     Font,
     TextSize,
     LargeWindows,
+    /// Razdor's «Фон меню» (`audio::Settings::menu_frame`): the menu's picture stretched or cropped. Look only.
+    MenuFrame,
     /// Razdor's «ЭЛТ-эффект» (`audio::Settings::crt`): an old monitor's look over the whole screen. Look only.
     CrtEffect,
     /// Razdor's «Качество ЭЛТ» (`audio::Settings::crt_quality`): the cost of the CRT look. Look only.
@@ -1982,7 +2161,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 82] = [
+pub const ALL: [Row; 83] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -2038,6 +2217,7 @@ pub const ALL: [Row; 82] = [
         Row::Font,
         Row::TextSize,
         Row::LargeWindows,
+        Row::MenuFrame,
         Row::CrtEffect,
         Row::CrtQuality,
         Row::CrtCurve,
@@ -2070,6 +2250,7 @@ pub const ALL: [Row; 82] = [
     /// The long hint a «?» pop-up shows (backlog 1508), for the rows whose hint runs past a line.
     fn help_text(self) -> Option<&'static str> {
         match self {
+            Row::MenuFrame => Some(tr("Stretched: the menu's picture is stretched over the whole screen, as before. Cropped: the picture keeps its proportions and fills the screen; what does not fit is cut off.")),
             Row::Telemetry => Some(tr("Sent anonymously: game statistics (launches, maps, events), crash reports, performance figures and battle records. Nothing you type is sent: no names of heroes or saves, no chat. The full list is on the page «What we send», linked from the question «Help Razdor?».")),
             Row::CrtEffect => Some(tr("An old monitor's look over the whole screen: scanlines, a soft glow and darker edges. Quality: Fast for weak phones, High adds a glow around bright areas.")),
             Row::GraphicsQuality => Some(tr("Original: as the original game, with no new effects. Sets the map's resolution, light, shadows, mist, water, weather and animation at once. Custom: when something was changed by hand.")),
@@ -2910,6 +3091,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::LargeWindows => {
             if labelled_row(c, geo, tr("Large message windows"), yes_no(audio.large_windows)).0 {
                 audio.large_windows = !audio.large_windows;
+            }
+        }
+        Row::MenuFrame => {
+            // Razdor's (the owner's decision, 2026-11-22): the menu's picture stretched or cropped. Look only.
+            if labelled_row_help(c, geo, tr("Menu background"), audio.menu_frame.label(), Row::MenuFrame.help_text()).0 {
+                audio.menu_frame = audio.menu_frame.next();
             }
         }
         Row::CrtEffect => {
@@ -4072,6 +4259,63 @@ pub fn close_options_kept() {
 mod tests {
     use super::*;
 
+    /// `Castle.lit`'s size.
+    const CASTLE: (f32, f32) = (512.0, 512.0);
+
+    #[test]
+    fn the_menu_layers_are_filtered_as_the_original_filters_them() {
+        use chrome::Filter::{Sharp, Smooth};
+        // LINEAR (0x4c77b4–0x4c77d6, the words 0x4c7e65): bilinear.
+        for layer in [Layer::Background, Layer::TitleFlame, Layer::MenuFire, Layer::Words] {
+            assert_eq!(layer_filter(layer), Smooth, "{layer:?}");
+        }
+        // POINT (0x4c7bab–0x4c7be1): the logo's tiles and the ovals' frames stay sharp.
+        for layer in [Layer::Logo, Layer::Frames] {
+            assert_eq!(layer_filter(layer), Sharp, "{layer:?}");
+        }
+    }
+
+    #[test]
+    fn the_stretched_menu_frame_is_the_frame_as_before() {
+        // Today's frame: the desktop's and a phone held sideways stretch the whole picture, a phone in
+        // portrait covers with its centre.
+        for screen in [(1920.0, 1080.0), (1024.0, 768.0), (2560.0, 1080.0), (1280.0, 800.0), (800.0, 800.0), (1080.0, 2160.0), (720.0, 1280.0)] {
+            assert_eq!(menu_source(MenuFrame::Stretched, CASTLE, screen), chrome::cover_source(CASTLE, screen), "{screen:?}");
+        }
+        assert_eq!(menu_source(MenuFrame::Stretched, CASTLE, (1920.0, 1080.0)), None, "the desktop: stretched");
+        assert_eq!(menu_source(MenuFrame::Stretched, CASTLE, (1080.0, 2160.0)), Some(Rect::new(128.0, 0.0, 256.0, 512.0)));
+    }
+
+    #[test]
+    fn the_cropped_menu_frame_keeps_the_aspect_fills_the_screen_and_keeps_the_towers() {
+        // 16:9: the whole width and the rows 30 to 318, the band picked by looking at the picture.
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (1920.0, 1080.0)), Some(Rect::new(0.0, 30.0, 512.0, 288.0)));
+        for screen in [(1920.0, 1080.0), (1024.0, 768.0), (2560.0, 1080.0), (1280.0, 800.0), (3840.0, 2160.0), (1366.0, 768.0)] {
+            let r = menu_source(MenuFrame::Cropped, CASTLE, screen).expect("a landscape screen is cropped");
+            // The picture's own aspect (within a rounded row), the whole width, inside the picture.
+            assert!(((r.w / r.h) - screen.0 / screen.1).abs() < 0.01, "{screen:?}: {r:?}");
+            assert_eq!((r.x, r.w), (0.0, 512.0), "{screen:?}");
+            assert!(r.y >= 0.0 && r.y + r.h <= 512.0, "{screen:?}: {r:?}");
+            // Nearer the top than the middle: the towers' roofs stay.
+            let cut = 512.0 - r.h;
+            assert!(r.y < cut / 4.0, "{screen:?}: {r:?}");
+            assert_eq!(r.y, (cut * MENU_CROP_TOP).round(), "{screen:?}");
+        }
+        // A phone in portrait: the centre strip of the width, all the rows.
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (1080.0, 2160.0)), Some(Rect::new(128.0, 0.0, 256.0, 512.0)));
+        // A square screen: the whole picture; an empty one: nothing to crop.
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (800.0, 800.0)), Some(Rect::new(0.0, 0.0, 512.0, 512.0)));
+        assert_eq!(menu_source(MenuFrame::Cropped, CASTLE, (0.0, 0.0)), None);
+    }
+
+    #[test]
+    fn the_menu_frame_row_switches_between_the_two() {
+        assert_eq!(MenuFrame::Stretched.next(), MenuFrame::Cropped);
+        assert_eq!(MenuFrame::Cropped.next(), MenuFrame::Stretched);
+        assert!(Group::Screen.rows().contains(&Row::MenuFrame));
+        assert!(Row::MenuFrame.help_text().is_some());
+    }
+
     #[test]
     fn a_windows_wheel_notch_scrolls_the_settings_pane_one_step() {
         use crate::ui::input::{wheel_notches, WINDOWS_WHEEL_DELTA};
@@ -4164,6 +4408,112 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-3
+    }
+
+    /// The menu's fire is one, for the whole column, and drawn before the logo and every button, so it
+    /// never lies over a frame (a player's report, 2026-11-22: orange frames; the original: 0x4c7a02
+    /// before 0x4c7d40). The other title screens have no fire.
+    #[test]
+    fn the_menus_one_fire_goes_under_the_logo_and_every_button() {
+        use Backdrop::*;
+        assert_eq!(backdrop_layers(true, false), vec![Ruins, MenuFire, Logo, Foot]);
+        assert_eq!(backdrop_layers(false, false), vec![Ruins, Logo, Foot]);
+    }
+
+    /// The holiday snow lies over the ruins and under the fire and the logo, and only on the main
+    /// menu while the look is on (the other title screens never have it).
+    #[test]
+    fn the_holiday_snow_is_between_the_ruins_and_the_fire_on_the_main_menu_only() {
+        use Backdrop::*;
+        assert_eq!(backdrop_layers(true, true), vec![Ruins, Snow, MenuFire, Logo, Foot]);
+        assert_eq!(backdrop_layers(false, true), vec![Ruins, Logo, Foot]);
+        assert_eq!(backdrop_layers(true, false), vec![Ruins, MenuFire, Logo, Foot]);
+    }
+
+    /// The fire's rect is the original's 400 × 590 at x 312, y 150 (of 1024 × 768) on the desktop's
+    /// column, and covers every oval wherever the column is (desktop, phone upright and sideways).
+    #[test]
+    fn the_menus_fire_is_the_originals_rect_behind_the_whole_column() {
+        let u = VIDEO_PER_ORIGINAL;
+        let f = fire_rect(&landscape_buttons(960.0, 720.0, 1.0), 1.0);
+        for (got, want) in [(f.x, 312.0 * u), (f.y, 150.0 * u), (f.w, 400.0 * u), (f.h, 590.0 * u)] {
+            assert!((got - want).abs() < 0.1, "fire {f:?}: {got} for {want}");
+        }
+        let (sw, sh, k, dp) = PHONE;
+        let columns = [
+            (landscape_buttons(1920.0, 1080.0, 1.5), 1.5),
+            (portrait_menu(sw, sh, k, dp, 0.0, 0.0).buttons, k * PORTRAIT_SCALE),
+            (landscape_menu(sh, sw, k, dp, 0.0).buttons, k),
+        ];
+        for (buttons, k) in columns {
+            let f = fire_rect(&buttons, k);
+            for b in buttons {
+                assert!(f.x <= b.x && b.x + b.w <= f.x + f.w && f.y <= b.y && b.y + b.h <= f.y + f.h, "{b:?} outside the fire {f:?}");
+            }
+        }
+    }
+
+    /// `MenuFlame`'s frames run down the columns of its 4×4 sheet (0x4c7a64–0x4c7ac5), and the last
+    /// fades into the first.
+    #[test]
+    fn the_menus_fire_frames_run_down_the_columns() {
+        assert_eq!(flame_frame(0), Rect::new(0.0, 0.0, 128.0, 128.0));
+        assert_eq!(flame_frame(1), Rect::new(0.0, 128.0, 128.0, 128.0));
+        assert_eq!(flame_frame(4), Rect::new(128.0, 0.0, 128.0, 128.0));
+        assert_eq!(flame_frame(15), Rect::new(384.0, 384.0, 128.0, 128.0));
+        let (current, next, ..) = fire_frames(1.55);
+        assert_eq!((current, next), (15, 0));
+    }
+
+    /// The fire adds each frame at `d + d · (1 − d)` of its vertex alpha `d` (`BLENDDIFFUSEALPHA` over
+    /// the opaque `MenuFlame`), not at `d`: 0.75 of a frame at the start of its 100 ms, 0.44 of each
+    /// halfway (0x4c7a02–0x4c7a4b).
+    #[test]
+    fn the_menus_fire_is_as_strong_as_the_originals() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        let (f, next, a, b) = fire_frames(0.0);
+        assert_eq!((f, next), (0, 1));
+        let d = 128.0 / 255.0;
+        assert!(close(a, d + d * (1.0 - d)) && close(b, 0.0), "{a} {b}");
+        let (f, _, a, b) = fire_frames(3.0505);
+        let d = 64.0 / 255.0;
+        assert_eq!(f, 14);
+        assert!(close(a, d + d * (1.0 - d)) && close(b, d + d * (1.0 - d)), "{a} {b}");
+    }
+
+    /// An oval keeps the original's vertex colours (0x4c7d40): white and opaque (the texture's alpha
+    /// squared keeps what is below), and under the mouse 0xC4 grey with alpha 0 (added: lighter), not
+    /// a gold tint.
+    #[test]
+    fn the_button_under_the_mouse_is_added_lighter_as_in_the_original() {
+        assert_eq!(frame_colour(false), WHITE);
+        let h = frame_colour(true);
+        assert_eq!((h.r, h.g, h.b, h.a), (196.0 / 255.0, 196.0 / 255.0, 196.0 / 255.0, 0.0));
+    }
+
+    /// The words' colours are the original's: 0x96AADC, under the mouse 0xE6E68C (0x4c7e22, 0x4c7dc5).
+    #[test]
+    fn the_words_are_the_originals_colours() {
+        assert_eq!(word_colour(false), Color::from_rgba(0x96, 0xAA, 0xDC, 255));
+        assert_eq!(word_colour(true), Color::from_rgba(0xE6, 0xE6, 0x8C, 255));
+    }
+
+    /// A word's quad is the original's (0x4dbb0c, the loop over 0x65a2c0): 138 × 25.875 original px,
+    /// 45 and 35 px inside the frame, and its band of `SMText_RUS` (128 × 120, a 128 × 128 texture) is
+    /// 24 rows, so each word is whole and none of its neighbours shows.
+    #[test]
+    fn a_word_is_the_originals_quad_and_its_own_band_of_the_sheet() {
+        let c = vec2(500.0, 300.0);
+        let (src, dst) = word_quad(2, c, 1.0 / VIDEO_PER_ORIGINAL, (128.0, 120.0));
+        assert_eq!(src, Rect::new(0.0, 48.0, 128.0, 24.0));
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert!(close(dst.x, c.x - 69.0) && close(dst.y, c.y - 11.0), "{dst:?}");
+        assert!(close(dst.w, 138.0) && close(dst.h, 25.875), "{dst:?}");
+        // The five words' rows in the sheet (first and last row with ink): each inside its band.
+        for (i, (first, last)) in [(4.0, 23.0), (27.0, 46.0), (51.0, 70.0), (75.0, 94.0), (99.0, 117.0)].into_iter().enumerate() {
+            let (src, _) = word_quad(i, c, 1.0, (128.0, 120.0));
+            assert!(src.y <= first && last + 1.0 <= src.y + src.h, "word {i}: {src:?}");
+        }
     }
 
     #[test]
@@ -4410,7 +4760,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
         scene_help("Experience");
         assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
         HELP_PINNED.with(|p| p.set(None));

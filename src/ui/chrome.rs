@@ -1048,6 +1048,7 @@ local! {
     static ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static MULTIPLY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static PREMULTIPLIED: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static MENU_FRAME: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static GROUND_RING: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
 
@@ -1086,6 +1087,37 @@ pub fn premultiplied(draw: impl FnOnce()) {
         .clone()
     });
     with_material(material, draw);
+}
+
+/// The main menu's oval buttons (`MB2`) as the original draws them (0x4c7d40, under the states
+/// 0x4c7774 leaves: `SRCBLEND = ONE`, `DESTBLEND = INVSRCALPHA`): the texture's colour times the
+/// vertex colour is added whole (stage 0's default `MODULATE`), and what is below is kept by one
+/// minus the stage's alpha. Every vertex alpha there is 0, and the alpha op picks the alpha:
+/// `BLENDTEXTUREALPHA` (a button not under the mouse, 0x4c7d6a) blends the texture's alpha with the
+/// vertex's by the texture's, which with the defaults `ALPHAARG1 = TEXTURE`, `ALPHAARG2 = CURRENT`
+/// is texture alpha × texture alpha (the marble middle, 11/15 opaque, keeps 46 % of what is below);
+/// `BLENDDIFFUSEALPHA` (the button under the mouse) gives 0, so the button is simply added. Here the
+/// drawn colour's alpha says which: 1 the first, 0 the second.
+const MENU_FRAME_MAIN: &str = "vec4 t = sharp_tex(uv); gl_FragColor = vec4(color.rgb * t.rgb, color.a * t.a * t.a);";
+
+/// Runs `draw` blending as the original's menu buttons ([`MENU_FRAME_MAIN`]), or premultiplied if
+/// the material cannot be made.
+pub fn menu_frame(draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
+    let material = MENU_FRAME.with(|m| {
+        m.get_or_init(|| {
+            let blend = BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha));
+            let params = macroquad::miniquad::PipelineParams { color_blend: Some(blend), ..Default::default() };
+            sharp::material(&sharp::fragment("", MENU_FRAME_MAIN), params, Vec::new())
+                .map_err(|e| razdor::diag!("menu frame material: {e}"))
+                .ok()
+        })
+        .clone()
+    });
+    match material {
+        Some(m) => with_material(Some(m), draw),
+        None => premultiplied(draw),
+    }
 }
 
 fn blend_material(blend: macroquad::miniquad::BlendState, what: &str) -> Option<Material> {
@@ -1168,6 +1200,91 @@ pub fn multiply(draw: impl FnOnce()) {
             .clone()
     });
     with_material(material, draw);
+}
+
+/// How a picture is sampled when it is drawn larger or smaller than its texels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Filter {
+    /// Razdor's sharp sampler (`sharp`): every texel a crisp square.
+    Sharp,
+    /// Plain bilinear, as the original's `LINEAR` texture filter (D3D's `D3DTFG_LINEAR`).
+    Smooth,
+}
+
+const SMOOTH_VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+varying mediump vec2 uv;
+varying lowp vec4 color;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1);
+    color = color0 / 255.0;
+    uv = texcoord;
+}"#;
+
+/// The colour times the picture, sampled by the hardware's bilinear filter (the textures are
+/// `FilterMode::Linear`).
+const SMOOTH_FRAGMENT: &str = r#"#version 100
+precision mediump float;
+varying mediump vec2 uv;
+varying lowp vec4 color;
+uniform sampler2D Texture;
+void main() {
+    gl_FragColor = color * texture2D(Texture, uv);
+}"#;
+
+local! {
+    static SMOOTH_ALPHA: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static SMOOTH_ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The bilinear material of `cell`, made once with `pipeline_params`: pictures drawn in it (`tex`,
+/// `tex_src` under [`with_blend`] with `sharp_art` false) are sampled plainly, not with the sharp
+/// sampler. None when it cannot be made.
+fn smooth_material(
+    cell: &'static razdor::local::Local<std::cell::OnceCell<Option<Material>>>,
+    pipeline_params: macroquad::miniquad::PipelineParams,
+    what: &str,
+) -> Option<Material> {
+    cell.with(|m| {
+        m.get_or_init(|| {
+            load_material(
+                macroquad::miniquad::ShaderSource::Glsl { vertex: SMOOTH_VERTEX, fragment: SMOOTH_FRAGMENT },
+                MaterialParams { pipeline_params, ..Default::default() },
+            )
+            .map_err(|e| razdor::diag!("smooth {what} material: {e}"))
+            .ok()
+        })
+        .clone()
+    })
+}
+
+/// Runs `draw` with its pictures sampled by `filter`, blended normally (alpha). Without the
+/// bilinear material, sharp.
+pub fn filtered(filter: Filter, draw: impl FnOnce()) {
+    match filter {
+        Filter::Sharp => draw(),
+        Filter::Smooth => match smooth_material(&SMOOTH_ALPHA, sharp::alpha_pipeline(), "alpha") {
+            Some(m) => with_blend(Some(m), false, draw),
+            None => draw(),
+        },
+    }
+}
+
+/// [`additive`] with its pictures sampled by `filter`.
+pub fn additive_filtered(filter: Filter, draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+    let blend = BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::One);
+    match filter {
+        Filter::Sharp => additive(draw),
+        Filter::Smooth => match smooth_material(&SMOOTH_ADDITIVE, PipelineParams { color_blend: Some(blend), ..Default::default() }, "additive") {
+            Some(m) => with_blend(Some(m), false, draw),
+            None => additive(draw),
+        },
+    }
 }
 
 /// Runs `draw` with subtractive blending: the colour drawn is taken off what is below, the
@@ -1422,16 +1539,29 @@ pub fn cover_source(pic: (f32, f32), screen: (f32, f32)) -> Option<Rect> {
     if pw <= 0.0 || ph <= 0.0 || sw <= 0.0 || sh <= sw {
         return None;
     }
-    let (pic_aspect, screen_aspect) = (pw / ph, sw / sh);
-    if (0.8..=1.2).contains(&(screen_aspect / pic_aspect)) {
+    if (0.8..=1.2).contains(&((sw / sh) / (pw / ph))) {
         return None;
     }
+    crop_source(pic, screen, 0.5)
+}
+
+/// The part of a `pic` picture (width, height) that covers a `screen` (width, height) at the
+/// picture's own aspect, in picture pixels, whatever the screen's shape: a screen wider than the
+/// picture keeps its whole width and the band of rows `top` of the way down the rows cut off (0
+/// the top rows, 0.5 the middle ones); a narrower one keeps the centre strip of its width. None for
+/// an empty picture or screen.
+pub fn crop_source(pic: (f32, f32), screen: (f32, f32), top: f32) -> Option<Rect> {
+    let ((pw, ph), (sw, sh)) = (pic, screen);
+    if pw <= 0.0 || ph <= 0.0 || sw <= 0.0 || sh <= 0.0 {
+        return None;
+    }
+    let (pic_aspect, screen_aspect) = (pw / ph, sw / sh);
     if screen_aspect < pic_aspect {
         let cut = ph * screen_aspect;
         Some(Rect::new(((pw - cut) / 2.0).round(), 0.0, cut.round(), ph))
     } else {
         let cut = pw / screen_aspect;
-        Some(Rect::new(0.0, ((ph - cut) / 2.0).round(), pw, cut.round()))
+        Some(Rect::new(0.0, ((ph - cut) * top).round(), pw, cut.round()))
     }
 }
 
