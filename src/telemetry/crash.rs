@@ -64,9 +64,33 @@ fn screen() -> String {
     SCREEN.try_lock().map(|s| s.clone()).unwrap_or_default()
 }
 
-/// Called by the panic hook: writes the pending report. Does nothing when the analytics are off.
+/// The first words of the sound device's failures: quad-snd's ALSA panics (`quad-snd/src/alsa_snd.rs`)
+/// and Razdor's own «no sound device». A player with no sound device is not a crash, so these are
+/// not reported. Matched on the panic's first line (its message), never on the backtrace.
+const SOUND_FAILURES: [&str; 11] = [
+    "PCM",
+    "ALSA",
+    "no sound device",
+    "software parameters",
+    "harware parameters",
+    "Can't set rate.",
+    "channels number",
+    "Cant's set buffer size",
+    "interleaved mode",
+    "start mode",
+    "audio interface",
+];
+
+/// Whether a panic text is a sound device's failure (see [`SOUND_FAILURES`]).
+pub fn is_sound_failure(text: &str) -> bool {
+    let message = text.lines().next().unwrap_or_default();
+    SOUND_FAILURES.iter().any(|s| message.contains(s))
+}
+
+/// Called by the panic hook: writes the pending report. Does nothing when the analytics are off, and
+/// for a sound device's failure ([`is_sound_failure`]).
 pub fn note_panic(text: &str) {
-    if !super::active() {
+    if !super::active() || is_sound_failure(text) {
         return;
     }
     let Some(dir) = state::telemetry_dir() else { return };
@@ -74,6 +98,33 @@ pub fn note_panic(text: &str) {
     let pending = Pending { at: super::now_secs(), screen: screen(), panic_text: text.to_string() };
     if let Ok(json) = serde_json::to_vec(&pending) {
         let _ = std::fs::write(dir.join(PENDING), json);
+    }
+}
+
+/// How many folders down [`newest_save`] looks (the saves' kinds: manual, quick, auto, maps).
+const SAVE_DEPTH: u32 = 3;
+
+/// The newest save file in the folder `dir` (`.rzsave`, by modification time), looking at most
+/// [`SAVE_DEPTH`] folders down. `None` when there is none, or the folder is missing.
+pub fn newest_save(dir: &Path) -> Option<PathBuf> {
+    let mut found = Vec::new();
+    collect_saves(dir, SAVE_DEPTH, &mut found);
+    found.into_iter().max_by_key(|(time, _)| *time).map(|(_, path)| path)
+}
+
+fn collect_saves(dir: &Path, depth: u32, out: &mut Vec<(std::time::SystemTime, PathBuf)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if depth > 0 {
+                collect_saves(&path, depth - 1, out);
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some(crate::rules::save::EXTENSION) {
+            if let Ok(time) = entry.metadata().and_then(|m| m.modified()) {
+                out.push((time, path));
+            }
+        }
     }
 }
 
@@ -272,6 +323,38 @@ mod tests {
         assert_eq!(item.path, paths::CRASH_SAVE);
         assert_eq!(item.after.as_deref(), Some(ask.token.as_str()));
         assert_eq!(hub.queue().body(queued).unwrap(), b"SAVEBYTES");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_sound_device_failure_is_not_a_crash_and_other_panics_are() {
+        // quad-snd's ALSA panic, as the audio thread reports it (with its place and a backtrace).
+        let alsa = "Can't open PCM device.\nat quad-snd-0.2.8/src/alsa_snd.rs:30:9\nbacktrace: snd_pcm_open";
+        assert!(is_sound_failure(alsa));
+        assert!(is_sound_failure("no sound device\nat src/ui/audio.rs:1"));
+        assert!(!is_sound_failure("index out of bounds: the len is 3 but the index is 7\nat src/rules/battle.rs:10"));
+        // A normal panic whose backtrace mentions the audio code is still recorded.
+        let normal = "called `Option::unwrap()` on a `None` value\nat src/ui/audio.rs:90\nbacktrace: razdor::ui::audio::play";
+        assert!(!is_sound_failure(normal));
+    }
+
+    #[test]
+    fn the_newest_save_is_the_one_modified_last_in_any_saves_folder() {
+        let dir = std::env::temp_dir().join(format!("razdor-newest-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("manual")).unwrap();
+        std::fs::create_dir_all(dir.join("auto")).unwrap();
+        let at = |secs: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        let put = |path: PathBuf, secs: u64| {
+            std::fs::write(&path, b"save").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(at(secs)).unwrap();
+        };
+        put(dir.join("manual").join("old.rzsave"), 1_000);
+        put(dir.join("auto").join("session.rzsave"), 3_000);
+        put(dir.join("manual").join("middle.rzsave"), 2_000);
+        put(dir.join("manual").join("newer.txt"), 9_000);
+        assert_eq!(newest_save(&dir), Some(dir.join("auto").join("session.rzsave")));
+        assert_eq!(newest_save(&dir.join("missing")), None, "no folder, no save");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
