@@ -47,8 +47,16 @@ zip = { version = "9.1.0", default-features = false, features = ["deflate-flate2
 # The picture cache's entries (`dt::picture_cache`): LZ4 per frame, pure Rust, no C code (zstd
 # is smaller but needs a C build for Android and Windows; its decode is no faster).
 lz4_flex = "0.14.0"
+# Cloud saves (`src/cloud`): the save file is zstd-packed on the client (the server stores it as sent),
+# and the account key's random bytes come from the OS. Both are already in the lock file.
+zstd = "0.13"
+getrandom = "0.3"
 
 [dev-dependencies]
+# The cloud's end-to-end test (`src/cloud/e2e.rs`) runs the API server in-process on a local port.
+razdor-server = { path = "server" }
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time"] }
 # The tests of `dt::unpack` write a 7z archive; the game itself only reads them.
 sevenz-rust2 = { version = "0.20.2", default-features = false, features = ["compress"] }
 

@@ -239,3 +239,42 @@ read-only sections skipped, the recorder untouched, a new start replacing an ope
 
 Off-screen: `RAZDOR_SCENE_CONSENT=1`, `RAZDOR_SCENE_CRASH=save|none`, `RAZDOR_SCENE_TELEMETRY=id|delete|newid`
 (with `RAZDOR_SNAPSHOT`), and `RAZDOR_SCENE=options:other` for the rows.
+
+## Cloud saves (client)
+
+The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`; the rest is behind it.
+
+- `account.rs`: the account key (`<cloud folder>/account.key`, 0600 on unix, written through a temporary
+  file and a rename). `phrase` and `key_from_phrase` turn the key into 53 characters of the link alphabet
+  (52 base-31 digits and a check digit) and back; a typo fails the check. The key is never the analytics
+  install id.
+- `select.rs`: `choose` picks the saves that go up, per game, map and kind: 3 manual, 3 quick and 1 session,
+  pinned first, then the newest. Autosaves are not given to the cloud. `state` gives the load list's icon:
+  `InCloud` (the account holds the same file), `WaitingUpload` (chosen, not yet there), `LocalOnly`.
+- `merge.rs`: marks merge as a union (the better level per map; a tie takes the later date); synced settings
+  take the newest change per key; `session_name` gives «Продолжить (ПК, 21:40)»; `keeps_slot` picks the newer
+  «Продолжить»; `newer_version` finds the saves of a newer Razdor.
+- `pack.rs`: zstd (level 9) on the client, the SHA-256 of the packed bytes (the hash the server checks), and
+  the limits in both directions.
+- `http.rs`: the `Net` transport. Desktop runs `curl` (the key in the `x-razdor-key` header, the body on
+  stdin). Android and iOS have no transport yet: their requests fail as offline.
+- `api.rs`: the typed calls over `Net`, every body validated both ways. A status maps onto `CloudError`:
+  409 `Conflict`, 413 `Full`, 404 `NotFound`, 401 and 403 `Unauthorized`, 408, 429 and 5xx `Offline`, any other
+  4xx `Refused`, a bad answer `Bad`.
+- `sync.rs`: `pull` and `push` over the `Local` trait (this device's saves and documents, implemented by the
+  game's store). A save is matched by game, map, kind and the hash of its packed bytes, so nothing is uploaded
+  twice and nothing is overwritten. The cloud loses a save only as a stale one of a full per-map window, and
+  never a save of a newer Razdor. A «Продолжить» conflict keeps the newer as the slot and turns the other into
+  an ordinary save. The quota is checked before each upload (20 MB, after zstd).
+- `mod.rs`: `Cloud` runs the jobs (`Job::CreateAccount`, `Link`, `Redeem`, `DeleteAccount`, `Sync`, `Pull`,
+  `Push`) on one background thread. `request` only queues; `snapshot` gives the `Shared` state (phase,
+  states, newer saves, quota, the last link code, errors); `state_of` gives one save's icon. Offline, a sync
+  retries after 1 minute, doubling up to 6 hours. Without an account nothing is sent.
+- Tests: `cargo test --profile fasttest cloud::`. `e2e.rs` runs `razdor-server`'s router on a local port with
+  two devices (linked by a code), the window, the session conflict, the quota, the marks and settings, the
+  account deletion, and the background worker.
+
+Not built yet (phase 4b, the UI and the device adapters): the game's `Local` store (the save folders, the
+`marks.json`, the settings file, the Hub and benchmark records, the pinned flags and the device name);
+the settings rows and the load list; the Android transport (`razdorPost` takes POST without headers); the
+sync's start and exit hooks. The session's names use the zone offset the store gives.
