@@ -236,6 +236,11 @@ phase only (a test-only TOML; every other limit keeps its default):
 | Container, `--cpus 0.5`, host network | 232 | 289 ms | 593 ms | 0.49 (at the cap) | 10 MB |
 | Container, `--cpus 1.0`, host network | 371 | 142 ms | 681 ms | 0.77 | 11 MB |
 | Static binary on the host, no container, no nginx | 614 | 78 ms | 288 ms | not measured | 12.7 MB peak |
+| Same, rebuilt after C2/C3 (2026-11-22, workstation, pinned to CPUs 8-19) | 1087 | 54 ms | 161 ms | not measured | 16.1 MB peak |
+
+The last row: 40 000 requests, all 200; the stored rows match what was sent (4000 pings, 4000 perf
+reports, 640 000 events = 4000 installs x 8 batches x 20 events). The numbers are from another machine
+state than the first row, so they show no regression, not a speed-up.
 
 Idle, the container uses about 1 MB. The quadlet's half-CPU cap is the limit of the first two rows: the
 service is CPU-bound at the cap. The host and bridge networks make no difference. A VPS that can spare a
