@@ -54,6 +54,7 @@ pub mod frame_cap;
 pub mod map_anim;
 pub mod map_freeze;
 pub mod map_scale;
+pub mod marble_button;
 pub mod memo;
 pub mod minimap;
 pub mod living;

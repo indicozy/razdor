@@ -850,7 +850,8 @@ fn overlaps(a: &Rect, b: &Rect) -> bool {
 /// (the owner's decision, 2026-11-21: pinch and wheel zoom stay). True when pressed.
 fn fit_button(r: Rect) -> bool {
     let k = chrome::k();
-    let pressed = widgets::button_sized(r.x, r.y, r.w, r.h, "", true, r.h * 0.5);
+    // Razdor's square: the game has no button art of this shape, so it is made as the game's own buttons are made.
+    let pressed = widgets::button_composed(r, "", true);
     let col = Color::new(0.95, 0.9, 0.75, 1.0);
     let cx = r.x + r.w / 2.0;
     let cy = r.y + r.h / 2.0;

@@ -1972,7 +1972,8 @@ fn add_map_button(has_install: bool, r: Rect) {
     }
     let enabled = has_install && map_import::can_start();
     let (_, down, pressed) = button_state(r, enabled);
-    chrome::marble_button(r, tr("Add a map…"), enabled, down);
+    // Wider than any of the game's button pictures: made as the game's own buttons are made, not stretched.
+    chrome::composed_button(r, tr("Add a map…"), enabled, down);
     if pressed {
         cue(Cue::Button);
         map_import::request();

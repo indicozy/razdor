@@ -1071,6 +1071,18 @@ pub fn button_sized(x: f32, y: f32, w: f32, h: f32, label: &str, enabled: bool, 
     pressed
 }
 
+/// A marble button of any size with `label` ([`chrome::composed_button`]), for Razdor's buttons the game has no art
+/// for (the tree's «[ ]»); true when clicked.
+#[track_caller]
+pub fn button_composed(r: Rect, label: &str, enabled: bool) -> bool {
+    let (_, down, pressed) = button_state(r, enabled);
+    super::chrome::composed_button(r, label, enabled, down);
+    if pressed {
+        super::audio::cue(super::audio::Cue::Button);
+    }
+    pressed
+}
+
 /// [`button_sized`] with its label in the plain face ([`chrome::marble_button_plain`]). Razdor's own, for
 /// the tree window's phone buttons.
 #[track_caller]

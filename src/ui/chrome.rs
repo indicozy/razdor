@@ -2679,6 +2679,58 @@ fn marble_frame(r: Rect, enabled: bool, hover: bool, quest_red: bool) {
     }
 }
 
+/// A marble button of any size with `label`, for Razdor's buttons the game has no art for (the tree's «[ ]» and
+/// «Добавить карту…»): [`composed_frame`] under the label, as [`marble_button`] draws its label. The game's own
+/// buttons keep their art ([`marble_button`]).
+pub fn composed_button(r: Rect, label: &str, enabled: bool, hover: bool) {
+    if !composed_frame(r, enabled, hover) {
+        marble_frame(r, enabled, hover, false);
+    }
+    button_label(r, label, enabled, hover, false);
+}
+
+/// A marble button's frame of any size, made as the game's own button art is made (`ui::marble_button`): a cut of
+/// `Win-marble` under the bevel, the outline drawn as the original frames its windows with `SteelLine`. Made at
+/// the art's size (36 high, as wide as `r` at the height's scale, the scale the game's buttons are drawn at), kept
+/// per size and state, drawn over `r`. False without the art (no install).
+pub fn composed_frame(r: Rect, enabled: bool, hover: bool) -> bool {
+    use super::marble_button::{self as mb, State};
+    const ART_H: u32 = 36;
+    let s = r.h / ART_H as f32;
+    if s <= 0.0 {
+        return false;
+    }
+    let w = ((r.w / s).round() as u32).max(mb::BEVEL_DEPTH * 2);
+    let state = if hover && enabled { State::Down } else { State::Up };
+    let key = format!("composed:{w}:{state:?}:{enabled}");
+    let cached = CHROME.with(|c| c.borrow().as_ref().and_then(|c| c.animations.get(&key).cloned()));
+    let t = match cached {
+        Some(t) => t.and_then(|v| v.first().cloned()),
+        None => {
+            let t = image("Windows/Win-marble.lit").zip(image("Windows/SteelLine.lit")).and_then(|(marble, steel)| {
+                let mut img = mb::button(&marble, mb::offset(state), w, ART_H, state, &steel);
+                if !enabled {
+                    transform(&mut img, Fx::Grey);
+                }
+                to_texture(&img)
+            });
+            CHROME.with(|c| {
+                if let Some(c) = c.borrow_mut().as_mut() {
+                    c.animations.insert(key, t.clone().map(|t| vec![t]));
+                }
+            });
+            t
+        }
+    };
+    match t {
+        Some(t) => {
+            tex(&t, r, WHITE);
+            true
+        }
+        None => false,
+    }
+}
+
 /// A marble button whose label is drawn at the size `size` (px), not fitted to the button's height
 /// (Razdor's, a phone held upright: the event windows' OK, which must read at a finger's size).
 pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
