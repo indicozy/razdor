@@ -9,21 +9,30 @@
 //! primary moves only when a request's own fallback chain shows it: the primary host failed, then
 //! another host answered ([`Chain`]). The primary is saved in the cache folder (`mirror-pref.json`,
 //! [`learn`]); a file that does not read is no primary. `RAZDOR_HUB` is one explicit source and is
-//! never reordered. Nothing here needs macroquad.
+//! never reordered.
+//!
+//! Throttling (429, 503): a throttle never moves the learned primary (`is_throttle`, `Chain::failed`). It
+//! pauses that host for its requests (`throttled`, `wait_host`), and a paused host's addresses go last in
+//! their list. Nothing here needs macroquad.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 #[cfg(not(test))]
 use std::path::PathBuf;
-#[cfg(not(test))]
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde::Deserialize;
+use web_time::Instant;
 
 /// The built-in update feed: the release list in the GitHub API's shape. GitVerse's copy is a static
-/// file on the community's Pages; GitHub's is the API.
-pub const UPDATE_FEED: [&str; 2] = [
+/// file on the community's Pages; GitHub's Pages copy is the same file, tried before the API (the API
+/// allows 60 anonymous requests an hour per IP). A copy that is not there (404) gives way to the next.
+pub const UPDATE_FEED: [&str; 3] = [
     "https://indicozy.gitverse.site/razdor-community/releases.json",
+    "https://indicozy.github.io/razdor-community/releases.json",
     "https://api.github.com/repos/indicozy/razdor/releases?per_page=30",
 ];
 
@@ -86,6 +95,13 @@ pub fn ordered_by<S: AsRef<str>>(primary: Option<Host>, list: &[S]) -> Vec<&str>
     first
 }
 
+/// The addresses whose host is held (paused) go after the others, each part in its order: a throttled
+/// host is tried when the other addresses have failed, and then it waits its pause (see [`wait_host`]).
+fn held_last_by(list: Vec<&str>, held: impl Fn(&str) -> bool) -> Vec<&str> {
+    let (live, held): (Vec<&str>, Vec<&str>) = list.into_iter().partition(|u| !held(u));
+    live.into_iter().chain(held).collect()
+}
+
 /// One request's fallback chain: the addresses in order, and whether the primary host failed in it.
 /// A primary moves only when this chain shows it (the primary failed, then another host answered).
 #[derive(Debug)]
@@ -100,14 +116,16 @@ impl Chain {
         Chain { primary, failed_on_primary: false }
     }
 
-    /// The list in this chain's order ([`ordered_by`] with the chain's primary).
+    /// The list in this chain's order ([`ordered_by`] with the chain's primary, the addresses of a
+    /// paused host last: see [`held_last_by`]).
     pub fn order<'a, S: AsRef<str>>(&self, list: &'a [S]) -> Vec<&'a str> {
-        ordered_by(self.primary, list)
+        held_last_by(ordered_by(self.primary, list), paused)
     }
 
-    /// An address of this chain failed (for whatever reason).
-    pub fn failed(&mut self, url: &str) {
-        if self.primary.is_some() && Host::of(url) == self.primary {
+    /// An address of this chain failed, with its reason. A throttle (429 or 503) is no failure of the
+    /// primary host: the primary is never moved away by it (the host is paused instead, see [`throttled`]).
+    pub fn failed(&mut self, url: &str, why: &str) {
+        if self.primary.is_some() && Host::of(url) == self.primary && !is_throttle(why) {
             self.failed_on_primary = true;
         }
     }
@@ -180,12 +198,163 @@ pub fn first_ok<T, S: AsRef<str>>(what: &str, addresses: &[S], mut attempt: impl
             }
             Err(why) => {
                 crate::diag!("{what}: {address}: {why}");
-                chain.failed(address);
+                chain.failed(address, &why);
                 last = why;
             }
         }
     }
     Err(last)
+}
+
+/// The status and the Retry-After (seconds, when the server gave a number) of the Java side's reply
+/// `HTTP <code>` or `HTTP <code> retry-after <seconds>`; None for any other reply.
+pub fn http_reply(text: &str) -> Option<(u16, Option<u64>)> {
+    let rest = text.strip_prefix("HTTP ")?;
+    let (code, retry_after) = match rest.split_once(" retry-after ") {
+        Some((code, retry)) => (code, retry.trim().parse().ok()),
+        None => (rest, None),
+    };
+    Some((code.trim().parse().ok()?, retry_after))
+}
+
+/// True when a failure's reason is a throttle: HTTP 429 (rate limit) or 503 (busy), as the app's
+/// requests and curl word them.
+pub fn is_throttle(why: &str) -> bool {
+    ["HTTP 429", "HTTP 503", "error: 429", "error: 503"]
+        .iter()
+        .any(|s| why.match_indices(s).any(|(i, _)| !why[i + s.len()..].starts_with(|c: char| c.is_ascii_digit())))
+}
+
+/// The host part of an `https://` address, for the log (`indicozy.gitverse.site`); "" for none.
+fn host_of(url: &str) -> &str {
+    let rest = url.strip_prefix("https://").unwrap_or(url);
+    rest.split(['/', '?', '#']).next().unwrap_or("").rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("")
+}
+
+/// The pauses per host (one shared pause for every request to that host, none for another host).
+/// `level` counts the throttles in a row: the next pause without a `Retry-After` is longer.
+#[derive(Debug, Clone, Copy)]
+struct Pause {
+    until: Instant,
+    level: u32,
+}
+
+/// The pauses of all hosts. Pure: the caller gives the clock and the random unit (0..1) for jitter.
+#[derive(Debug, Default)]
+pub struct Pauses {
+    hosts: BTreeMap<&'static str, Pause>,
+}
+
+impl Pauses {
+    /// A throttle from `host` at `now`: its requests wait a while. The wait is the server's
+    /// `Retry-After` (capped at [`crate::parts::MAX_RETRY_AFTER`]) or else 2, 4, 8 ... 60 s by the
+    /// level, jittered to 75-125 %. Returns the wait given.
+    pub fn throttled(&mut self, host: Host, now: Instant, retry_after: Option<u64>, unit: f64) -> Duration {
+        let level = self.hosts.get(host.name()).map_or(0, |p| p.level);
+        let base = match retry_after {
+            Some(s) => Duration::from_secs(s.min(crate::parts::MAX_RETRY_AFTER)),
+            None => Duration::from_secs((2u64 << level.min(5)).min(crate::parts::MAX_RETRY_AFTER)),
+        };
+        let wait = base.mul_f64(0.75 + 0.5 * unit.clamp(0.0, 1.0));
+        let entry = self.hosts.entry(host.name()).or_insert(Pause { until: now, level: 0 });
+        entry.until = entry.until.max(now + wait);
+        entry.level = level + 1;
+        wait
+    }
+
+    /// How long `host`'s requests still wait at `now`.
+    pub fn remaining(&self, host: Host, now: Instant) -> Duration {
+        self.hosts.get(host.name()).map_or(Duration::ZERO, |p| p.until.saturating_duration_since(now))
+    }
+
+    /// `host` answered: its pause and its level are gone.
+    pub fn answered(&mut self, host: Host) {
+        self.hosts.remove(host.name());
+    }
+}
+
+/// The app's pauses (see [`Pauses`]).
+static PAUSES: Mutex<Pauses> = Mutex::new(Pauses { hosts: BTreeMap::new() });
+
+fn pauses() -> std::sync::MutexGuard<'static, Pauses> {
+    PAUSES.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A random unit (0..1) for the jitter: a xorshift stream seeded from the clock.
+fn unit_random() -> f64 {
+    static SEED: AtomicU64 = AtomicU64::new(0);
+    let mut x = SEED.load(Ordering::Relaxed);
+    if x == 0 {
+        x = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) | 1;
+    }
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    SEED.store(x, Ordering::Relaxed);
+    (x >> 11) as f64 / (1u64 << 53) as f64
+}
+
+/// The address's host is throttled (429 or 503): its requests wait a while ([`Pauses::throttled`]).
+/// Other hosts are not held back. An address of no known host changes nothing.
+pub fn throttled(url: &str, retry_after: Option<u64>) {
+    let Some(host) = Host::of(url) else { return };
+    let wait = pauses().throttled(host, Instant::now(), retry_after, unit_random());
+    crate::diag!("http: {}: throttled, its requests wait {:.1} s", host_of(url), wait.as_secs_f64());
+}
+
+/// The address's host answered: its level of throttles starts again.
+pub fn answered(url: &str) {
+    if let Some(host) = Host::of(url) {
+        pauses().answered(host);
+    }
+}
+
+/// True while the address's host is paused.
+pub fn paused(url: &str) -> bool {
+    Host::of(url).is_some_and(|host| !pauses().remaining(host, Instant::now()).is_zero())
+}
+
+/// Waits until the address's host is not paused. `stopped` ends the wait early (a cancel).
+pub fn wait_host(url: &str, stopped: &dyn Fn() -> bool) {
+    let Some(host) = Host::of(url) else { return };
+    loop {
+        if stopped() {
+            return;
+        }
+        let left = pauses().remaining(host, Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::sleep(left.min(Duration::from_millis(100)));
+    }
+}
+
+/// A failed HTTP request, logged with its host, reason and `Retry-After`. A throttle (429 or 503)
+/// pauses that host ([`throttled`]).
+pub fn note_failure(url: &str, why: &str, retry_after: Option<u64>) {
+    let retry = retry_after.map_or_else(|| "none".to_string(), |s| s.to_string());
+    crate::diag!("http: {}: {why} (retry-after {retry})", host_of(url));
+    if is_throttle(why) {
+        throttled(url, retry_after);
+    }
+}
+
+/// Extra tries a request gets after a throttle (429 or 503), each one after the host's pause.
+pub const THROTTLE_RETRIES: u32 = 2;
+
+/// Runs `attempt`, and runs it again (up to [`THROTTLE_RETRIES`] times) while it fails with a
+/// throttle. Any other failure, or the last one, is the result.
+pub fn retrying<T>(what: &str, mut attempt: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+    let mut left = THROTTLE_RETRIES;
+    loop {
+        match attempt() {
+            Err(why) if is_throttle(&why) && left > 0 => {
+                left -= 1;
+                crate::diag!("{what}: throttled, another try after the host's pause: {why}");
+            }
+            other => return other,
+        }
+    }
 }
 
 /// The primary host a saved file gives: `{"host": "gitverse" | "github", ...}`. Anything else (a
@@ -281,7 +450,8 @@ mod tests {
     #[test]
     fn the_addresses_are_gitverse_first_and_github_last() {
         assert!(UPDATE_FEED[0].starts_with("https://indicozy.gitverse.site/"));
-        assert!(UPDATE_FEED[1].starts_with("https://api.github.com/"));
+        assert_eq!(UPDATE_FEED[1], "https://indicozy.github.io/razdor-community/releases.json", "the Pages copy before the API");
+        assert!(UPDATE_FEED[2].starts_with("https://api.github.com/"), "the API is the last fallback");
         assert!(HUB[0].starts_with("https://indicozy.gitverse.site/"));
         assert_eq!(HUB[1], crate::hub::DEFAULT_SOURCE);
         assert!(GAME[0].starts_with("https://gitverse.ru/api/attachments/"));
@@ -318,18 +488,18 @@ mod tests {
     fn a_chain_moves_only_when_the_primary_failed_and_another_host_answered() {
         let mut c = Chain::new(Some(Host::GitHub));
         assert_eq!(c.succeeded(GH), None, "a success on the primary keeps it");
-        c.failed(GH);
+        c.failed(GH, "stalled");
         assert_eq!(c.succeeded(GH2), None, "another address of the primary's host keeps it");
-        c.failed(GV);
+        c.failed(GV, "stalled");
         assert_eq!(c.succeeded(GV2), Some(Host::GitVerse), "the primary failed, then GitVerse answered");
 
         let mut other = Chain::new(Some(Host::GitHub));
-        other.failed(GV);
+        other.failed(GV, "stalled");
         assert_eq!(other.succeeded(GV2), None, "a failure on the other host alone does not move the primary");
         assert_eq!(other.succeeded(GH), None);
 
         let mut none = Chain::new(None);
-        none.failed(GH);
+        none.failed(GH, "stalled");
         assert_eq!(none.succeeded(GV), None, "with no primary nothing moves");
     }
 
@@ -348,6 +518,102 @@ mod tests {
         let got = first_ok("test", &[GH, GV], |url| if url == GH { Err("HTTP 404".into()) } else { Ok(8) });
         assert_eq!(got, Ok(8));
         assert_eq!(current(), Some(Host::GitVerse), "GitHub failed, GitVerse answered: GitVerse is the primary now");
+    }
+
+    #[test]
+    fn a_429_or_503_on_the_primary_never_learns_another_primary() {
+        learn(Host::GitVerse, "test: start");
+        let got = first_ok("test", &[GV, GH], |url| if url == GV { Err("HTTP 429".into()) } else { Ok(3) });
+        assert_eq!(got, Ok(3), "the next mirror answers at once");
+        assert_eq!(current(), Some(Host::GitVerse), "a throttle is no reason to move the primary");
+        let got = first_ok("test", &[GV, GH], |url| if url == GV { Err("error: 503".into()) } else { Ok(4) });
+        assert_eq!(got, Ok(4));
+        assert_eq!(current(), Some(Host::GitVerse));
+        let mut c = Chain::new(Some(Host::GitVerse));
+        c.failed(GV, "The requested URL returned error: 429");
+        assert_eq!(c.succeeded(GH), None, "curl's 429 words count as a throttle too");
+    }
+
+    #[test]
+    fn the_java_side_reply_gives_its_status_and_retry_after() {
+        assert_eq!(http_reply("HTTP 429 retry-after 30"), Some((429, Some(30))));
+        assert_eq!(http_reply("HTTP 503"), Some((503, None)));
+        assert_eq!(http_reply("HTTP 429 retry-after Wed, 21 Oct 2026 07:28:00 GMT"), Some((429, None)), "a date is no number of seconds");
+        assert_eq!(http_reply("206 1234"), None);
+        assert_eq!(http_reply("stalled: timeout"), None);
+    }
+
+    #[test]
+    fn a_throttle_is_recognised_in_every_words_it_comes_in() {
+        for why in ["HTTP 429", "the server answered HTTP 503 to a range request", "the server refused the file (HTTP 429)", "curl: (22) The requested URL returned error: 429"] {
+            assert!(is_throttle(why), "{why}");
+        }
+        for why in ["stalled", "HTTP 404", "HTTP 4290", "reply: expected value at line 1", "curl: (6) could not resolve"] {
+            assert!(!is_throttle(why), "{why}");
+        }
+    }
+
+    #[test]
+    fn a_throttled_host_is_held_last_and_the_others_keep_their_order() {
+        let list = [GV, GH, OTHER, GV2];
+        let held = |u: &str| Host::of(u) == Some(Host::GitVerse);
+        assert_eq!(held_last_by(list.to_vec(), held), vec![GH, OTHER, GV, GV2]);
+        assert_eq!(held_last_by(list.to_vec(), |_| false), list.to_vec(), "nothing held: the list as it is");
+    }
+
+    #[test]
+    fn a_pause_is_shared_by_one_host_grows_without_a_retry_after_and_is_reset_by_an_answer() {
+        let now = Instant::now();
+        let mut pauses = Pauses::default();
+        let first = pauses.throttled(Host::GitVerse, now, None, 0.5);
+        assert_eq!(first, Duration::from_secs(2), "no Retry-After: 2 s at the middle of the jitter");
+        let second = pauses.throttled(Host::GitVerse, now, None, 0.5);
+        assert_eq!(second, Duration::from_secs(4), "the next throttle in a row is longer");
+        assert_eq!(pauses.remaining(Host::GitVerse, now), Duration::from_secs(4), "one pause for the whole host");
+        assert_eq!(pauses.remaining(Host::GitHub, now), Duration::ZERO, "another host is not held back");
+        assert_eq!(pauses.throttled(Host::GitVerse, now, Some(7), 0.5), Duration::from_secs(7), "Retry-After is honoured");
+        assert_eq!(pauses.throttled(Host::GitVerse, now, Some(999), 0.5), Duration::from_secs(60), "and capped");
+        pauses.answered(Host::GitVerse);
+        assert_eq!(pauses.remaining(Host::GitVerse, now), Duration::ZERO);
+        assert_eq!(pauses.throttled(Host::GitVerse, now, None, 0.5), Duration::from_secs(2), "the level starts again");
+    }
+
+    #[test]
+    fn the_jitter_keeps_a_pause_within_75_to_125_percent() {
+        let now = Instant::now();
+        let low = Pauses::default().throttled(Host::GitHub, now, Some(20), 0.0);
+        let high = Pauses::default().throttled(Host::GitHub, now, Some(20), 1.0);
+        assert_eq!(low, Duration::from_secs(15));
+        assert_eq!(high, Duration::from_secs(25));
+        let long = Pauses::default().throttled(Host::GitHub, now, None, 1.0);
+        assert!(long <= Duration::from_secs(75), "the cap holds with the jitter: {long:?}");
+    }
+
+    #[test]
+    fn retrying_tries_again_after_a_throttle_only_and_gives_up_at_the_limit() {
+        let calls = RefCell::new(0u32);
+        let got = retrying("test", || {
+            *calls.borrow_mut() += 1;
+            if *calls.borrow() == 1 { Err("HTTP 503".to_string()) } else { Ok(5) }
+        });
+        assert_eq!(got, Ok(5));
+        assert_eq!(*calls.borrow(), 2);
+
+        let calls = RefCell::new(0u32);
+        let got: Result<(), String> = retrying("test", || {
+            *calls.borrow_mut() += 1;
+            Err("HTTP 429".to_string())
+        });
+        assert_eq!(got, Err("HTTP 429".to_string()));
+        assert_eq!(*calls.borrow(), 1 + THROTTLE_RETRIES, "the first try and the retries");
+
+        let calls = RefCell::new(0u32);
+        let got: Result<(), String> = retrying("test", || {
+            *calls.borrow_mut() += 1;
+            Err("stalled".to_string())
+        });
+        assert_eq!(got, Err("stalled".to_string()));
+        assert_eq!(*calls.borrow(), 1, "a stall is not retried here");
     }
 
     #[test]

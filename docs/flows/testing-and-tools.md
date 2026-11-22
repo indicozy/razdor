@@ -291,15 +291,18 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   is the `release` skill.
 - `src/update.rs`: the game checks the release feeds on a background thread
   (`update::Mode`: Ask / Always / Off): the learned primary host's feed first (GitVerse's `releases.json`
-  until one is learned, the GitHub API after it; `mirror::first_ok`, `docs/specs/2026-11-13-gitverse-mirrors.md` «Learned primary»)
+  until one is learned, then the GitHub Pages copy, then the GitHub API; `mirror::first_ok`, `docs/specs/2026-11-13-gitverse-mirrors.md` «Learned primary»)
   (`remote_config::update_feed()`, the remote config's list; `mirror::UPDATE_FEED` is the built-in one; `update::feed_from`: a reply that is not a release list, e.g. an
   HTML page with HTTP 200, is the next address's). It downloads through the system `curl` (the host the new file came from becomes the learned primary: `mirror::learn_from`), accepts a file
   only if its SHA-256 matches `SHA256SUMS` (or `SHA256SUMS.txt`), and replaces itself by rename.
   A big download (over 4 MiB, a server that answers Range requests) comes in 8 pieces at once (4 for
   gitverse.ru), each checked (`src/parts.rs`, the game flow in `app-and-ui.md`); the update's `download_to`
   takes that path too. A piece that stalls, fails or comes back short RESUMES: its bytes are kept and
-  the next request is a Range request for the rest of its range (a 429 or 503 waits 1, 2, 4 s first and
-  is not a try; three tries in all). Tail hedging: once every other piece is whole, a slow piece (no new
+  the next request is a Range request for the rest of its range (a 429 or 503 with a `Retry-After`
+  waits it, up to three times, and is not a try; one with no `Retry-After` gives the address up at once, so
+  the next mirror is asked: `parts::primary`, `parts::probe`. The throttled host is paused for every request
+  to it, jittered and growing, never another host: `mirror::throttled`, `mirror::wait_host`; a throttle never
+  moves the learned primary. Three tries in all for any other failure). Tail hedging: once every other piece is whole, a slow piece (no new
   byte for 8 s, or under a third of the whole pieces' average rate once 3 s old) gets one more request for
   its remaining bytes; the first copy to finish the piece wins and the other is cancelled. A file is written
   only on a 206, so a partial file is a prefix of its range. Cancel stops every piece (the phones: each

@@ -1110,18 +1110,29 @@ impl Hub {
 
     fn fetch(&self, rel: &str) -> Result<Vec<u8>, String> {
         match self.root()? {
-            Root::Url(u) => crate::update::fetch(&resolve(&u, rel), 60),
+            Root::Url(u) => crate::mirror::retrying(rel, || crate::update::fetch(&resolve(&u, rel), 60)),
             Root::Dir(d) => std::fs::read(folder_file(&d, rel)?).map_err(|e| format!("{rel}: {e}")),
         }
     }
 
     /// Downloads `rel` into the file `dest`, streamed (a folder hub copies it), at most
     /// `max_bytes` on the desktop.
-    fn download(&self, rel: &str, dest: &Path, max_bytes: u64) -> Result<(), String> {
-        let _ = std::fs::remove_file(dest);
-        match self.root()? {
-            Root::Url(u) => crate::update::download_to(&resolve(&u, rel), dest, 900, max_bytes),
-            Root::Dir(d) => std::fs::copy(folder_file(&d, rel)?, dest).map(|_| ()).map_err(|e| format!("{rel}: {e}")),
+    /// `size` is the catalog's size of the file, when it gives one (a small file then takes no probe).
+    fn download(&self, rel: &str, dest: &Path, max_bytes: u64, size: Option<u64>) -> Result<(), String> {
+        crate::mirror::retrying(rel, || {
+            let _ = std::fs::remove_file(dest);
+            match self.root()? {
+                Root::Url(u) => crate::update::download_known(&resolve(&u, rel), dest, 900, max_bytes, size),
+                Root::Dir(d) => std::fs::copy(folder_file(&d, rel)?, dest).map(|_| ()).map_err(|e| format!("{rel}: {e}")),
+            }
+        })
+    }
+
+    /// A short pause between two Hub downloads from an address: a burst of requests is what the
+    /// GitVerse side throttles (see `mirror`). Nothing for a folder or the mock.
+    fn hub_gap(&self) {
+        if matches!(self.source, Source::Mirrors | Source::Url(_)) {
+            std::thread::sleep(std::time::Duration::from_millis(400));
         }
     }
 
@@ -1140,7 +1151,7 @@ impl Hub {
         let dir = self.local.join("previews");
         std::fs::create_dir_all(&dir).map_err(|e| format!("previews: {e}"))?;
         let part = dir.join(format!("{}.part", f.sha256.to_lowercase()));
-        self.download(&f.path, &part, MAX_PREVIEW_DOWNLOAD)?;
+        self.download(&f.path, &part, MAX_PREVIEW_DOWNLOAD, Some(f.size))?;
         let checked = Hub::check_file(&part, f).and_then(|()| {
             let bytes = std::fs::read(&part).map_err(|e| format!("{}: {e}", f.path))?;
             if preview_ok(&bytes) { Ok(()) } else { Err(format!("{}: not a PNG within {PREVIEW_MAX_W}x{PREVIEW_MAX_H}", f.path)) }
@@ -1168,7 +1179,7 @@ impl Hub {
         fs::create_dir_all(&folder).map_err(|e| format!("ads: {e}"))?;
         let part = folder.join(format!("{picture}.part"));
         let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None };
-        self.download(&a.image, &part, MAX_AD_BYTES).and_then(|()| Hub::check_file(&part, &file)).inspect_err(|_| {
+        self.download(&a.image, &part, MAX_AD_BYTES, Some(a.size)).and_then(|()| Hub::check_file(&part, &file)).inspect_err(|_| {
             let _ = fs::remove_file(&part);
         })?;
         fs::rename(&part, folder.join(&picture)).map_err(|e| format!("ads: {e}"))?;
@@ -1249,7 +1260,10 @@ impl Hub {
 
     fn install_plan(&self, catalog: &Catalog, plan: &[String], code: &str, downloads: &Path) -> Result<(), String> {
         let mut installed = self.installed();
-        for pid in plan {
+        for (idx, pid) in plan.iter().enumerate() {
+            if idx > 0 {
+                self.hub_gap();
+            }
             let e = catalog.entry(pid).expect("planned from the catalog");
             let files = e.files_for(code);
             let got = self.fetch_files(&e.id, &files, downloads)?;
@@ -1282,6 +1296,9 @@ impl Hub {
     fn fetch_files<'a>(&self, id: &str, files: &[&'a FileRef], downloads: &Path) -> Result<Vec<(&'a FileRef, Got)>, String> {
         let mut got = Vec::with_capacity(files.len());
         for (n, &f) in files.iter().enumerate() {
+            if n > 0 {
+                self.hub_gap();
+            }
             // The names come from the local record too (a repair reads them): checked where they are used.
             if !safe_name(&f.name) {
                 return Err(format!("{}: not a file name the hub may use", f.name));
@@ -1289,7 +1306,7 @@ impl Hub {
             if f.archive {
                 std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
                 let part = downloads.join(format!("{id}-{n}.zip"));
-                self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD)?;
+                self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD, Some(f.size))?;
                 Hub::check_file(&part, f)?;
                 got.push((f, Got::Zip(part)));
             } else if f.wrapped.is_some() {
@@ -1312,7 +1329,7 @@ impl Hub {
     fn fetch_wrapped(&self, id: &str, f: &FileRef, n: usize, downloads: &Path) -> Result<Vec<u8>, String> {
         std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
         let zip = downloads.join(format!("{id}-{n}.wrapped.zip"));
-        let result = self.download(&f.path, &zip, MAX_ARCHIVE_DOWNLOAD).and_then(|()| check_archive(&zip, f)).and_then(|()| {
+        let result = self.download(&f.path, &zip, MAX_ARCHIVE_DOWNLOAD, f.archive_size).and_then(|()| check_archive(&zip, f)).and_then(|()| {
             let member = f.member.as_deref().unwrap_or_default();
             archive::member(&zip, member).map_err(|e| format!("{}: {e}", f.path))
         });

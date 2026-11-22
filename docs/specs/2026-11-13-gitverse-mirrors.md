@@ -50,7 +50,7 @@ app releases and the newest two catalogs; never the game archive.
 
 1. **Sources in order.** A small module (e.g. `src/mirror.rs`, no macroquad) lists each resource's
    addresses in order, GitVerse first: the update feed (`releases.json` on GitVerse Pages, then the
-   GitHub API), the hub catalog (GitVerse Pages, then `hub::DEFAULT_SOURCE`), the game
+   same file on GitHub Pages, then the GitHub API), the hub catalog (GitVerse Pages, then `hub::DEFAULT_SOURCE`), the game
    (`gdrive::GAME` with GitVerse first and the GitHub URL as its mirror; the catalog's
    `game.mirrors`). The next address is tried on: a connection error, an HTTP error, the stall limit,
    a reply that does not parse, a file whose size or SHA-256 is wrong. Cancel stops all. Each
@@ -69,7 +69,8 @@ app releases and the newest two catalogs; never the game archive.
    against `SHA256SUMS.txt` (the `sums` asset may be named `SHA256SUMS` or `SHA256SUMS.txt`). The
    APK is not packed.
 5. **Multi-connection download** for big files (the game, hub archives, app updates): when the file
-   is over ~4 MB and the server answers a Range request with 206, it is fetched in 8 parts at once (4 for a gitverse.ru address, `parts::pieces_for`; a 429 or 503 waits 1, 2, 4 s or the server's `Retry-After` first, and is not a try until those are spent),
+   is over ~4 MB and the server answers a Range request with 206, it is fetched in 8 parts at once (4 for a gitverse.ru address, `parts::pieces_for`; a 429 or 503 with a `Retry-After` waits it (up to 3 times) and is not a try; one with no `Retry-After`
+   gives the address up at once, so the next mirror is asked, and the host is paused: `mirror::throttled`),
    each checked for its exact size and retried up to 3 times, each with the 30 s stall limit; the
    parts are joined and the whole file checked (size, SHA-256). A server without Range (200) gets
    the single stream. Desktop: one curl per part. Android: `razdorDownload` takes a byte range
@@ -127,7 +128,13 @@ no macroquad):
   updater's file (its release comes from the feed that answered, so the feed's order decides it).
 - **Adapt**: a request's fallback chain (`mirror::Chain`) moves the primary only when the primary host failed
   in it (an error, the stall limit, an HTML page, a file that does not verify) and then another known host
-  answered. One success on the primary keeps it; a failure on the other host alone changes nothing.
+  answered. One success on the primary keeps it; a failure on the other host alone changes nothing. A 429 or
+  503 is never a reason to move the primary (`mirror::is_throttle`): it pauses that host instead.
+- **Throttles** (2026-11-22): one pause per host, shared by its requests (`mirror::Pauses`): a 429 or 503 with
+  a `Retry-After` waits that long (at most 60 s), else 2, 4, 8 ... 60 s, jittered to 75-125 %. A paused host's
+  addresses go last in their list, and a request waits for its host's pause (`mirror::wait_host`). Every
+  failed HTTP request is logged with its host, status and `Retry-After` (`mirror::note_failure`). Hub files
+  come 400 ms apart from an address; a throttled Hub request is tried again up to twice (`mirror::retrying`).
 - **The updater**: the host a new version's file was downloaded from becomes the primary (`mirror::learn_from`,
   after the file checks out).
 - **Saved** in the cache folder as `mirror-pref.json` (`{"host": "gitverse" | "github", "since": <unix s>}`);

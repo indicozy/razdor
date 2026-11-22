@@ -434,15 +434,26 @@ pub(crate) fn fetch_temp_name() -> String {
     format!("razdor-fetch-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
-/// The body of `url`, or why not.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+/// The body of `url`, or why not. A throttled host is waited for, and a failure is noted (`mirror`).
 pub(crate) fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
+    mirror::wait_host(url, &|| false);
+    let result = fetch_once(url, seconds);
+    match &result {
+        Ok(_) => mirror::answered(url),
+        Err(why) => mirror::note_failure(url, why, None),
+    }
+    result
+}
+
+/// One request for the body of `url` (see [`fetch`]).
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     phone::get(url, seconds)
 }
 
-/// The body of `url`, or why not.
+/// One request for the body of `url` (see [`fetch`]).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(crate) fn fetch(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
+fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     let out = curl()
         .args(["--max-time", &seconds.to_string(), url])
         .output()
@@ -624,12 +635,19 @@ pub fn sha256_file(path: &Path) -> std::io::Result<String> {
 /// answers ranges (`parts`), else as one stream of at most `max_bytes` (curl stops there on the
 /// desktop; the phones take what the system's downloader gives).
 pub(crate) fn download_to(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<(), String> {
-    download_parted(url, path, seconds, max_bytes, &|_: u64| {}, &|| false, || download_one(url, path, seconds, max_bytes).map(|()| 200)).map(|_| ())
+    download_known(url, path, seconds, max_bytes, None)
+}
+
+/// [`download_to`] for a file whose size the caller knows (the catalog's): a small one is one stream,
+/// with no range probe (see `parts::fetch_known`).
+pub(crate) fn download_known(url: &str, path: &Path, seconds: u32, max_bytes: u64, known: Option<u64>) -> Result<(), String> {
+    download_parted(url, path, seconds, max_bytes, known, &|_: u64| {}, &|| false, || download_one(url, path, seconds, max_bytes).map(|()| 200)).map(|_| ())
 }
 
 /// One stream into `path`, the whole file: `curl` on the desktop (a failed status is its error).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn download_one(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<(), String> {
+    mirror::wait_host(url, &|| false);
     let out = curl()
         // curl's size limit is a signed 64-bit number.
         .args(["--max-time", &seconds.to_string(), "--max-filesize", &max_bytes.min(i64::MAX as u64).to_string(), "-o"])
@@ -638,9 +656,12 @@ fn download_one(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<
         .output()
         .map_err(|e| format!("curl: {e}"))?;
     if out.status.success() {
+        mirror::answered(url);
         return Ok(());
     }
-    Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)))
+    let why = curl_why(out.status, &String::from_utf8_lossy(&out.stderr));
+    mirror::note_failure(url, &why, None);
+    Err(why)
 }
 
 /// Android: the system's downloader (a refused status is `HTTP <code>`).
@@ -659,8 +680,14 @@ fn download_one(url: &str, path: &Path, seconds: u32, _max_bytes: u64) -> Result
 /// The pieces of `url` into `path` when the server answers ranges (see `parts`): `Ok(200)` when
 /// they are joined, else `single` (one stream, with its own status). A failed piece is the error.
 #[cfg(not(target_os = "ios"))]
-fn download_parted(url: &str, path: &Path, seconds: u32, cap: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, single: impl FnOnce() -> Result<u16, String>) -> Result<u16, String> {
-    match parts::fetch(&Ranged { seconds }, url, path, cap, progress, cancelled)? {
+#[allow(clippy::too_many_arguments)]
+fn download_parted(url: &str, path: &Path, seconds: u32, cap: u64, known: Option<u64>, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, single: impl FnOnce() -> Result<u16, String>) -> Result<u16, String> {
+    let net = Ranged { seconds };
+    let joined = match known {
+        Some(size) => parts::fetch_known(&net, url, path, cap, size, progress, cancelled)?,
+        None => parts::fetch(&net, url, path, cap, progress, cancelled)?,
+    };
+    match joined {
         parts::Parted::Joined => Ok(200),
         parts::Parted::Single => single(),
     }
@@ -668,7 +695,8 @@ fn download_parted(url: &str, path: &Path, seconds: u32, cap: u64, progress: &dy
 
 /// iOS takes one stream: its download is one `NSData` call, with no range to ask for.
 #[cfg(target_os = "ios")]
-fn download_parted(_: &str, _: &Path, _: u32, _: u64, _: &dyn Fn(u64), _: &dyn Fn() -> bool, single: impl FnOnce() -> Result<u16, String>) -> Result<u16, String> {
+#[allow(clippy::too_many_arguments)]
+fn download_parted(_: &str, _: &Path, _: u32, _: u64, _: Option<u64>, _: &dyn Fn(u64), _: &dyn Fn() -> bool, single: impl FnOnce() -> Result<u16, String>) -> Result<u16, String> {
     single()
 }
 
@@ -690,6 +718,7 @@ impl parts::RangeNet for Ranged {
 /// the range, and curl stops at `--max-filesize` (exit 63) before it takes the whole file.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
+    mirror::wait_host(url, cancelled);
     let mut cmd = curl_base();
     cmd.args(["--max-time", &seconds.to_string(), "--max-filesize", &(end - start + 1).to_string()])
         .args(["-r", &format!("{start}-{end}"), "-w", "%{http_code} %header{content-range}|%header{retry-after}", "-o"])
@@ -725,6 +754,7 @@ fn parse_range_reply(out: &str) -> Option<parts::RangeReply> {
 /// The phone's range request: the system's downloader, watched (`watched`).
 #[cfg(target_os = "android")]
 fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
+    mirror::wait_host(url, cancelled);
     watched(path, progress, cancelled, || phone::download_range(url, path, start, end, seconds))
 }
 
@@ -738,7 +768,7 @@ pub(crate) fn download_watched(url: &str, path: &Path, from: u64, seconds: u32, 
     if from > 0 {
         return stream_watched(url, path, from, seconds, progress, cancelled);
     }
-    download_parted(url, path, seconds, u64::MAX, progress, cancelled, || stream_watched(url, path, 0, seconds, progress, cancelled))
+    download_parted(url, path, seconds, u64::MAX, None, progress, cancelled, || stream_watched(url, path, 0, seconds, progress, cancelled))
 }
 
 /// The size of the file at `path` (0 when there is none yet).

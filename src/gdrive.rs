@@ -179,8 +179,8 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
             }
             Err(Failure::Cancelled) => return Err(Failure::Cancelled),
             Err(Failure::Failed(why) | Failure::NoAddress(why)) => {
-                crate::diag!("game download: {link}: {why}");
-                chain.failed(link);
+                crate::mirror::note_failure(link, &why, None);
+                chain.failed(link, &why);
                 last = why;
             }
         }

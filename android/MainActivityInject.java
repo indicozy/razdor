@@ -441,7 +441,7 @@ private static long contentRangeTotal(String header) {
 // `rangeStart` and `rangeEnd` (inclusive) ask for those bytes only, with a Range request (-1 for
 // the whole file; `rangeEnd` -1 is the file's end). Returns "" when the whole file is in, "206 <size>"
 // when the range is in (<size> is the file's size, -1 when the server does not say), "200" when the
-// server ignored the range (nothing is written), "HTTP <code>" for a refused status, "stalled: <why>"
+// server ignored the range (nothing is written), "HTTP <code>" for a refused status (with " retry-after <seconds>" after it when the server sent a Retry-After), "stalled: <why>"
 // for a stall, "cancelled", "timeout: ..." at the cap, or the error.
 public String razdorDownload(String url, String path, int stallSeconds, int totalSeconds, long rangeStart, long rangeEnd) {
     final long generation = razdorDownloadGeneration.get();
@@ -467,7 +467,8 @@ public String razdorDownload(String url, String path, int stallSeconds, int tota
             return "200";
         }
         if (code / 100 != 2 || (ranged && code != 206)) {
-            return "HTTP " + code;
+            String retryAfter = connection.getHeaderField("Retry-After");
+            return "HTTP " + code + (retryAfter == null ? "" : " retry-after " + retryAfter.trim());
         }
         long total = ranged ? contentRangeTotal(connection.getHeaderField("Content-Range")) : 0;
         int n = 1;

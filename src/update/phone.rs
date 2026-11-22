@@ -46,29 +46,43 @@ mod android {
     /// stall fails with `STALLED`, its reason in the log) and after `seconds` in all. Blocks; a
     /// cancel from another thread (`download_cancel`) makes it return "cancelled".
     pub fn download(url: &str, path: &Path, seconds: u32) -> Result<(), String> {
-        match java_download(url, path, seconds, -1, -1)?.as_str() {
-            "" => Ok(()),
-            text => Err(failure(text)),
+        crate::mirror::wait_host(url, &|| false);
+        let text = java_download(url, path, seconds, -1, -1)?;
+        if text.is_empty() {
+            crate::mirror::answered(url);
+            return Ok(());
         }
+        if let Some((code, retry_after)) = crate::mirror::http_reply(&text) {
+            crate::mirror::note_failure(url, &format!("HTTP {code}"), retry_after);
+        }
+        Err(failure(&text))
     }
 
     /// Downloads bytes `start..=end` of `url` into the file `path` (a piece of a download, see
     /// `parts`). Blocks like `download`. The server's answer: a 206 with the file's size, or a 200
     /// (the range was ignored: nothing was written).
     pub fn download_range(url: &str, path: &Path, start: u64, end: u64, seconds: u32) -> Result<RangeReply, String> {
+        crate::mirror::wait_host(url, &|| false);
         let text = java_download(url, path, seconds, start as i64, end as i64)?;
         if text == "200" {
             return Ok(RangeReply { status: 200, total: None, retry_after: None });
         }
-        match text.strip_prefix("206 ") {
-            Some(total) => Ok(RangeReply { status: 206, total: total.trim().parse::<i64>().ok().filter(|t| *t >= 0).map(|t| t as u64), retry_after: None }),
-            None => Err(failure(&text)),
+        if let Some(total) = text.strip_prefix("206 ") {
+            return Ok(RangeReply { status: 206, total: total.trim().parse::<i64>().ok().filter(|t| *t >= 0).map(|t| t as u64), retry_after: None });
         }
+        // A refused status comes back as the reply itself, with its Retry-After: parts decides what it means.
+        if let Some((code, retry_after)) = crate::mirror::http_reply(&text) {
+            return Ok(RangeReply { status: code, total: None, retry_after });
+        }
+        Err(failure(&text))
     }
 
     /// The reason of a download that failed with the Java side's reply `text`: a stall is
     /// `STALLED` (its own words go to the log), anything else is the text itself.
     fn failure(text: &str) -> String {
+        if let Some((code, _)) = crate::mirror::http_reply(text) {
+            return format!("HTTP {code}");
+        }
         if text.starts_with("stalled") {
             crate::diag!("download: {text}");
             return crate::update::STALLED.into();

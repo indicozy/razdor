@@ -170,7 +170,7 @@ impl HubView {
             changed: false,
             preview: None,
         };
-        v.reload();
+        v.open();
         v
     }
 
@@ -197,6 +197,19 @@ impl HubView {
     /// Shows the cached catalog at once (`show_cache`) and reads the current one on a thread
     /// (`fetching`); a catalog already on the screen stays until the new one lands (`landed`).
     /// Also reads what is installed.
+    /// Opens the window: the launch's catalog when it has come (one catalog fetch a session), else a
+    /// fetch. Refresh still fetches (`reload`).
+    fn open(&mut self) {
+        if let (Some(hub), Some(Ok(c))) = (self.hub.clone(), crate::ui::launch::catalog()) {
+            self.installed = hub.installed();
+            self.offline = false;
+            self.picked = keep_pick(self.picked.as_deref(), c);
+            self.catalog = Some(Ok(c.clone()));
+            return;
+        }
+        self.reload();
+    }
+
     fn reload(&mut self) {
         let Some(hub) = self.hub.clone() else {
             self.catalog = Some(Err(tr("No folder for the hub.").into()));

@@ -7,8 +7,10 @@
 //!
 //! A piece RESUMES. Its requests write their bytes into their own files; when one stalls, fails or
 //! comes back short, the bytes it has are kept and the next request asks for the rest of the range
-//! (a Range request from the first byte not yet had). A piece gets [`TRIES`] tries in all, a 429 or
-//! 503 waits first (see [`BACKOFF`]) and is not a try; then the whole address fails.
+//! (a Range request from the first byte not yet had). A piece gets [`TRIES`] tries in all. A 429 or
+//! 503 with a `Retry-After` waits it (up to [`RETRY_AFTER_WAITS`] times) and is not a try; a 429 or
+//! 503 with no `Retry-After`, or once the waits are spent, gives the whole address up at once, so the
+//! caller asks the next mirror (the throttled host is paused, see `mirror::throttled`).
 //!
 //! Tail hedging: when every other piece is whole, a piece that is slow gets ONE more request, for
 //! the rest of its bytes (from the first byte its primary request has not yet had). The first of the
@@ -40,9 +42,10 @@ use web_time::Instant;
 pub const PIECES: u64 = 8;
 /// The pieces at once for a gitverse.ru address: GitVerse answers 429 (rate limit) to eight.
 pub const PIECES_GITVERSE: u64 = 4;
-/// The waits before a piece is tried again after a 429 or 503 (not counted as a failed try until they
-/// are spent): 1 s, 2 s, 4 s, or the server's `Retry-After` (capped at [`MAX_RETRY_AFTER`]).
-pub const BACKOFF: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
+/// The waits a piece (or the probe) takes for a 429 or 503 that gives a `Retry-After`: at most this many,
+/// each for the server's time (capped at [`MAX_RETRY_AFTER`]). A throttle with no `Retry-After` gives
+/// the address up at once.
+pub const RETRY_AFTER_WAITS: usize = 3;
 /// The longest wait a `Retry-After` may ask for, in seconds.
 pub const MAX_RETRY_AFTER: u64 = 60;
 /// The smallest piece: a file splits into fewer pieces when it is smaller than [`PIECES`] of these.
@@ -332,17 +335,26 @@ fn tuning() -> Tuning {
 
 /// [`fetch`] with the hedging given (the tests use shorter times).
 pub fn fetch_tuned(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, tune: Tuning) -> Result<Parted, String> {
-    let probe = sibling(dest, "probe");
-    let answer = net.range(url, &probe, 0, 0, &|_| {}, cancelled);
-    let _ = fs::remove_file(&probe);
-    let total = match answer {
-        Ok(RangeReply { status: 206, total: Some(total), .. }) => total,
-        Ok(_) => return Ok(Parted::Single),
-        Err(why) if cancelled() => return Err(why),
-        Err(why) => {
-            crate::diag!("download: no range probe, one stream: {why}");
+    fetch_sized(net, url, dest, cap, None, progress, cancelled, tune)
+}
+
+/// [`fetch`] for a file whose size the caller knows (the catalog's): a size of [`MIN_SIZE`] or less, or
+/// over `cap`, is one stream at once, with no probe request.
+pub fn fetch_known(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, known: u64, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<Parted, String> {
+    fetch_sized(net, url, dest, cap, Some(known), progress, cancelled, tuning())
+}
+
+/// [`fetch_tuned`] with the size the caller may know (`known`, see [`fetch_known`]).
+#[allow(clippy::too_many_arguments)]
+pub fn fetch_sized(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, known: Option<u64>, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool, tune: Tuning) -> Result<Parted, String> {
+    if let Some(size) = known {
+        if size <= MIN_SIZE || size > cap {
             return Ok(Parted::Single);
         }
+    }
+    let total = match probe(net, url, dest, cancelled)? {
+        Some(total) => total,
+        None => return Ok(Parted::Single),
     };
     if total <= MIN_SIZE || total > cap {
         return Ok(Parted::Single);
@@ -372,6 +384,41 @@ pub fn fetch_tuned(net: &dyn RangeNet, url: &str, dest: &Path, cap: u64, progres
     progress(total);
     crate::diag!("download: {total} bytes in {} pieces from {url}", ranges.len());
     Ok(Parted::Joined)
+}
+
+/// The file's whole size from a probe for byte 0 (the first request of a fetch): `Some(size)` when the
+/// server answers ranges, `None` when it does not (one stream). A 429 or 503 with a `Retry-After` waits
+/// it (up to [`RETRY_AFTER_WAITS`] times); without one, or once the waits are spent, the address fails
+/// at once, so the caller asks the next mirror.
+fn probe(net: &dyn RangeNet, url: &str, dest: &Path, cancelled: &dyn Fn() -> bool) -> Result<Option<u64>, String> {
+    let file = sibling(dest, "probe");
+    let mut waits = 0usize;
+    loop {
+        let answer = net.range(url, &file, 0, 0, &|_| {}, cancelled);
+        let _ = fs::remove_file(&file);
+        match answer {
+            Ok(RangeReply { status: 206, total: Some(total), .. }) => {
+                crate::mirror::answered(url);
+                return Ok(Some(total));
+            }
+            Ok(RangeReply { status, retry_after, .. }) if throttled(status) => {
+                crate::mirror::note_failure(url, &format!("HTTP {status}"), retry_after);
+                match retry_after {
+                    Some(s) if waits < RETRY_AFTER_WAITS && !cancelled() => {
+                        waits += 1;
+                        net.wait(Duration::from_secs(s.min(MAX_RETRY_AFTER)), cancelled);
+                    }
+                    _ => return Err(format!("the server answered HTTP {status} to the range probe")),
+                }
+            }
+            Ok(_) => return Ok(None),
+            Err(why) if cancelled() => return Err(why),
+            Err(why) => {
+                crate::diag!("download: no range probe, one stream: {why}");
+                return Ok(None);
+            }
+        }
+    }
 }
 
 /// Every piece's files that make it whole, in order.
@@ -594,8 +641,8 @@ fn wait_hedge(ctx: &Ctx, p: &Piece) {
 
 /// The primary of piece `i`: up to [`TRIES`] tries, each a request for the piece's bytes from the
 /// first byte not yet had, checked for its 206 and its exact byte count. A 429 or 503 is not a try:
-/// the piece waits ([`BACKOFF`], or the server's `Retry-After`) and asks again, until the backoff is
-/// spent; then it counts as a failed try like any other.
+/// the piece waits the server's `Retry-After` and asks again ([`RETRY_AFTER_WAITS`] times at most); a
+/// throttle with no `Retry-After` fails the address at once (the caller asks the next mirror).
 fn primary(ctx: &Ctx, i: usize) -> Result<(), String> {
     let p = &ctx.pieces[i];
     let stopped = || ctx.stopped() || p.primary_stop.load(Ordering::SeqCst);
@@ -623,19 +670,25 @@ fn primary(ctx: &Ctx, i: usize) -> Result<(), String> {
             Ok(RangeReply { status: 206, .. }) => {
                 let len = file_len(&file);
                 if len == want {
+                    crate::mirror::answered(ctx.url);
                     finish_primary(p, &file, want);
                     return Ok(());
                 }
                 format!("piece {i} came back with {len} bytes, not {want}")
             }
             Ok(RangeReply { status, retry_after, .. }) => {
-                if throttled(status) && waits < BACKOFF.len() {
-                    let how_long = retry_after.map_or(BACKOFF[waits], |s| Duration::from_secs(s.min(MAX_RETRY_AFTER)));
-                    waits += 1;
+                if throttled(status) {
+                    crate::mirror::note_failure(ctx.url, &format!("HTTP {status}"), retry_after);
+                    if let Some(s) = retry_after.filter(|_| waits < RETRY_AFTER_WAITS) {
+                        waits += 1;
+                        end_request(p, &file);
+                        crate::diag!("download piece {i}: the server is busy, waiting {s} s");
+                        ctx.net.wait(Duration::from_secs(s.min(MAX_RETRY_AFTER)), &stopped);
+                        continue;
+                    }
+                    // No Retry-After (or the waits are spent): this address gives way at once.
                     end_request(p, &file);
-                    crate::diag!("download piece {i}: the server is busy, waiting {} s", how_long.as_secs_f64());
-                    ctx.net.wait(how_long, &stopped);
-                    continue;
+                    return Err(format!("the server answered HTTP {status} to a range request"));
                 }
                 format!("the server answered HTTP {status} to a range request")
             }
@@ -1059,36 +1112,35 @@ mod tests {
     }
 
     #[test]
-    fn a_429_waits_one_second_and_the_retry_is_not_a_failed_try() {
+    fn a_429_without_retry_after_gives_the_address_up_at_once() {
         let dir = scratch("throttle-once");
         let dest = dir.join("big.zip");
-        let data = body(10 * MIB as usize);
         let piece1 = layout(10 * MIB, PIECES)[1].0;
-        let net = Fake::new(data.clone()).with(piece1, vec![Act::Status(429)]);
-        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
-        assert_eq!(fs::read(&dest).unwrap(), data);
-        assert_eq!(net.requests_for(piece1), 2);
-        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1)]);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_429_backs_off_one_two_four_seconds_then_counts_as_failed_tries() {
-        let dir = scratch("throttle-spent");
-        let dest = dir.join("big.zip");
-        let piece1 = layout(10 * MIB, PIECES)[1].0;
-        // Three waits, then three tries that all fail: six requests in all.
-        let net = Fake::new(body(10 * MIB as usize)).with(piece1, vec![Act::Status(429); 6]);
-        let result = fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel);
-        assert_eq!(result, Err("the server answered HTTP 429 to a range request".to_string()));
-        assert_eq!(net.requests_for(piece1), 6);
-        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)]);
+        let net = Fake::new(body(10 * MIB as usize)).with(piece1, vec![Act::Status(429)]);
+        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Err("the server answered HTTP 429 to a range request".to_string()));
+        assert_eq!(net.requests_for(piece1), 1, "no same-host retry: the caller asks the next mirror");
+        assert!(net.waits.lock().unwrap().is_empty());
         assert!(!dest.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn a_503_waits_like_a_429_and_retry_after_is_honoured_and_capped() {
+    fn a_429_with_retry_after_waits_three_times_then_gives_the_address_up() {
+        let dir = scratch("throttle-spent");
+        let dest = dir.join("big.zip");
+        let piece1 = layout(10 * MIB, PIECES)[1].0;
+        // Three waits, each for the server's one second, then the fourth 429 gives the address up.
+        let net = Fake::new(body(10 * MIB as usize)).with(piece1, vec![Act::Throttle(Some(1)); 4]);
+        let result = fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel);
+        assert_eq!(result, Err("the server answered HTTP 429 to a range request".to_string()));
+        assert_eq!(net.requests_for(piece1), 4);
+        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1); 3]);
+        assert!(!dest.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_503_with_retry_after_waits_it_capped_and_a_503_without_gives_up() {
         let dir = scratch("throttle-after");
         let dest = dir.join("big.zip");
         let data = body(10 * MIB as usize);
@@ -1097,9 +1149,43 @@ mod tests {
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
         assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(7)]);
         let piece2 = layout(10 * MIB, PIECES)[2].0;
-        let net = Fake::new(data.clone()).with(piece2, vec![Act::Status(503), Act::Throttle(Some(999))]);
+        let net = Fake::new(data.clone()).with(piece2, vec![Act::Throttle(Some(999))]);
         assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
-        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(1), Duration::from_secs(MAX_RETRY_AFTER)]);
+        assert_eq!(net.waits.lock().unwrap().clone(), vec![Duration::from_secs(MAX_RETRY_AFTER)]);
+        let net = Fake::new(data).with(piece2, vec![Act::Status(503)]);
+        assert_eq!(fetch(&net, URL, &dest, u64::MAX, &|_| {}, &no_cancel), Err("the server answered HTTP 503 to a range request".to_string()));
+        assert_eq!(net.requests_for(piece2), 1, "a 503 with no Retry-After is not waited for");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_known_small_size_is_one_stream_and_asks_nothing() {
+        let dir = scratch("known-small");
+        let dest = dir.join("small.bin");
+        let net = Fake::new(body(10 * MIB as usize));
+        assert_eq!(fetch_sized(&net, URL, &dest, u64::MAX, Some(1000), &|_| {}, &no_cancel, QUICK), Ok(Parted::Single));
+        assert!(net.log.lock().unwrap().is_empty(), "no probe: the caller's one stream takes the file");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_known_size_over_the_cap_is_one_stream_and_asks_nothing() {
+        let dir = scratch("known-cap");
+        let dest = dir.join("big.bin");
+        let net = Fake::new(body(10 * MIB as usize));
+        assert_eq!(fetch_sized(&net, URL, &dest, MIB, Some(10 * MIB), &|_| {}, &no_cancel, QUICK), Ok(Parted::Single));
+        assert!(net.log.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_known_big_size_still_probes_for_ranges_and_a_probe_429_gives_up_at_once() {
+        let dir = scratch("known-big");
+        let dest = dir.join("big.zip");
+        let net = Fake::new(body(10 * MIB as usize)).with(0, vec![Act::Status(429)]);
+        assert_eq!(fetch_sized(&net, URL, &dest, u64::MAX, Some(10 * MIB), &|_| {}, &no_cancel, QUICK), Err("the server answered HTTP 429 to the range probe".to_string()));
+        assert_eq!(net.requests_for(0), 1, "the probe is asked once: the next mirror is asked");
+        assert!(net.waits.lock().unwrap().is_empty());
         let _ = fs::remove_dir_all(&dir);
     }
 
