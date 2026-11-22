@@ -153,7 +153,7 @@ fn panel_step(hub: Option<&Hub>, panel: Panel) {
     match panel {
         Panel::Id => {
             let id = hub.map_or_else(|| tr("No id yet").to_string(), |h| h.install_id());
-            let (inner, closed) = map_import::frame(tr("My id"), &[id.clone()], true);
+            let (inner, closed) = map_import::frame(tr("My id"), std::slice::from_ref(&id), true);
             match map_import::buttons(inner, &[tr("Copy"), tr("Close")]) {
                 Some(0) => {
                     clipboard_set(&id);
