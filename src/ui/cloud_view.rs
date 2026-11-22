@@ -36,6 +36,8 @@ static TYPED: Mutex<String> = Mutex::new(String::new());
 pub struct View {
     pub on: bool,
     pub state: String,
+    /// The cloud space in use («Занято 3.0 из 20 МБ»), empty while the cloud is off.
+    pub space: String,
     /// The link code and when it stops working (unix seconds), while one is issued.
     pub link: Option<(String, u64)>,
     /// The account's saves from a newer Razdor (listed, never downloaded).
@@ -57,10 +59,12 @@ pub fn view() -> View {
     }
     let on = cloud_store::on();
     let shared = cloud_store::shared();
-    let state = state_line(on, shared.as_ref().map(|s| (s.phase, s.last_sync, s.used_bytes)));
+    let state = state_line(on, shared.as_ref().map(|s| (s.phase, s.last_sync)));
+    let space = space_line(on, shared.as_ref().map_or(0, |s| s.used_bytes));
     View {
         on,
         state,
+        space,
         link: shared.as_ref().and_then(|s| s.link.as_ref()).map(|l| (l.code.as_str().to_string(), l.expires_at)),
         newer: shared.as_ref().map_or(0, |s| s.newer.len()),
         has_account: cloud_store::has_account(),
@@ -68,42 +72,49 @@ pub fn view() -> View {
 }
 
 fn canned_view(scene: &str) -> View {
-    let (on, state) = match scene {
-        "off" => (false, state_line(false, None)),
-        "offline" => (true, state_line(true, Some((Phase::Offline, None, 3 << 20)))),
-        "full" => (true, state_line(true, Some((Phase::Full, Some(1_700_000_000), 20 << 20)))),
-        "working" => (true, state_line(true, Some((Phase::Working, Some(1_700_000_000), 3 << 20)))),
-        _ => (true, state_line(true, Some((Phase::Idle, Some(1_700_000_000), 3 << 20)))),
+    let recent = Some(1_700_000_000);
+    let (on, state, used) = match scene {
+        "off" => (false, state_line(false, None), 0),
+        "offline" => (true, state_line(true, Some((Phase::Offline, None))), 3 << 20),
+        "full" => (true, state_line(true, Some((Phase::Full, recent))), 20 << 20),
+        "working" => (true, state_line(true, Some((Phase::Working, recent))), 3 << 20),
+        _ => (true, state_line(true, Some((Phase::Idle, recent))), 3 << 20),
     };
     View {
         on,
         state,
+        space: space_line(on, used),
         link: (scene == "link").then(|| ("4F7K-2Q9M".to_string(), telemetry::now_secs() + 600)),
         newer: 0,
         has_account: true,
     }
 }
 
-/// The state line: off, syncing, offline, full, or the time of the last sync and the quota in use.
-/// `shared` is (phase, last sync, bytes used) from the worker; none before it starts.
-pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>, u64)>) -> String {
+/// The state line: off, syncing, offline, full, or the time of the last sync.
+/// `shared` is (phase, last sync) from the worker; none before it starts.
+pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>) -> String {
     if !on {
         return tr("Off").to_string();
     }
-    let Some((phase, last, used)) = shared else { return tr("Not synced yet").to_string() };
+    let Some((phase, last)) = shared else { return tr("Not synced yet").to_string() };
     match phase {
         Phase::Full => tr("The cloud is full: delete old saves").to_string(),
         Phase::Offline => tr("No connection").to_string(),
         Phase::Failed => tr("Sync failed, it will try again").to_string(),
         Phase::Working => tr("Syncing…").to_string(),
-        Phase::Off | Phase::Idle => {
-            let used = format!("{} {} {}", tr("Using"), mb(used), tr("of 20 MB"));
-            match last {
-                Some(t) => format!("{} {} · {used}", tr("Synced"), hhmm(t)),
-                None => used,
-            }
-        }
+        Phase::Off | Phase::Idle => match last {
+            Some(t) => razdor::trf!("Synced {time}", time = hhmm(t)),
+            None => tr("Not synced yet").to_string(),
+        },
     }
+}
+
+/// The cloud space in use, «Занято 3.0 из 20 МБ» (empty while the cloud is off).
+pub fn space_line(on: bool, used: u64) -> String {
+    if !on {
+        return String::new();
+    }
+    razdor::trf!("Using {used} of 20 MB", used = mb(used))
 }
 
 /// Megabytes with one decimal, as the state line shows them.
@@ -113,7 +124,9 @@ fn mb(bytes: u64) -> String {
 
 /// The local clock's «hh:mm» of unix time `t`.
 pub fn hhmm(t: u64) -> String {
-    let local = (t as i64 + super::saves::local_offset(t)).rem_euclid(86_400);
+    // A snapshot shows UTC, as the load list's dates do (`saves::saved_label`).
+    let offset = if super::clock::is_snapshot() { 0 } else { super::saves::local_offset(t) };
+    let local = (t as i64 + offset).rem_euclid(86_400);
     format!("{:02}:{:02}", local / 3600, local % 3600 / 60)
 }
 
@@ -204,8 +217,12 @@ fn enter_step() {
 }
 
 fn phrase_step() {
-    let has = cloud_store::has_account();
-    let key = cloud_store::cloud_dir().and_then(|d| account::load_key(&d));
+    // The snapshots show a made-up key's phrase (no account is on the snapshot's device).
+    let (has, key) = if canned().is_some() {
+        (true, Some("ab".repeat(32)))
+    } else {
+        (cloud_store::has_account(), cloud_store::cloud_dir().and_then(|d| account::load_key(&d)))
+    };
     let words = match key.as_deref().map(account::phrase) {
         Some(Ok(p)) => split(&p, 18),
         _ => vec![tr("No account on this device.").to_string()],

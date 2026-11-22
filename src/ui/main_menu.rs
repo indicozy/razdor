@@ -1803,7 +1803,7 @@ impl Group {
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
             Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId, Row::CloudSaves, Row::CloudState, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
+            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId, Row::CloudSaves, Row::CloudState, Row::CloudSpace, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
         }
     }
 }
@@ -1899,6 +1899,8 @@ pub enum Row {
     CloudSaves,
     /// The cloud's state line (`cloud_view::state_line`).
     CloudState,
+    /// The cloud space in use (`cloud_view::space_line`).
+    CloudSpace,
     /// «Синхронизировать сейчас».
     CloudSync,
     /// «Привязать устройство»: the code for another device.
@@ -1913,7 +1915,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 81] = [
+pub const ALL: [Row; 82] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -1990,6 +1992,7 @@ pub const ALL: [Row; 81] = [
         Row::TelemetryNewId,
         Row::CloudSaves,
         Row::CloudState,
+        Row::CloudSpace,
         Row::CloudSync,
         Row::CloudLink,
         Row::CloudEnter,
@@ -2907,6 +2910,10 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         Row::CloudState => {
             let v = super::cloud_view::view();
             labelled_row(c, geo, tr("Cloud state"), &v.state);
+        }
+        Row::CloudSpace => {
+            let v = super::cloud_view::view();
+            labelled_row(c, geo, tr("Cloud space"), &v.space);
         }
         Row::CloudSync => {
             if labelled_row(c, geo, tr("Sync now"), tr("Sync")).0 {

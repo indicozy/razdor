@@ -393,13 +393,14 @@ fn row_of(e: &ListedSave) -> Row {
     let Some(m) = &e.meta else {
         return Row { name: "…".to_string(), scenario: String::new(), time: time_line(e.written), pinned: e.pinned, waiting: true, mark: None, placeholder: false, caret: None, cloud: None };
     };
-    let mut name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
-    // A save pulled from the cloud from another device says which («… — телефон, 22:10»).
-    if let Some(device) = super::cloud_store::origin_of(&e.path) {
-        name = format!("{name} — {device}, {}", super::cloud_view::hhmm(m.saved_at));
-    }
+    let name = if m.name == save::QUICK_SAVE || m.name == save::SESSION { tr(&m.name).to_string() } else { m.name.clone() };
     // A game in which the cheat console worked says so after its scenario.
-    let scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
+    let mut scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
+    // A save pulled from the cloud from another device says which («… — телефон, 22:10»); the
+    // scenario line has the room the name's line lacks.
+    if let Some(device) = super::cloud_store::origin_of(&e.path) {
+        scenario = format!("{scenario} — {device}, {}", super::cloud_view::hhmm(m.saved_at));
+    }
     let cloud = Some(super::cloud_store::state_of(&e.path.to_string_lossy()));
     Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud }
 }
@@ -784,9 +785,6 @@ impl Book {
                     let p = Rect::new(r.x + r.w - 2.0 * sign - 10.0 * k, r.y + (r.h - sign) / 2.0, sign, sign);
                     let (over, down, pressed) = super::widgets::button_state(p, true);
                     draw_pin(p, row.pinned, down);
-                    if let Some(state) = row.cloud {
-                        draw_cloud_mark(Rect::new(p.x - sign - 6.0 * k, p.y, sign, sign), state);
-                    }
                     if over {
                         tooltip(&[(if row.pinned { tr("Unpin the save (P)") } else { tr("Pin the save (P): it is never overwritten, stays on top and is not counted in the save limit") }.to_string(), INK)]);
                     }
@@ -813,6 +811,13 @@ impl Book {
             if row.pinned && !(deletable && selected == Some(i)) {
                 let sign = 18.0 * k * self.grow;
                 draw_pin(Rect::new(r.x + 6.0 * k, r.y + (r.h - sign) / 2.0, sign, sign), true, false);
+            }
+            // The cloud mark at the row's left edge, after the pin of a pinned row.
+            if let Some(state) = row.cloud {
+                let sign = 18.0 * k * self.grow;
+                // Past the selected row's arrow, or the row's left edge (after a pin).
+                let x = if selected == Some(i) { r.x + 36.0 * k } else { r.x + 6.0 * k + if row.pinned { sign + 4.0 * k } else { 0.0 } };
+                draw_cloud_mark(Rect::new(x, r.y + (r.h - sign) / 2.0, sign, sign), state);
             }
             let lh = r.h;
             let dim = |c: Color| if row.waiting { Color { a: c.a * 0.55, ..c } } else { c };

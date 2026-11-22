@@ -73,6 +73,17 @@ pub fn shared() -> Option<razdor::cloud::Shared> {
 
 /// The load list's state of a local save (`LocalOnly` without a worker).
 pub fn state_of(id: &str) -> razdor::cloud::SaveState {
+    // The snapshots' made-up marks (`RAZDOR_SCENE_CLOUD=saves`): by the file's name.
+    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var("RAZDOR_SCENE_CLOUD").is_ok_and(|s| s == "saves") {
+        let name = Path::new(id).file_name().and_then(|n| n.to_str()).unwrap_or("");
+        return if name.starts_with("cloud") {
+            razdor::cloud::SaveState::InCloud
+        } else if name.starts_with("wait") {
+            razdor::cloud::SaveState::WaitingUpload
+        } else {
+            razdor::cloud::SaveState::LocalOnly
+        };
+    }
     CLOUD.get().map_or(razdor::cloud::SaveState::LocalOnly, |c| c.state_of(id))
 }
 
