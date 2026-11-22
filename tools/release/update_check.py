@@ -1059,7 +1059,6 @@ def check_android(frm, to, rel_from, rel_to, scratch, rows, logs):
     if not Path(sdk).is_dir():
         raise ToolError("the Android SDK is not found: set ANDROID_HOME")
     bt = build_tools(sdk)
-    apksigner, aapt2 = bt / "apksigner", bt / "aapt2"
 
     base = scratch / "android"
     reset(base)
@@ -1078,7 +1077,17 @@ def check_android(frm, to, rel_from, rel_to, scratch, rows, logs):
             raise CheckFail(f"{name} does not match its SHA256SUMS line")
         apks[name] = dest
     rows.append(("android: download both APKs", PASS, "sha256 matches SHA256SUMS"))
+    check_apk_pair(apks[prev_name], apks[new_name], prev_name, new_name, bt, rows, want_vname=vnum(to))
+    return apks
 
+
+def check_apk_pair(old_apk, new_apk, old_label, new_label, bt, rows, want_vname=None):
+    """The static rules for an APK over an APK (the old one installed, the new one put over it):
+    both verify, the same signing certificate, the same package, a versionCode that does not go
+    down. Rows, and a CheckFail for each broken rule. `bt` is the build-tools folder."""
+    apksigner, aapt2 = bt / "apksigner", bt / "aapt2"
+    apks = {old_label: old_apk, new_label: new_apk}
+    prev_name, new_name = old_label, new_label
     certs = {}
     for name, path in apks.items():
         r = run_tool([str(apksigner), "verify", "--print-certs", str(path)])
@@ -1107,11 +1116,11 @@ def check_android(frm, to, rel_from, rel_to, scratch, rows, logs):
         raise CheckFail(f"versionCode goes down: {old['code']} -> {new['code']}")
     rows.append(("android: versionCode does not go down", PASS, f"{old['code']} -> {new['code']}"))
 
-    if new["vname"] == vnum(to):
+    if want_vname is None or new["vname"] == want_vname:
         rows.append(("android: versionName", PASS, f"{new['vname']} (old {old['vname']})"))
     else:
         rows.append(("android: versionName", INFO,
-                     f"new {new['vname']!r}, want {vnum(to)} (old {old['vname']!r}); not a failure"))
+                     f"new {new['vname']!r}, want {want_vname!r} (old {old['vname']!r}); not a failure"))
 
 
 # ---------------------------------------------------------------- main
