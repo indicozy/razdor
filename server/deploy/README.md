@@ -150,20 +150,35 @@ The ssh key must be able to read `/var/backups/razdor-api` on the VPS (the owner
 
 ### Restore
 
-Restore into the data folder of the service, with the service stopped. The copy is whole: the SQLite
-files are consistent snapshots and the battle, crash and save folders are complete.
+Restore into the data folder of the service, with the service stopped. A dated copy holds `stats.sqlite`,
+`cloud.sqlite`, `ip_salt` and the `battles`, `crashes`, `saves` folders. Changes made after the copy was
+taken are lost (up to a day).
 
 1. `systemctl stop razdor-api` (or the quadlet's unit name on the host).
 2. Move the current data folder aside, for example `mv /var/lib/razdor-api /var/lib/razdor-api.broken`.
 3. Make a fresh folder and copy the dated backup into it:
    `install -d -m 0700 /var/lib/razdor-api && cp -a /var/backups/razdor-api/<date>/. /var/lib/razdor-api/`
    (or from the PC copy, with `rsync -a` over ssh).
-4. Keep `ip_salt` from the broken folder if the bans must keep matching: copy it back over
-   (`cp -a /var/lib/razdor-api.broken/ip_salt /var/lib/razdor-api/`). A new salt only forgets the hashed IPs.
+4. `ip_salt` is in the copy. A copy made before it was added has none: then copy it from the broken
+   folder (`cp -a /var/lib/razdor-api.broken/ip_salt /var/lib/razdor-api/`). Without the old salt the IP
+   bans are forgotten (the hashed IPs no longer match); nothing else breaks.
 5. `systemctl start razdor-api`, then check `https://razdor.indicozy.dev/api/v1/...` (a cloud save of a
    test account, or the dashboard's counts) against the numbers from before.
 
-Not yet tested end to end (the restore drill is open): run it once on a copy before relying on it.
+Tested (2026-11-22, a scratch folder, server at 4fcf9873, the python3 fallback because the host had no
+sqlite3 CLI): one account with a 1 KB and a 40 KB save, settings, marks and one link code. The copy
+restored into a fresh folder. Both saves came back with the same SHA-256, the settings and marks matched,
+the row counts of every table matched, `PRAGMA integrity_check` said `ok` for both files, and the link
+code was gone from the copy. The drill did not cover the battle and crash folders (empty there), the
+container's bind mount and file owner on the VPS, or the PC copy.
+
+Known gaps:
+
+- Link codes are not in the copy, on purpose. A player who had a code issues a new one.
+- Anything written after the copy was taken is lost (up to a day).
+- A copy older than the `ip_salt` change needs step 4 from the broken folder.
+- The battle and crash folders, the container's file owner and the PC copy (`pull-backup.sh`) are not
+  drilled yet. Run the drill again after a change to the data layout or to the script.
 
 ## 7. Operate
 
