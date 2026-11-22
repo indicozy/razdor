@@ -139,6 +139,35 @@ fn menu_source(frame: MenuFrame, pic: (f32, f32), screen: (f32, f32)) -> Option<
     }
 }
 
+/// A layer of the main menu, for its texture filter ([`layer_filter`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Layer {
+    /// `Castle.lit`, the burning ruins.
+    Background,
+    /// `TitleFlame_RUS.lit`, the flames behind the logo's letters.
+    TitleFlame,
+    /// `MenuFlame.lit`, the fire behind the column of buttons.
+    MenuFire,
+    /// `Title_RUS.ugs`, the silver letters.
+    Logo,
+    /// `mb2.ugs`, the ovals' frames and marble.
+    Frames,
+    /// `SMText_RUS.lit`, the buttons' words.
+    Words,
+}
+
+/// How the original filters each layer of its main menu (0x4c7774 and 0x4c7d40): stage 0's
+/// MAGFILTER and MINFILTER are set to LINEAR at 0x4c77b4–0x4c77d6 for the background and the two
+/// flames (drawn 0x4c77f2–0x4c7b9c), back to POINT at 0x4c7bab–0x4c7be1 for the logo's seven tiles
+/// and the ovals' frames (0x4c7d40), and to LINEAR again at 0x4c7e65 for the words. LINEAR is drawn
+/// plain bilinear, POINT with Razdor's sharp sampler (crisp texels, as POINT is, at uneven scales too).
+fn layer_filter(layer: Layer) -> chrome::Filter {
+    match layer {
+        Layer::Background | Layer::TitleFlame | Layer::MenuFire | Layer::Words => chrome::Filter::Smooth,
+        Layer::Logo | Layer::Frames => chrome::Filter::Sharp,
+    }
+}
+
 /// The burning ruins over the whole screen, a little warmer where the fire glows, framed as the
 /// settings say (`MenuFrame`). Not panned: the screen behind a panned title stays covered (`ui::pan`).
 fn background() {
@@ -148,10 +177,10 @@ fn background() {
             let screen = Rect::new(0.0, 0.0, sw, sh);
             let pic = (t.width(), t.height());
             let src = menu_source(MENU_FRAME.with(|f| f.get()), pic, (sw, sh));
-            match src {
+            chrome::filtered(layer_filter(Layer::Background), || match src {
                 Some(src) => chrome::tex_src(&t, src, screen, WHITE),
                 None => chrome::tex(&t, screen, WHITE),
-            }
+            });
         }
         None => clear_background(Color::from_rgba(60, 30, 12, 255)),
     });
@@ -182,7 +211,7 @@ fn draw_flame_frames(
 ) {
     frame_probe::time(frame_probe::Stage::MenuFlames, || {
         let (current, next, blend) = flame_phase(t, fps, frames);
-        chrome::additive(|| {
+        chrome::additive_filtered(layer_filter(Layer::TitleFlame), || {
             let mut current_tint = tint;
             current_tint.a *= 1.0 - blend;
             chrome::tex_src(texture, source(current), dest, current_tint);
@@ -238,7 +267,7 @@ fn logo() {
         }
     }
     match chrome::win_ugs("Title_RUS") {
-        Some(t) => chrome::tex(&t, Rect::new(x, y, w, h), WHITE),
+        Some(t) => chrome::filtered(layer_filter(Layer::Logo), || chrome::tex(&t, Rect::new(x, y, w, h), WHITE)),
         None => text_centered(tr("A time of discord"), screen_width() / 2.0, y + h * 0.7, 64.0 * k, chrome::SILVER),
     }
 }
@@ -294,7 +323,7 @@ fn menu_fire() {
         let dst = fire_rect(&buttons, k);
         let (f, next, a, b) = fire_frames(crate::ui::clock::now());
         frame_probe::time(frame_probe::Stage::MenuFlames, || {
-            chrome::additive(|| {
+            chrome::additive_filtered(layer_filter(Layer::MenuFire), || {
                 chrome::tex_src(&fl, flame_frame(f), dst, Color { a, ..FIRE_TINT });
                 chrome::tex_src(&fl, flame_frame(next), dst, Color { a: b, ..FIRE_TINT });
             });
@@ -327,6 +356,8 @@ fn oval(i: usize, label: &str, hot: Option<usize>) -> bool {
     if let Some(t) = chrome::win_ugs("mb2") {
         let pointed = i + 1 == BUTTONS.len();
         let (src, dst) = oval_picture(c, k * VIDEO_PER_ORIGINAL, t.width(), t.height(), pointed);
+        // The frames stay sharp (POINT, 0x4c7bab–0x4c7be1): `menu_frame` samples sharply.
+        debug_assert_eq!(layer_filter(Layer::Frames), chrome::Filter::Sharp);
         chrome::menu_frame(|| chrome::tex_src(&t, src, dst, frame_colour(hover)));
     } else {
         draw_ellipse_lines(c.x, c.y, size.x / 2.0, size.y / 2.0, 0.0, 3.0, if hover { chrome::GOLD } else { chrome::SILVER });
@@ -383,10 +414,12 @@ fn word(i: usize, label: &str, c: Vec2, hover: bool, k: f32) {
             let (w, h) = (t.width() * WORD_SCALE * k, rh * WORD_SCALE * k);
             let dst = Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h);
             // A dark rim, then the word.
-            for (dx, dy) in [(-WORD_RIM, 0.0), (WORD_RIM, 0.0), (0.0, -WORD_RIM), (0.0, WORD_RIM)] {
-                chrome::tex_src(&t, src, Rect::new(dst.x + dx * k, dst.y + dy * k, dst.w, dst.h), WORD_EDGE);
-            }
-            chrome::tex_src(&t, src, dst, color);
+            chrome::filtered(layer_filter(Layer::Words), || {
+                for (dx, dy) in [(-WORD_RIM, 0.0), (WORD_RIM, 0.0), (0.0, -WORD_RIM), (0.0, WORD_RIM)] {
+                    chrome::tex_src(&t, src, Rect::new(dst.x + dx * k, dst.y + dy * k, dst.w, dst.h), WORD_EDGE);
+                }
+                chrome::tex_src(&t, src, dst, color);
+            });
         }
         None => {
             let box_ = (WORD_CAP * WORD_SCALE * k, WORD_WIDTH * WORD_SCALE * k);
@@ -4010,6 +4043,19 @@ mod tests {
 
     /// `Castle.lit`'s size.
     const CASTLE: (f32, f32) = (512.0, 512.0);
+
+    #[test]
+    fn the_menu_layers_are_filtered_as_the_original_filters_them() {
+        use chrome::Filter::{Sharp, Smooth};
+        // LINEAR (0x4c77b4–0x4c77d6, the words 0x4c7e65): bilinear.
+        for layer in [Layer::Background, Layer::TitleFlame, Layer::MenuFire, Layer::Words] {
+            assert_eq!(layer_filter(layer), Smooth, "{layer:?}");
+        }
+        // POINT (0x4c7bab–0x4c7be1): the logo's tiles and the ovals' frames stay sharp.
+        for layer in [Layer::Logo, Layer::Frames] {
+            assert_eq!(layer_filter(layer), Sharp, "{layer:?}");
+        }
+    }
 
     #[test]
     fn the_stretched_menu_frame_is_the_frame_as_before() {

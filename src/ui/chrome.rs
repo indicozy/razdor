@@ -1202,6 +1202,91 @@ pub fn multiply(draw: impl FnOnce()) {
     with_material(material, draw);
 }
 
+/// How a picture is sampled when it is drawn larger or smaller than its texels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Filter {
+    /// Razdor's sharp sampler (`sharp`): every texel a crisp square.
+    Sharp,
+    /// Plain bilinear, as the original's `LINEAR` texture filter (D3D's `D3DTFG_LINEAR`).
+    Smooth,
+}
+
+const SMOOTH_VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+varying mediump vec2 uv;
+varying lowp vec4 color;
+uniform mat4 Model;
+uniform mat4 Projection;
+void main() {
+    gl_Position = Projection * Model * vec4(position, 1);
+    color = color0 / 255.0;
+    uv = texcoord;
+}"#;
+
+/// The colour times the picture, sampled by the hardware's bilinear filter (the textures are
+/// `FilterMode::Linear`).
+const SMOOTH_FRAGMENT: &str = r#"#version 100
+precision mediump float;
+varying mediump vec2 uv;
+varying lowp vec4 color;
+uniform sampler2D Texture;
+void main() {
+    gl_FragColor = color * texture2D(Texture, uv);
+}"#;
+
+local! {
+    static SMOOTH_ALPHA: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static SMOOTH_ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+}
+
+/// The bilinear material of `cell`, made once with `pipeline_params`: pictures drawn in it (`tex`,
+/// `tex_src` under [`with_blend`] with `sharp_art` false) are sampled plainly, not with the sharp
+/// sampler. None when it cannot be made.
+fn smooth_material(
+    cell: &'static razdor::local::Local<std::cell::OnceCell<Option<Material>>>,
+    pipeline_params: macroquad::miniquad::PipelineParams,
+    what: &str,
+) -> Option<Material> {
+    cell.with(|m| {
+        m.get_or_init(|| {
+            load_material(
+                macroquad::miniquad::ShaderSource::Glsl { vertex: SMOOTH_VERTEX, fragment: SMOOTH_FRAGMENT },
+                MaterialParams { pipeline_params, ..Default::default() },
+            )
+            .map_err(|e| razdor::diag!("smooth {what} material: {e}"))
+            .ok()
+        })
+        .clone()
+    })
+}
+
+/// Runs `draw` with its pictures sampled by `filter`, blended normally (alpha). Without the
+/// bilinear material, sharp.
+pub fn filtered(filter: Filter, draw: impl FnOnce()) {
+    match filter {
+        Filter::Sharp => draw(),
+        Filter::Smooth => match smooth_material(&SMOOTH_ALPHA, sharp::alpha_pipeline(), "alpha") {
+            Some(m) => with_blend(Some(m), false, draw),
+            None => draw(),
+        },
+    }
+}
+
+/// [`additive`] with its pictures sampled by `filter`.
+pub fn additive_filtered(filter: Filter, draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation, PipelineParams};
+    let blend = BlendState::new(Equation::Add, BlendFactor::Value(BlendValue::SourceAlpha), BlendFactor::One);
+    match filter {
+        Filter::Sharp => additive(draw),
+        Filter::Smooth => match smooth_material(&SMOOTH_ADDITIVE, PipelineParams { color_blend: Some(blend), ..Default::default() }, "additive") {
+            Some(m) => with_blend(Some(m), false, draw),
+            None => additive(draw),
+        },
+    }
+}
+
 /// Runs `draw` with subtractive blending: the colour drawn is taken off what is below, the
 /// original's blend mode 1 (476790, 4768f8), the window's alpha kept. Without the material,
 /// normal blending.
