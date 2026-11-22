@@ -59,7 +59,7 @@ fn key_hash_of(headers: &HeaderMap) -> Option<String> {
 
 async fn find_account(st: &AppState, key_hash: String) -> Result<Option<String>, ApiError> {
     st.cloud
-        .call(move |c| {
+        .read(move |c| {
             Ok(c.query_row("SELECT id FROM accounts WHERE key_hash = ?1", params![key_hash], |r| r.get::<_, String>(0))
                 .optional()?)
         })
@@ -340,7 +340,7 @@ pub async fn list_saves(
     let id = account_of(&st, &headers).await?;
     let (saves, used) = st
         .cloud
-        .call(move |c| {
+        .read(move |c| {
             let mut s = c.prepare(&format!("SELECT {SAVE_COLUMNS} FROM saves WHERE account_id = ?1 ORDER BY saved_at"))?;
             let saves = s
                 .query_map(params![id], meta_of)?
@@ -464,7 +464,7 @@ pub async fn get_save(
     }
     let found = st
         .cloud
-        .call({
+        .read({
             let (save, account) = (save.clone(), account.clone());
             move |c| {
                 Ok(c.query_row(
@@ -564,7 +564,7 @@ pub async fn get_marks(
     let account = account_of(&st, &headers).await?;
     let doc = st
         .cloud
-        .call(move |c| load_doc::<Marks>(c, "marks", &account))
+        .read(move |c| load_doc::<Marks>(c, "marks", &account))
         .await?
         .unwrap_or(Marks { schema: SCHEMA, updated_at: 0, maps: Default::default() });
     Ok(json(&doc))
@@ -604,7 +604,7 @@ pub async fn get_settings(
     let account = account_of(&st, &headers).await?;
     let doc = st
         .cloud
-        .call(move |c| load_doc::<SyncedSettings>(c, "settings", &account))
+        .read(move |c| load_doc::<SyncedSettings>(c, "settings", &account))
         .await?
         .unwrap_or(SyncedSettings { schema: SCHEMA, values: Default::default() });
     Ok(json(&doc))
@@ -643,7 +643,7 @@ pub async fn get_hub(
     let account = account_of(&st, &headers).await?;
     let doc = st
         .cloud
-        .call(move |c| load_doc::<HubList>(c, "hub", &account))
+        .read(move |c| load_doc::<HubList>(c, "hub", &account))
         .await?
         .unwrap_or(HubList { schema: SCHEMA, updated_at: 0, items: Vec::new() });
     Ok(json(&doc))
@@ -719,7 +719,7 @@ pub async fn get_bench(
     let account = account_of(&st, &headers).await?;
     let reports = st
         .cloud
-        .call(move |c| {
+        .read(move |c| {
             let mut s = c.prepare("SELECT json FROM bench WHERE account_id = ?1 ORDER BY at DESC, id DESC LIMIT ?2")?;
             let texts = s
                 .query_map(params![account, BENCH_KEPT], |r| r.get::<_, String>(0))?

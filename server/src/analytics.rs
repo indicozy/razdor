@@ -660,7 +660,7 @@ pub async fn battles_pending(State(st): State<AppState>, headers: HeaderMap) -> 
     }
     let rows = st
         .stats
-        .call(|c| {
+        .read(|c| {
             let mut s = c.prepare(&format!(
                 "SELECT {BATTLE_COLUMNS} FROM battles WHERE verdict IS NULL AND quarantined = 0
                  ORDER BY received_at LIMIT 200"
@@ -683,7 +683,7 @@ pub async fn battle_get(
     }
     let (meta, file) = st
         .stats
-        .call({
+        .read({
             let id = id.clone();
             move |c| {
                 let found = c

@@ -104,7 +104,7 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
     let week = today - 6;
     let stats = st
         .stats
-        .call(move |c| {
+        .read(move |c| {
             let players_per_day = c
                 .prepare(
                     "SELECT day, SUM(n) FROM (
@@ -287,7 +287,7 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
         stats;
     let cloud = st
         .cloud
-        .call(move |c| {
+        .read(move |c| {
             let accounts: i64 = c.query_row("SELECT COUNT(*) FROM accounts", [], |r| r.get(0))?;
             let used_bytes: i64 = c.query_row("SELECT COALESCE(SUM(size), 0) FROM saves", [], |r| r.get(0))?;
             Ok(CloudStats { accounts, used_bytes, syncs_per_day })

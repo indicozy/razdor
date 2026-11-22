@@ -77,7 +77,7 @@ pub fn router(state: AppState) -> Router {
 }
 
 async fn healthz(State(st): State<AppState>) -> Response {
-    match st.stats.call(|c| Ok(c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))?)).await {
+    match st.stats.read(|c| Ok(c.query_row("SELECT 1", [], |r| r.get::<_, i64>(0))?)).await {
         Ok(_) => "ok".into_response(),
         Err(_) => ApiError::Internal("health check".into()).into_response(),
     }
