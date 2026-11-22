@@ -430,6 +430,8 @@ async fn main() {
         if let Some(interval) = razdor::lab::take_swap() {
             macroquad::miniquad::window::set_swap_interval(interval);
         }
+        // The performance reports' frame time: the work and the drawing, without the wait for the next frame (`ui::perf_analytics`).
+        ui::perf_analytics::frame(&app, started.elapsed());
         next_frame().await;
         pacer.pace(ui::frame_cap::current(), snapshot.is_none() && !ui::trailer::active());
         // The performance test's frame: its work and its whole time (`ui::bench`, a no-op when no test runs).

@@ -258,6 +258,7 @@ pub fn session_content(install: Option<Arc<Content>>, game: &Game) -> Option<Arc
 /// it puts the hero on the map next to the enemy (potions, spells and the army can still be
 /// seen to) instead of straight into the fight, which starts again when he moves or waits.
 pub fn battle(game: &mut Game, session: Option<&mut super::session::Keeper>) -> Screen {
+    super::perf_analytics::battle_requested();
     let name = battle_name(game);
     let foe = game.foe.take();
     let foe_id = save::foe_id(&game.world, foe.as_ref());

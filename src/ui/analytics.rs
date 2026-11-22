@@ -66,6 +66,7 @@ pub fn session_start(app: &App) {
 /// The session ends: called as the app exits (`main.rs`, `exit_now`).
 pub fn session_end() {
     with_tracker(|hub, t| t.session_end(hub, telemetry::now_secs()));
+    super::perf_analytics::session_end();
 }
 
 /// Called every frame by the app (cheap: a screen and a dialog count, and one poll a second).
@@ -121,6 +122,7 @@ pub fn frame(app: &App) {
 /// A campaign game starts (`screens::start_game_with_rules`): the run starts at the next frame, when
 /// the app's settings are at hand. Nothing for the demo (it has no map file to name or hash).
 pub fn campaign_started(game: &Game) {
+    super::perf_analytics::map_requested();
     if telemetry::hub().is_none() {
         return;
     }
@@ -137,6 +139,7 @@ pub fn campaign_started(game: &Game) {
 /// A save is loaded (`App::load`). Its source, its format (when older) and its map: an open run on
 /// another map ends (as abandoned) and the save's map starts a new run; on the same map the run goes on.
 pub fn save_loaded(app: &App, path: &Path, game: &Game) {
+    super::perf_analytics::map_requested();
     let Ok(meta) = save::read_meta(path) else { return };
     let source = if meta.name == save::QUICK_SAVE {
         SaveSource::Quick
