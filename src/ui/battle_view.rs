@@ -926,6 +926,7 @@ impl BattleView {
     /// enemy as it plays against the player's own moves, the player's units by the same
     /// search; that takes a while, so it runs on a worker and the window waits for it.
     fn quick_battle(&mut self) {
+        super::analytics::battle_autobattle();
         self.fx = None;
         self.news = None;
         self.rest_max();
@@ -2023,7 +2024,7 @@ impl BattleView {
     /// `Unit-Upgrade` is the promotion screen's).
     fn close_won(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
         let result = game.resolve_battle(&self.battle);
-        super::analytics::battle_ended(&self.battle, &result);
+        super::analytics::battle_ended(game, &self.battle, &result);
         if game.won() {
             return Screen::Victory;
         }
@@ -2039,7 +2040,7 @@ impl BattleView {
     /// ends the game ([`Dialog::defeat`]).
     fn close_lost(&self, game: &mut Game, message: &mut Option<String>, dialogs: &mut VecDeque<Dialog>) -> Screen {
         let result = game.resolve_battle(&self.battle);
-        super::analytics::battle_ended(&self.battle, &result);
+        super::analytics::battle_ended(game, &self.battle, &result);
         let due = crate::ui::clock::now() + razdor::av::BATTLE_REPORT_GAP_MS as f64 / 1000.0;
         dialogs.push_back(Dialog { not_before: Some(due), ..Dialog::defeat(super::last_save_path().is_some()) });
         *message = None;
@@ -2076,7 +2077,7 @@ impl BattleView {
             return None;
         }
         let result = game.resolve_battle(&self.battle);
-        super::analytics::battle_ended(&self.battle, &result);
+        super::analytics::battle_ended(game, &self.battle, &result);
         match result {
             BattleResult::Defeat => {
                 dialogs.push_back(Dialog::defeat(super::last_save_path().is_some()));

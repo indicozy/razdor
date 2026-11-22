@@ -9,10 +9,14 @@ use std::path::Path;
 use razdor::rules::battle::{Battle, Team};
 use razdor::rules::content::ExperimentalRules;
 use razdor::rules::game::{BattleResult, Game};
+use razdor::rules::recording::header::{install_hash, ReplayHeader};
+use razdor::rules::recording::hook;
 use razdor::rules::save::{self, ScenarioRef, SaveKind};
+use razdor::telemetry::battles::{self, Facts};
 use razdor::telemetry::events::{self, MapInfo, Tracker};
+use razdor::telemetry::state::Consent;
 use razdor::telemetry::{self, Hub};
-use razdor_wire::analytics::{BattleOutcome, Outcome, SaveSource, Setting, Side};
+use razdor_wire::analytics::{BattleOutcome, BattleTag, Outcome, SaveSource, Setting, Side};
 
 use super::quality_preset::{self, Preset};
 use super::{audio, main_menu, App, Screen};
@@ -34,6 +38,11 @@ struct Glue {
     /// The screen and the dialog count of the last frame: their changes are the windows opened.
     screen: String,
     dialogs: usize,
+    /// The second the battle screen was entered (the battle record's start), and the battle's flags:
+    /// the player let the autobattle play («Q»), or loaded a save while the battle was open.
+    battle_since: Option<u64>,
+    autobattle: bool,
+    reloaded: bool,
 }
 
 thread_local! {
@@ -85,6 +94,14 @@ pub fn frame(app: &App) {
         (g.pending.take(), previous, previous_dialogs, second_due)
     });
     let changed_screen = previous.is_some();
+    if changed_screen && screen == "battle" {
+        GLUE.with(|g| {
+            let mut g = g.borrow_mut();
+            g.battle_since = Some(now);
+            g.autobattle = false;
+            g.reloaded = false;
+        });
+    }
     let in_map = app.game.is_some() && !is_menu(&app.screen);
     let closed_settings = matches!(previous.as_deref(), Some("options" | "settings"));
     let settings = closed_settings.then(|| changed_settings(app));
@@ -123,6 +140,7 @@ pub fn frame(app: &App) {
 /// the app's settings are at hand. Nothing for the demo (it has no map file to name or hash).
 pub fn campaign_started(game: &Game) {
     super::perf_analytics::map_requested();
+    arm_battles(game);
     if telemetry::hub().is_none() {
         return;
     }
@@ -140,6 +158,10 @@ pub fn campaign_started(game: &Game) {
 /// another map ends (as abandoned) and the save's map starts a new run; on the same map the run goes on.
 pub fn save_loaded(app: &App, path: &Path, game: &Game) {
     super::perf_analytics::map_requested();
+    if hook::battle_tap_open() {
+        GLUE.with(|g| g.borrow_mut().reloaded = true);
+    }
+    arm_battles(game);
     let Ok(meta) = save::read_meta(path) else { return };
     let source = if meta.name == save::QUICK_SAVE {
         SaveSource::Quick
@@ -165,9 +187,35 @@ pub fn save_loaded(app: &App, path: &Path, game: &Game) {
     });
 }
 
+/// The battles of a campaign game are captured for the battle records (`hook::arm_battle_tap`) when the
+/// consent is yes; any other game, and no consent, turns the capture off.
+fn arm_battles(game: &Game) {
+    let campaign = matches!(game.origin, Some(ScenarioRef::Map { .. }));
+    let on = telemetry::hub().is_some_and(|h| h.consent_now() == Consent::Yes) && campaign;
+    hook::arm_battle_tap(on);
+}
+
+/// The player let the autobattle play in the battle (`battle_view`'s quick battle: «Q»).
+pub fn battle_autobattle() {
+    GLUE.with(|g| g.borrow_mut().autobattle = true);
+}
+
+/// The battle's tags in its record: the autobattle, and a load before the battle ended.
+fn battle_tags(autobattle: bool, reloaded: bool) -> Vec<BattleTag> {
+    let mut tags = Vec::new();
+    if autobattle {
+        tags.push(BattleTag::Autobattle);
+    }
+    if reloaded {
+        tags.push(BattleTag::ReloadBeforeEnd);
+    }
+    tags
+}
+
 /// A battle ended (`battle_view`, after `resolve_battle`): the run's last battle. The turns are the
-/// battle's round; the losses count the fighters that are down at the end.
-pub fn battle_ended(battle: &Battle, result: &BattleResult) {
+/// battle's round; the losses count the fighters that are down at the end. The battle's record is
+/// packed and queued (`battle_record`).
+pub fn battle_ended(game: &Game, battle: &Battle, result: &BattleResult) {
     let winner = match result {
         BattleResult::Victory { .. } => Side::Player,
         BattleResult::Withdrew { .. } | BattleResult::Defeat => Side::Foe,
@@ -175,6 +223,39 @@ pub fn battle_ended(battle: &Battle, result: &BattleResult) {
     let down = |team: Team| battle.fighters.iter().filter(|f| f.team == team && !f.alive()).count() as u32;
     let outcome = BattleOutcome { winner, turns: battle.round, player_losses: down(Team::Player), foe_losses: down(Team::Enemy) };
     with_tracker(|hub, t| t.battle_ended(hub, telemetry::now_secs(), outcome));
+    battle_record(game, outcome);
+}
+
+/// Packs the battle that just ended from the rules' capture (`hook::take_battle_tap`) and queues it for
+/// the next hour (`battles::submit`). Nothing without the hub, the consent or a captured battle.
+fn battle_record(game: &Game, outcome: BattleOutcome) {
+    let (since, autobattle, reloaded) = GLUE.with(|g| {
+        let mut g = g.borrow_mut();
+        let flags = (g.battle_since.take(), g.autobattle, g.reloaded);
+        g.autobattle = false;
+        g.reloaded = false;
+        flags
+    });
+    let Some(hub) = telemetry::hub() else { return };
+    let Some(captured) = hook::take_battle_tap() else { return };
+    let Some(install) = save::install_dir().and_then(|dir| install_hash(&dir).ok()) else { return };
+    let header = ReplayHeader::of(game, install);
+    let install_id = hub.install_id();
+    let game_id = telemetry::game_id();
+    let now = telemetry::now_secs();
+    let facts = Facts {
+        install_id: &install_id,
+        game: &game_id,
+        mod_hash: None,
+        experiments: experiment_names(&game.experimental),
+        tags: battle_tags(autobattle, reloaded),
+        outcome,
+        started_at: since.unwrap_or(now),
+        ended_at: now,
+    };
+    if let Ok(packed) = battles::pack(&header, &captured.start, &captured.entries, &facts) {
+        let _ = battles::submit(hub, &packed, now);
+    }
 }
 
 /// The «?» hint opened (`main_menu`'s help button): counted for the session.
@@ -255,6 +336,13 @@ mod tests {
     fn the_map_hash_is_the_save_hash_as_hex() {
         let bytes = b"a map's bytes";
         assert_eq!(fnv1a64_hex(bytes), format!("{:016x}", save::fnv1a(bytes)));
+    }
+
+    #[test]
+    fn an_autobattle_or_a_reload_tags_the_battle_record() {
+        assert_eq!(battle_tags(false, false), Vec::<BattleTag>::new());
+        assert_eq!(battle_tags(true, false), vec![BattleTag::Autobattle]);
+        assert_eq!(battle_tags(false, true), vec![BattleTag::ReloadBeforeEnd]);
     }
 
     #[test]
