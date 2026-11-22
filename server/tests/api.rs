@@ -197,29 +197,59 @@ async fn ten_bad_requests_in_a_row_ban_the_install_silently() {
     assert_eq!(count(&h, "SELECT COUNT(*) FROM pings").await, 0);
 }
 
+fn ping_for(id: &str, day: i64) -> Value {
+    let mut v = ping_body(id);
+    v["day"] = json!(day);
+    v
+}
+
 #[tokio::test]
-async fn a_fourth_ping_in_a_day_bans_and_quarantines_the_day() {
-    let h = harness("pings-day", Limits::default());
+async fn a_backlog_of_claimed_days_is_stored_and_never_banned() {
+    // An honest client offline for five days sends them all at once: each is its own day.
+    let h = harness("pings-backlog", Limits::default());
     let id = install(3);
-    for _ in 0..3 {
-        assert_eq!(post_json(&h, "/v1/ping", &ping_body(&id)).await.status, StatusCode::OK);
+    let today = NOW / 86_400;
+    for d in 1..=5 {
+        assert_eq!(post_json(&h, "/v1/ping", &ping_for(&id, today - d)).await.status, StatusCode::OK);
     }
-    assert_eq!(count(&h, "SELECT COUNT(*) FROM pings WHERE quarantined = 0").await, 3);
-    let fourth = post_json(&h, "/v1/ping", &ping_body(&id)).await;
-    assert_eq!(fourth.json(), json!({}));
-    // The banned day's rows are kept but not counted.
-    assert_eq!(count(&h, "SELECT COUNT(*) FROM pings WHERE quarantined = 1").await, 3);
-    let (strikes, active): (i64, bool) = h
-        .st
-        .stats
-        .call(|c| {
-            Ok(c.query_row("SELECT strikes, until > 0 FROM bans WHERE kind = 'install'", [], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })?)
-        })
-        .await
-        .expect("ban row");
-    assert_eq!((strikes, active), (1, true));
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM pings WHERE quarantined = 0").await, 5);
+    // A re-send of a stored day is the same ping: answered, not counted twice.
+    assert_eq!(post_json(&h, "/v1/ping", &ping_for(&id, today - 1)).await.status, StatusCode::OK);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM pings").await, 5);
+    // A day in the future, or older than the window, is refused (400) without a strike.
+    assert_eq!(post_json(&h, "/v1/ping", &ping_for(&id, today + 5)).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(post_json(&h, "/v1/ping", &ping_for(&id, today - 61)).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
+}
+
+#[tokio::test]
+async fn an_old_client_without_a_day_still_gets_one_ping_a_day() {
+    let h = harness("pings-old", Limits::default());
+    let id = install(7);
+    assert_eq!(post_json(&h, "/v1/ping", &ping_body(&id)).await.status, StatusCode::OK);
+    assert_eq!(post_json(&h, "/v1/ping", &ping_body(&id)).await.status, StatusCode::OK);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM pings").await, 1);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
+}
+
+#[tokio::test]
+async fn pings_over_the_limit_are_refused_then_a_gross_flood_bans() {
+    let limits = Limits { pings_per_day: 2, ..Limits::default() };
+    let h = harness("pings-gross", limits);
+    let id = install(4);
+    let today = NOW / 86_400;
+    for d in 1..=2 {
+        assert_eq!(post_json(&h, "/v1/ping", &ping_for(&id, today - d)).await.status, StatusCode::OK);
+    }
+    // Forty refusals in the hour (twenty times the limit): 429 each, no ban.
+    for d in 3..=42 {
+        assert_eq!(post_json(&h, "/v1/ping", &ping_for(&id, today - d)).await.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
+    // The forty-first refusal is gross: the install is banned and answered silently.
+    let r = post_json(&h, "/v1/ping", &ping_for(&id, today - 43)).await;
+    assert_eq!(r.json(), json!({}));
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans WHERE kind = 'install'").await, 1);
 }
 
 #[tokio::test]
@@ -275,8 +305,10 @@ async fn an_hourly_event_limit_bans_the_install() {
     let batch = |n: usize| json!({ "schema": 1, "install_id": id, "razdor": "1.5.4",
         "events": (0..n).map(|_| progress_event(NOW)).collect::<Vec<_>>() });
     assert_eq!(post_json(&h, "/v1/events", &batch(3)).await.json()["stored"], 3);
-    assert_eq!(post_json(&h, "/v1/events", &batch(3)).await.json(), json!({}));
+    // Over the hour's limit: refused with 429, not banned.
+    assert_eq!(post_json(&h, "/v1/events", &batch(3)).await.status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(count(&h, "SELECT COUNT(*) FROM events").await, 3);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
 }
 
 #[tokio::test]
@@ -371,14 +403,29 @@ async fn a_battle_is_stored_checked_and_judged() {
 }
 
 #[tokio::test]
-async fn overlapping_battles_ban_the_install() {
+async fn a_resent_battle_is_answered_once_and_stored_once() {
+    // The first answer was lost, so the client sends the same record again: no overlap, no ban.
+    let h = harness("resend", Limits::default());
+    let id = install(12);
+    let app = router(h.st.clone());
+    let frame = battle_frame(&id, 100, 200, b"same record");
+    assert_eq!(call(&app, "POST", "/v1/battles", &[], frame.clone()).await.status, StatusCode::OK);
+    assert_eq!(call(&app, "POST", "/v1/battles", &[], frame).await.status, StatusCode::OK);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM battles").await, 1);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
+}
+
+#[tokio::test]
+async fn an_overlapping_battle_is_refused_without_a_ban() {
+    // Two PCs with one copied install folder can play at once: the later battle is refused (409).
     let h = harness("overlap", Limits::default());
     let id = install(11);
     let app = router(h.st.clone());
     assert_eq!(call(&app, "POST", "/v1/battles", &[], battle_frame(&id, 100, 200, b"a")).await.status, StatusCode::OK);
     let r = call(&app, "POST", "/v1/battles", &[], battle_frame(&id, 150, 250, b"b")).await;
-    assert_eq!(r.json(), json!({}));
+    assert_eq!(r.status, StatusCode::CONFLICT);
     assert_eq!(count(&h, "SELECT COUNT(*) FROM battles").await, 1);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
 }
 
 #[tokio::test]

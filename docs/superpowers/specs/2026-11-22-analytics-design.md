@@ -54,7 +54,19 @@ Never sent: hero or save names, chat, typed text, anything outside the game.
   an hour, overlapping battles) or mostly invalid data (>20% invalid, or >10 bad requests in a row) is banned for
   24 h, then 7 days, then for good; what it sent in the bad period is quarantined. IP bans only for gross abuse
   (floods, non-JSON junk) and only for 1–24 h (CGNAT in Russia and Kazakhstan: many players share one IP).
-- A banned sender still gets 200 OK; its data is dropped silently. The dashboard lists bans with reasons and an
+- Over the honest limit (not a ban): 429 with Retry-After, nothing stored; the client keeps the item and retries.
+  A ban comes only at 20× the limit in an hour, counted over refusals (`abuse::gross_refusals`). Pings count by the
+  UTC day the client claims (`day`, optional on the wire; a re-sent day is answered once); a day outside the 60-day
+  window is a plain 400 with no strike. A re-sent battle (same record sha256) is answered 200 once; an overlapping
+  battle is refused with 409, not banned (a copied install folder).
+- IP bans: the strike count decays after 7 days; junk threshold 300 per ten minutes; IPv6 is windowed per /64; cloud
+  requests with a valid account key skip the IP gate; a wrong link code is a 400 (the per-IP redeem limit still applies).
+  Cloud accounts: at most 5 new per IP per day (429).
+- A banned sender still gets 200 OK; its data is dropped silently. Cloud routes never do: a ban there is a 429 with
+  Retry-After, and the client forgets its key only on `{"ok":true}` (cloud writes confirm with it; `{}` is silent).
+- Memory: every rate map is bounded (100k windows, oldest evicted) and pruned at most once a minute, on the request path.
+- Not yet (left for later): disk budget and free-space floor (507/429 when over), per-account row caps, expiry of
+  stale accounts, per-install caps for crash and perf reports, encryption of the `links` key column. The dashboard lists bans with reasons and an
   unban button.
 - Battle replay check: nightly on the owner's PC (where the DT install is): a script pulls new battles, replays
   them with the real engine, and posts verdicts (ok / suspicious). Only checked battles go into training data.

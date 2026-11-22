@@ -29,9 +29,40 @@ use crate::state::{sha256_hex, AppState};
 /// The saves a device may list per account: the list is the whole account (no paging needed).
 const BENCH_KEPT: i64 = 50;
 
-/// The IP's gate, for every cloud request (a flood is refused for all of them).
+/// A cloud request is never answered with the silent 200 that a banned analytics sender gets: the
+/// client would forget its key while the account stays. A ban is a 429 with Retry-After instead.
+pub fn cloud_refusal(e: ApiError) -> ApiError {
+    match e {
+        ApiError::Silent => ApiError::Limited,
+        other => other,
+    }
+}
+
+/// The IP's gate, for every cloud request (a flood is refused for all of them). A request whose key
+/// is a stored account skips the IP ban: a shared (CGNAT) address must not lock its own players out.
 async fn gate(st: &AppState, headers: &HeaderMap, peer: Peer) -> Result<(), ApiError> {
-    abuse::ip_gate(st, ip_of(st, headers, peer)).await
+    if let Some(key_hash) = key_hash_of(headers) {
+        if find_account(st, key_hash).await?.is_some() {
+            return Ok(());
+        }
+    }
+    abuse::ip_gate(st, ip_of(st, headers, peer)).await.map_err(cloud_refusal)
+}
+
+/// The SHA-256 of the presented account key, when the header is a well-formed key.
+fn key_hash_of(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(paths::KEY_HEADER).and_then(|v| v.to_str().ok())?;
+    let key = AccountKey::parse(raw).ok()?;
+    Some(sha256_hex(&[key.as_str().as_bytes()]))
+}
+
+async fn find_account(st: &AppState, key_hash: String) -> Result<Option<String>, ApiError> {
+    st.cloud
+        .call(move |c| {
+            Ok(c.query_row("SELECT id FROM accounts WHERE key_hash = ?1", params![key_hash], |r| r.get::<_, String>(0))
+                .optional()?)
+        })
+        .await
 }
 
 fn parse_valid<T: DeserializeOwned + Validate>(body: &[u8]) -> Result<T, ApiError> {
@@ -48,15 +79,10 @@ async fn account_of(st: &AppState, headers: &HeaderMap) -> Result<String, ApiErr
         .ok_or(ApiError::Unauthorized("no account key"))?;
     let key = AccountKey::parse(raw).map_err(|_| ApiError::Unauthorized("bad account key"))?;
     let key_hash = sha256_hex(&[key.as_str().as_bytes()]);
+    // The rate window is opened only for a stored account: a made-up key costs no memory.
+    let id = find_account(st, key_hash.clone()).await?.ok_or(ApiError::Unauthorized("no such account"))?;
     abuse::account_gate(st, &key_hash)?;
-    let id = st
-        .cloud
-        .call(move |c| {
-            Ok(c.query_row("SELECT id FROM accounts WHERE key_hash = ?1", params![key_hash], |r| r.get::<_, String>(0))
-                .optional()?)
-        })
-        .await?;
-    id.ok_or(ApiError::Unauthorized("no such account"))
+    Ok(id)
 }
 
 async fn count_op(st: &AppState, op: &'static str) -> Result<(), ApiError> {
@@ -119,13 +145,15 @@ pub async fn new_account(
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let ip = ip_of(&st, &headers, peer);
-    abuse::ip_gate(&st, ip).await?;
+    abuse::ip_gate(&st, ip).await.map_err(cloud_refusal)?;
     let _req: AccountNew = match serde_json::from_slice::<AccountNew>(&body).map_err(|e| e.to_string()).and_then(|r| {
         r.validate().map(|()| r).map_err(|e| e.to_string())
     }) {
         Ok(r) => r,
-        Err(msg) => return Err(abuse::junk(&st, ip, &msg).await),
+        Err(msg) => return Err(cloud_refusal(abuse::junk(&st, ip, &msg).await)),
     };
+    // Accounts per IP per day (CGNAT-tolerant: a bucket of many players, not one player).
+    abuse::account_create_gate(&st, ip).await?;
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).map_err(|e| ApiError::Internal(format!("random: {e}")))?;
     let key_text = files::hex(&raw);
@@ -171,7 +199,7 @@ pub async fn delete_account(
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .map_err(|e| ApiError::Internal(format!("account files: {e}")))?;
     count_op(&st, "account_delete").await?;
-    Ok(json(&Ack::default()))
+    Ok(json(&Ack::confirmed()))
 }
 
 /// `POST /v1/link`: a code another device types within ten minutes, once.
@@ -234,14 +262,15 @@ pub async fn link_redeem(
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let ip = ip_of(&st, &headers, peer);
-    abuse::ip_gate(&st, ip).await?;
+    abuse::ip_gate(&st, ip).await.map_err(cloud_refusal)?;
+    // Every attempt, right or wrong, is rate-limited per IP (429): a wrong code is no junk strike.
     abuse::redeem_gate(&st, ip)?;
     let req: LinkRedeem = match serde_json::from_slice::<LinkRedeem>(&body)
         .map_err(|e| e.to_string())
         .and_then(|r| r.validate().map(|()| r).map_err(|e| e.to_string()))
     {
         Ok(r) => r,
-        Err(msg) => return Err(abuse::junk(&st, ip, &msg).await),
+        Err(msg) => return Err(cloud_refusal(abuse::junk(&st, ip, &msg).await)),
     };
     let code = LinkCode::parse(&req.code).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let now = st.clock.now();
@@ -266,7 +295,7 @@ pub async fn link_redeem(
         })
         .await?;
     let Some(key) = found else {
-        return Err(abuse::junk(&st, ip, "no such code, or it has expired").await);
+        return Err(ApiError::BadRequest("no such code, or it has expired".into()));
     };
     let key = AccountKey::parse(&key).map_err(|e| ApiError::Internal(e.to_string()))?;
     count_op(&st, "link_redeem").await?;
@@ -441,7 +470,7 @@ pub async fn delete_save(
         })
         .await?;
     count_op(&st, "save_delete").await?;
-    Ok(json(&Ack::default()))
+    Ok(json(&Ack::confirmed()))
 }
 
 /// The rank of a mark's level: the game's own order, Green (best) first.
@@ -637,7 +666,7 @@ pub async fn post_bench(
         })
         .await?;
     count_op(&st, "bench").await?;
-    Ok(json(&Ack::default()))
+    Ok(json(&Ack::confirmed()))
 }
 
 /// `GET /v1/bench`: the account's last reports, newest first.

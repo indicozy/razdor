@@ -20,6 +20,48 @@ use crate::civil::DAY;
 use crate::http::ApiError;
 use crate::state::{sha256_hex, AppState};
 
+/// Each rate map holds at most this many windows; the oldest are evicted past it (memory bound).
+pub const MAX_WINDOWS: usize = 100_000;
+/// A ban's strike count restarts after this long without a new IP ban (strikes decay).
+pub const IP_STRIKE_DECAY_SECS: i64 = 7 * DAY;
+/// The windows are pruned at most this often (the request path checks it).
+const PRUNE_EVERY_SECS: i64 = 60;
+
+/// The address a rate window is keyed by: an IPv6 address is cut to its /64 (one household or one
+/// carrier's customer), an IPv4 address stays whole.
+pub fn window_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V4(_) => ip,
+        IpAddr::V6(v6) => {
+            let mut o = v6.octets();
+            o[8..].fill(0);
+            IpAddr::V6(std::net::Ipv6Addr::from(o))
+        }
+    }
+}
+
+/// Keeps at most `max` entries of `m`: when over, drops the oldest (by `ts`) down to 90% of `max`.
+pub fn bound<K: Clone + Eq + std::hash::Hash, V>(m: &mut HashMap<K, V>, max: usize, ts: impl Fn(&V) -> i64) {
+    if m.len() <= max {
+        return;
+    }
+    let mut by_age: Vec<(i64, K)> = m.iter().map(|(k, v)| (ts(v), k.clone())).collect();
+    by_age.sort_by_key(|(t, _)| *t);
+    let drop = m.len() - max * 9 / 10;
+    for (_, k) in by_age.into_iter().take(drop) {
+        m.remove(&k);
+    }
+}
+
+/// The strikes of a new IP ban: one more than the last one's, unless the last one is older than
+/// the decay (then it starts again at one).
+pub fn next_ip_strikes(prev: Option<(i64, i64)>, now: i64) -> i64 {
+    match prev {
+        Some((strikes, created)) if now - created < IP_STRIKE_DECAY_SECS => strikes + 1,
+        _ => 1,
+    }
+}
+
 /// A fixed window: `(start, count)`. Returns the count in the current window.
 fn bump(w: &mut (i64, u32), now: i64, window: i64) -> u32 {
     if now - w.0 >= window {
@@ -46,6 +88,9 @@ pub struct InstallWin {
     invalid: u32,
     bad_run: u32,
     bad_since: i64,
+    /// Items refused for volume in the hour that `refused_window` starts.
+    refused_window: i64,
+    refused: u32,
 }
 
 #[derive(Default)]
@@ -55,22 +100,40 @@ pub struct Abuse {
     accounts: HashMap<String, (i64, u32)>,
     redeems: HashMap<IpAddr, (i64, u32)>,
     logins: HashMap<IpAddr, (i64, u32)>,
+    creates: HashMap<IpAddr, (i64, u32)>,
+    last_prune: i64,
 }
 
 impl Abuse {
-    /// Drops the windows nobody has used for two hours (run by the retention job).
+    /// Drops the windows nobody has used for two hours and bounds every map. Called by the retention
+    /// job, and by the request path at most once a minute ([`Abuse::maybe_prune`]).
     pub fn prune(&mut self, now: i64) {
         let old = now - 7200;
+        self.last_prune = now;
         self.ips.retain(|_, w| w.minute.0 > old || w.junk.0 > old || w.strike_window > old);
         self.installs.retain(|_, w| w.minute.0 > old || w.window > old);
         self.accounts.retain(|_, w| w.0 > old);
         self.redeems.retain(|_, w| w.0 > old);
         self.logins.retain(|_, w| w.0 > old);
+        self.creates.retain(|_, w| w.0 > now - DAY);
+        bound(&mut self.creates, MAX_WINDOWS, |w| w.0);
+        bound(&mut self.ips, MAX_WINDOWS, |w| w.minute.0.max(w.junk.0).max(w.strike_window));
+        bound(&mut self.installs, MAX_WINDOWS, |w| w.minute.0.max(w.window));
+        bound(&mut self.accounts, MAX_WINDOWS, |w| w.0);
+        bound(&mut self.redeems, MAX_WINDOWS, |w| w.0);
+        bound(&mut self.logins, MAX_WINDOWS, |w| w.0);
+    }
+
+    pub fn maybe_prune(&mut self, now: i64) {
+        if now - self.last_prune >= PRUNE_EVERY_SECS {
+            self.prune(now);
+        }
     }
 }
 
+/// The salted hash of an IP's window key (the ban key): never the raw address.
 pub fn ip_key(st: &AppState, ip: IpAddr) -> String {
-    sha256_hex(&[st.ip_salt.as_bytes(), ip.to_string().as_bytes()])
+    sha256_hex(&[st.ip_salt.as_bytes(), window_ip(ip).to_string().as_bytes()])
 }
 
 /// Whether a ban of `kind` on `key` is active now.
@@ -98,7 +161,8 @@ pub async fn ip_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let strikes_to_ban = st.cfg.limits.ip_flood_strikes;
     let flood = {
         let mut a = st.abuse();
-        let w = a.ips.entry(ip).or_default();
+        a.maybe_prune(now);
+        let w = a.ips.entry(window_ip(ip)).or_default();
         let n = bump(&mut w.minute, now, 60);
         if n <= limit {
             None
@@ -130,7 +194,8 @@ pub async fn junk(st: &AppState, ip: IpAddr, msg: &str) -> ApiError {
     let limit = st.cfg.limits.junk_per_ten_minutes;
     let banned = {
         let mut a = st.abuse();
-        let w = a.ips.entry(ip).or_default();
+        a.maybe_prune(now);
+        let w = a.ips.entry(window_ip(ip)).or_default();
         if now - w.junk.0 >= 600 {
             w.junk = (now, 0);
         }
@@ -161,6 +226,7 @@ pub async fn install_gate(st: &AppState, install: &str, allow_banned: bool) -> R
     let limit = st.cfg.limits.install_per_minute;
     let n = {
         let mut a = st.abuse();
+        a.maybe_prune(now);
         let w = a.installs.entry(install.to_string()).or_default();
         bump(&mut w.minute, now, 60)
     };
@@ -179,6 +245,7 @@ pub async fn tally(st: &AppState, install: &str, valid: u32, invalid: u32, whole
     let invalid_percent = st.cfg.limits.invalid_percent;
     let decision = {
         let mut a = st.abuse();
+        a.maybe_prune(now);
         let w = a.installs.entry(install.to_string()).or_default();
         if now - w.window >= 3600 {
             w.window = now;
@@ -226,6 +293,7 @@ pub fn account_gate(st: &AppState, key_hash: &str) -> Result<(), ApiError> {
     let limit = st.cfg.limits.account_per_minute;
     let n = {
         let mut a = st.abuse();
+        a.maybe_prune(now);
         let w = a.accounts.entry(key_hash.to_string()).or_insert((0, 0));
         bump(w, now, 60)
     };
@@ -236,12 +304,46 @@ pub fn account_gate(st: &AppState, key_hash: &str) -> Result<(), ApiError> {
     }
 }
 
+/// New cloud accounts per IP per day (a 429). Free accounts cost disk, so one address may open only
+/// a few; the window is a day, so a carrier's shared address still fits a household's worth.
+pub async fn account_create_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
+    let now = st.clock.now();
+    let limit = st.cfg.limits.accounts_per_ip_per_day;
+    let n = {
+        let mut a = st.abuse();
+        a.maybe_prune(now);
+        let w = a.creates.entry(window_ip(ip)).or_insert((0, 0));
+        bump(w, now, DAY)
+    };
+    if n > limit {
+        Err(ApiError::Limited)
+    } else {
+        Ok(())
+    }
+}
+
+/// Counts the items of an install that were refused for volume (over the honest limit: a 429, nothing
+/// stored) in the hour. True when they are a gross volume (over `gross` in an hour): the caller bans.
+pub fn gross_refusals(st: &AppState, install: &str, items: u32, gross: u32) -> bool {
+    let now = st.clock.now();
+    let mut a = st.abuse();
+    a.maybe_prune(now);
+    let w = a.installs.entry(install.to_string()).or_default();
+    if now - w.refused_window >= 3600 {
+        w.refused_window = now;
+        w.refused = 0;
+    }
+    w.refused = w.refused.saturating_add(items);
+    w.refused > gross
+}
+
 pub fn redeem_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let now = st.clock.now();
     let limit = st.cfg.limits.redeem_per_ip_per_minute;
     let n = {
         let mut a = st.abuse();
-        let w = a.redeems.entry(ip).or_insert((0, 0));
+        a.maybe_prune(now);
+        let w = a.redeems.entry(window_ip(ip)).or_insert((0, 0));
         bump(w, now, 60)
     };
     if n > limit {
@@ -256,7 +358,8 @@ pub fn login_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let limit = st.cfg.limits.login_per_ip_per_ten_minutes;
     let n = {
         let mut a = st.abuse();
-        let w = a.logins.entry(ip).or_insert((0, 0));
+        a.maybe_prune(now);
+        let w = a.logins.entry(window_ip(ip)).or_insert((0, 0));
         bump(w, now, 600)
     };
     if n > limit {
@@ -284,10 +387,12 @@ async fn ban_ip(st: &AppState, key: String, reason: &'static str, now: i64) -> R
     st.stats
         .call(move |c| {
             let tx = c.transaction()?;
-            let prev: Option<i64> = tx
-                .query_row("SELECT strikes FROM bans WHERE kind = 'ip' AND key = ?1", params![key], |r| r.get(0))
+            let prev: Option<(i64, i64)> = tx
+                .query_row("SELECT strikes, created_at FROM bans WHERE kind = 'ip' AND key = ?1", params![key], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
                 .optional()?;
-            let strikes = prev.unwrap_or(0) + 1;
+            let strikes = next_ip_strikes(prev, now);
             let until = now + ip_ban_secs(strikes);
             tx.execute(
                 "INSERT INTO bans (kind, key, strikes, until, reason, created_at) VALUES ('ip', ?1, ?2, ?3, ?4, ?5)
@@ -356,6 +461,36 @@ mod tests {
         assert_eq!(install_ban_until(1, 100), 100 + DAY);
         assert_eq!(install_ban_until(2, 100), 100 + 7 * DAY);
         assert_eq!(install_ban_until(3, 100), i64::MAX);
+    }
+
+    #[test]
+    fn ip_v6_windows_are_per_slash_64() {
+        let a: IpAddr = "2001:db8:1:2:aaaa:bbbb:cccc:1".parse().unwrap();
+        let b: IpAddr = "2001:db8:1:2:ffff::9".parse().unwrap();
+        let c: IpAddr = "2001:db8:1:3::1".parse().unwrap();
+        assert_eq!(window_ip(a), window_ip(b));
+        assert_ne!(window_ip(a), window_ip(c));
+        let v4: IpAddr = "203.0.113.7".parse().unwrap();
+        assert_eq!(window_ip(v4), v4);
+    }
+
+    #[test]
+    fn bounded_maps_drop_the_oldest() {
+        let mut m: HashMap<u32, i64> = (0..100u32).map(|i| (i, i64::from(i))).collect();
+        bound(&mut m, 50, |t| *t);
+        assert!(m.len() <= 50 && m.len() >= 40, "down to 90% of the cap: {}", m.len());
+        assert!(!m.contains_key(&0), "the oldest went first");
+        assert!(m.contains_key(&99), "the newest stayed");
+        let mut small: HashMap<u32, i64> = (0..5u32).map(|i| (i, 0)).collect();
+        bound(&mut small, 50, |t| *t);
+        assert_eq!(small.len(), 5, "under the cap nothing goes");
+    }
+
+    #[test]
+    fn ip_strikes_decay_after_a_week() {
+        assert_eq!(next_ip_strikes(None, 1000), 1);
+        assert_eq!(next_ip_strikes(Some((3, 1000)), 1000 + DAY), 4, "a recent ban escalates");
+        assert_eq!(next_ip_strikes(Some((3, 1000)), 1000 + IP_STRIKE_DECAY_SECS), 1, "an old one has decayed");
     }
 
     #[test]

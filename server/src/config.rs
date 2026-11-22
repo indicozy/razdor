@@ -22,8 +22,10 @@ pub struct Limits {
     pub install_per_minute: u32,
     /// Requests per account key per minute (a 429).
     pub account_per_minute: u32,
-    /// Link redeems per IP per minute (a 429).
+    /// Link redeems per IP per minute (a 429); wrong codes count too.
     pub redeem_per_ip_per_minute: u32,
+    /// New cloud accounts per IP per day (a 429).
+    pub accounts_per_ip_per_day: u32,
     /// Admin logins per IP per ten minutes (a 429).
     pub login_per_ip_per_ten_minutes: u32,
     pub pings_per_day: u32,
@@ -40,10 +42,11 @@ impl Default for Limits {
         Limits {
             ip_per_minute: 1200,
             ip_flood_strikes: 5,
-            junk_per_ten_minutes: 50,
+            junk_per_ten_minutes: 300,
             install_per_minute: 300,
             account_per_minute: 120,
             redeem_per_ip_per_minute: 10,
+            accounts_per_ip_per_day: 5,
             login_per_ip_per_ten_minutes: 10,
             pings_per_day: limits::PINGS_PER_DAY,
             events_per_hour: limits::EVENTS_PER_HOUR,

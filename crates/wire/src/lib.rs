@@ -38,4 +38,19 @@ pub trait Validate {
 pub struct Ack {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Set by the cloud's writes that really happened (`{"ok":true}`). A silent answer is `{}`, so
+    /// a client never takes an unconfirmed answer for success (it would forget its key).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ok: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+impl Ack {
+    /// The confirmed answer of a cloud write that happened.
+    pub fn confirmed() -> Ack {
+        Ack { id: None, ok: true }
+    }
 }

@@ -168,6 +168,8 @@ impl Hub {
             platform: platform(),
             game: game.to_string(),
             lang: lang.to_string(),
+            // The day this ping is for: a backlog sent late is counted by it, not by arrival.
+            day: i64::try_from(today).ok(),
         };
         self.enqueue_checked(paths::PING, Class::Always, &ping)?;
         Ok(true)

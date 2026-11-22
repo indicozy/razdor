@@ -35,7 +35,19 @@ fn ping() -> Ping {
         platform: "linux x86_64 64".into(),
         game: "community-update".into(),
         lang: "ru".into(),
+        day: Some(20_000),
     }
+}
+
+#[test]
+fn a_ping_without_a_day_is_an_old_client_and_still_decodes() {
+    // Old clients omit `day`; the server then counts the ping by its arrival day.
+    let old = r#"{"schema":1,"install_id":"0123456789abcdef0123456789abcdef","razdor":"1.5.4",
+        "platform":"linux x86_64 64","game":"dt","lang":"ru"}"#;
+    let p: Ping = serde_json::from_str(old).expect("an old ping decodes");
+    assert_eq!(p.day, None);
+    let new = serde_json::to_string(&Ping { day: Some(20_000), ..p }).unwrap();
+    assert!(new.contains("\"day\":20000"), "the claimed day goes on the wire: {new}");
 }
 
 fn meta() -> SaveMeta {
@@ -120,7 +132,19 @@ fn round_trip_analytics_bodies() {
         len: 10,
     });
     round(&Verdict { schema: SCHEMA, battle_id: "b1".into(), kind: VerdictKind::Ok, reason: None });
-    round(&crate::Ack { id: Some("x".into()) });
+    round(&crate::Ack { id: Some("x".into()), ok: false });
+    round(&crate::Ack::confirmed());
+}
+
+#[test]
+fn a_silent_answer_is_not_a_confirmed_one() {
+    // The silent 200 is `{}`: it must decode as not confirmed, and a confirmed answer must not be `{}`.
+    let silent: crate::Ack = serde_json::from_str("{}").unwrap();
+    assert!(!silent.ok);
+    let confirmed = serde_json::to_string(&crate::Ack::confirmed()).unwrap();
+    assert_eq!(confirmed, r#"{"ok":true}"#);
+    let old_client_shape: crate::Ack = serde_json::from_str(&confirmed).unwrap();
+    assert!(old_client_shape.ok);
 }
 
 #[test]

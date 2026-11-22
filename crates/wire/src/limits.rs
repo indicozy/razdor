@@ -60,8 +60,9 @@ pub const MAX_SAVES_LISTED: usize = 10_000;
 
 // Analytics: the automatic-ban rules (`2026-11-22-analytics-design.md`, Abuse).
 
-/// Pings per install per day.
-pub const PINGS_PER_DAY: u32 = 3;
+/// Pings per install in a day the server accepts before it answers 429 (an honest client sends one a
+/// UTC day, plus its queued backlog after an outage: a few dozen at most).
+pub const PINGS_PER_DAY: u32 = 100;
 /// Events per install per hour.
 pub const EVENTS_PER_HOUR: u32 = 1000;
 /// Battle records per install per hour.

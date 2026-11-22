@@ -105,7 +105,7 @@ pub async fn release(st: &AppState, install: &str, version: &str) -> Result<(), 
 
 /// The answer of a stored write: its id, when it made one.
 fn stored(id: Option<String>) -> Response {
-    json(&Ack { id })
+    json(&Ack { id, ok: false })
 }
 
 fn name_of<T: serde::Serialize>(v: &T) -> String {
@@ -144,7 +144,23 @@ struct RawBatch {
     events: Vec<Value>,
 }
 
-/// `POST /v1/ping`: the daily ping (3 a day per install at most).
+/// A gross volume is this many times the honest limit before an install is banned (a 429 below it).
+pub const BAN_FACTOR: i64 = 20;
+/// How far back a ping's claimed UTC day may be (a client's queue keeps a few weeks of days).
+pub const PING_MAX_AGE_DAYS: i64 = 60;
+
+/// The volume that bans: `BAN_FACTOR` times the honest limit, counted over refusals in the hour.
+fn gross(limit: i64) -> u32 {
+    u32::try_from(limit * BAN_FACTOR).unwrap_or(u32::MAX)
+}
+
+enum PingOutcome {
+    Duplicate,
+    Stored,
+    Over,
+}
+
+/// `POST /v1/ping`: the daily ping, one per install and UTC day. Over the limit of the last day: 429.
 pub async fn ping(
     State(st): State<AppState>,
     peer: Peer,
@@ -155,35 +171,57 @@ pub async fn ping(
     let p: Ping = typed(&st, &adm.install, adm.value, 1).await?;
     release(&st, &adm.install, &p.razdor).await?;
     let now = st.clock.now();
-    let day = civil::day_of(now);
+    let today = civil::day_of(now);
+    // The UTC day the client claims (a backlog sends old days). Without it (old clients), today.
+    let day = p.day.unwrap_or(today);
+    if day > today + 1 || day < today - PING_MAX_AGE_DAYS {
+        // Plain 400, no strike: an honest client with a stale queue must not be banned for it.
+        return Err(ApiError::BadRequest("the ping's day is outside the accepted window".into()));
+    }
     let limit = i64::from(st.cfg.limits.pings_per_day);
     let install = adm.install.clone();
-    let over = st
+    let outcome = st
         .stats
         .call(move |c| {
-            let n: i64 = c.query_row(
-                "SELECT COUNT(*) FROM pings WHERE install_id = ?1 AND day = ?2 AND quarantined = 0",
+            // One ping per install and UTC day: a re-send of a stored day is the same ping.
+            let dup: i64 = c.query_row(
+                "SELECT COUNT(*) FROM pings WHERE install_id = ?1 AND day = ?2",
                 params![install, day],
                 |r| r.get(0),
             )?;
-            if n >= limit {
-                return Ok(true);
+            if dup > 0 {
+                return Ok(PingOutcome::Duplicate);
+            }
+            let recent: i64 = c.query_row(
+                "SELECT COUNT(*) FROM pings WHERE install_id = ?1 AND received_at > ?2 AND quarantined = 0",
+                params![install, now - 86_400],
+                |r| r.get(0),
+            )?;
+            if recent >= limit {
+                return Ok(PingOutcome::Over);
             }
             c.execute(
                 "INSERT INTO pings (install_id, day, received_at, razdor, platform, game, lang)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![install, day, now, p.razdor, p.platform, p.game, p.lang],
             )?;
-            Ok(false)
+            Ok(PingOutcome::Stored)
         })
         .await?;
-    if over {
-        abuse::ban_install(&st, &adm.install, "more pings in a day than a player can send", civil::day_start(day))
-            .await?;
-        return Err(ApiError::Silent);
+    match outcome {
+        PingOutcome::Over => {
+            if abuse::gross_refusals(&st, &adm.install, 1, gross(limit)) {
+                abuse::ban_install(&st, &adm.install, "far more pings in a day than a player can send", now - 86_400)
+                    .await?;
+                return Err(ApiError::Silent);
+            }
+            Err(ApiError::Limited)
+        }
+        PingOutcome::Duplicate | PingOutcome::Stored => {
+            abuse::tally(&st, &adm.install, 1, 0, false).await?;
+            Ok(stored(None))
+        }
     }
-    abuse::tally(&st, &adm.install, 1, 0, false).await?;
-    Ok(stored(None))
 }
 
 /// `POST /v1/events`: a batch of play events. Each event is decoded alone: an unknown kind is
@@ -227,7 +265,7 @@ pub async fn events(
     let now = st.clock.now();
     let limit = i64::from(st.cfg.limits.events_per_hour);
     let install = adm.install.clone();
-    let room = st
+    let recent = st
         .stats
         .call(move |c| {
             let n: i64 = c.query_row(
@@ -235,12 +273,18 @@ pub async fn events(
                 params![install, now - 3600],
                 |r| r.get(0),
             )?;
-            Ok(n + i64::from(stored_n) <= limit)
+            Ok(n)
         })
         .await?;
-    if !room {
-        abuse::ban_install(&st, &adm.install, "more events in an hour than a player can play", now - 3600).await?;
-        return Err(ApiError::Silent);
+    // Over the hour's limit: refused with 429 (the client keeps the batch and retries); banned only at a
+    // gross volume (a backlog sent after an outage is slow, not a bot).
+    if recent + i64::from(stored_n) > limit {
+        if abuse::gross_refusals(&st, &adm.install, stored_n.max(1), gross(limit)) {
+            abuse::ban_install(&st, &adm.install, "far more events in an hour than a player can play", now - 3600)
+                .await?;
+            return Err(ApiError::Silent);
+        }
+        return Err(ApiError::Limited);
     }
     abuse::tally(&st, &adm.install, stored_n, invalid, false).await?;
 
@@ -432,11 +476,18 @@ pub async fn battles(
     let (started, ended) = (b.started_at as i64, b.ended_at as i64);
     let limit = i64::from(st.cfg.limits.battles_per_hour);
     let install = adm.install.clone();
-    let (recent, overlaps): (i64, i64) = st
+    let record_sha = b.record_sha256.clone();
+    let (same, recent, overlaps): (i64, i64, i64) = st
         .stats
         .call({
             let install = install.clone();
             move |c| {
+                // A re-send of a stored record (the first answer was lost) is the same battle.
+                let same = c.query_row(
+                    "SELECT COUNT(*) FROM battles WHERE install_id = ?1 AND record_sha256 = ?2",
+                    params![install, record_sha],
+                    |r| r.get(0),
+                )?;
                 let recent = c.query_row(
                     "SELECT COUNT(*) FROM battles WHERE install_id = ?1 AND received_at > ?2 AND quarantined = 0",
                     params![install, now - 3600],
@@ -448,17 +499,27 @@ pub async fn battles(
                     params![install, ended, started],
                     |r| r.get(0),
                 )?;
-                Ok((recent, overlaps))
+                Ok((same, recent, overlaps))
             }
         })
         .await?;
-    if recent + 1 > limit {
-        abuse::ban_install(&st, &install, "more battles in an hour than a player can fight", now - 3600).await?;
-        return Err(ApiError::Silent);
+    if same > 0 {
+        return Ok(stored(None));
     }
+    // Over the hour's limit: refused (429, the client keeps it and retries), banned only at a gross
+    // volume no player reaches (a backlog sent after an outage is slow, not a bot).
+    if recent + 1 > limit {
+        if abuse::gross_refusals(&st, &install, 1, gross(limit)) {
+            abuse::ban_install(&st, &install, "far more battles in an hour than a player can fight", now - 3600)
+                .await?;
+            return Err(ApiError::Silent);
+        }
+        return Err(ApiError::Limited);
+    }
+    // Overlapping in time: a copied game folder (one install id on two PCs) can make two real battles
+    // overlap. The later one is refused (409, dropped by the client), not banned.
     if overlaps > 0 {
-        abuse::ban_install(&st, &install, "overlapping battles", now - 3600).await?;
-        return Err(ApiError::Silent);
+        return Err(ApiError::Conflict("overlaps a stored battle of this install".into()));
     }
     let id = files::new_id()?;
     let zst = files::zstd_blocking(adm.rest.to_vec()).await?;

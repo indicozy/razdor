@@ -100,7 +100,7 @@ impl Api {
 
     /// Deletes the account and every file of it.
     pub fn delete_account(&self) -> Result<(), CloudError> {
-        self.send("DELETE", paths::ACCOUNT, None, true).map(|_| ())
+        confirmed(&self.send("DELETE", paths::ACCOUNT, None, true)?)
     }
 
     /// A link code for a second device: valid for ten minutes, once.
@@ -142,7 +142,7 @@ impl Api {
     }
 
     pub fn delete_save(&self, id: &str) -> Result<(), CloudError> {
-        self.send("DELETE", &paths::save(id), None, true).map(|_| ())
+        confirmed(&self.send("DELETE", &paths::save(id), None, true)?)
     }
 
     /// The account's marks, merged on the server with what is sent.
@@ -184,7 +184,7 @@ impl Api {
     /// One performance test's report.
     pub fn post_bench(&self, report: &BenchReport) -> Result<(), CloudError> {
         let body = Self::json_body(report)?;
-        self.send("POST", paths::BENCH, Some(&body), true).map(|_| ())
+        confirmed(&self.send("POST", paths::BENCH, Some(&body), true)?)
     }
 
     /// The account's last reports (the server keeps 50).
@@ -214,10 +214,33 @@ pub fn in_group<'a>(saves: &'a [SaveEntry], game: &str, map: &str, kind: razdor_
         .collect()
 }
 
+/// The server's confirmation of a write (`{"ok":true}`). A silent answer (`{}`) is not one: the write
+/// may not have happened, so the caller keeps what it knows (a key, a save) and tries again later.
+fn confirmed(answer: &[u8]) -> Result<(), CloudError> {
+    let ack: razdor_wire::Ack = serde_json::from_slice(answer).map_err(|e| CloudError::Bad(e.to_string()))?;
+    if ack.ok {
+        Ok(())
+    } else {
+        Err(CloudError::Offline("the server did not confirm the write".into()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn a_silent_answer_forgets_nothing() {
+        // A banned IP's silent 200 (`{}`) is not a deleted account: the error keeps the key.
+        let silent = stub(200, "{}");
+        let api = Api::new(silent, "https://example.invalid", Some("k".repeat(32)));
+        assert!(matches!(api.delete_account(), Err(CloudError::Offline(_))));
+        assert!(matches!(api.delete_save("abc"), Err(CloudError::Offline(_))));
+        let confirmed_net = stub(200, r#"{"ok":true}"#);
+        let api = Api::new(confirmed_net, "https://example.invalid", Some("k".repeat(32)));
+        assert!(api.delete_account().is_ok());
+    }
 
     /// A stub transport: answers with the status and body it was given, and records the calls.
     struct Stub {

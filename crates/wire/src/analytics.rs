@@ -26,6 +26,10 @@ pub struct Ping {
     pub game: String,
     /// The interface language code.
     pub lang: String,
+    /// The UTC day the ping is for (days since 1970). A client sends its queued days late, so the
+    /// server counts a ping by this day, not by when it arrives. Optional: old clients omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub day: Option<i64>,
 }
 
 impl Validate for Ping {
