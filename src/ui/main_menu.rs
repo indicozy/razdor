@@ -977,10 +977,6 @@ fn corner_links(k: f32, mods: &[(String, razdor::hub::Text)], mod_choice: Option
     if link("Discord", x, y, false, size) {
         open_link(DISCORD_INVITE);
     }
-    // The letter to Ded Moroz, while the holiday look is on (the welcome window shows once a season).
-    if super::holiday::on() && link(tr("Letter to Ded Moroz"), x + measure("Discord", size).width + 28.0 * k, y, false, size) {
-        super::holiday_windows::open_letter();
-    }
     // The Mods link, right-aligned in the corner: the mod played (its list on a click), or «Моды».
     let label = mods_label(mod_choice);
     let w = measure(label, size).width;
