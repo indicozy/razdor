@@ -105,10 +105,17 @@ pub fn decode_ugs(d: &[u8]) -> Result<Vec<Image>, DtError> {
     Ok(frames)
 }
 
-/// The single-frame stills of `Graphics/Windows` (`MB2`, `MM_Icons`, `Title_RUS`) are not
-/// scrambled: each pixel is one grey byte and one alpha byte. The game tints them (the menu
-/// buttons, the minimap symbols by owner).
-pub const UGS_GREY_STILLS: [&str; 3] = ["mb2.ugs", "mm_icons.ugs", "title_rus.ugs"];
+/// The single-frame stills of `Graphics/Windows` (`MM_Icons`, `Title_RUS`) are not
+/// scrambled: each pixel is one grey byte and one alpha byte. The game tints them (the minimap
+/// symbols by owner). `MB2` is not one of them: see [`UGS_TEXTURE_STILLS`].
+pub const UGS_GREY_STILLS: [&str; 2] = ["mm_icons.ugs", "title_rus.ugs"];
+
+/// The main menu's oval buttons (`MB2`): `[u16 w][u16 h]` then one little-endian ARGB 4444 word
+/// per pixel, unscrambled. The game makes an ARGB 4444 texture (0x4820f4 with format 1: A 0xF000,
+/// R 0x0F00, G 0x00F0, B 0x000F) and copies the file's words into it as they are (0x4822dc through
+/// 0x48d09c to 0x402bd0): silver frames round a violet-blue marble middle, alpha 11 of 15. Read as
+/// grey + alpha (Razdor before 2026-11-22) the middle came out grey.
+pub const UGS_TEXTURE_STILLS: [&str; 1] = ["mb2.ugs"];
 
 /// The event window's defeat and victory pictures (`Stnd-1`, `Stnd-2`): `[u16 w][u16 h]`
 /// then one little-endian u16 per pixel, ARGB 4444. The window splits each pixel into its
@@ -118,6 +125,17 @@ pub const UGS_ARGB4444_STILLS: [&str; 2] = ["stnd-1.ugs", "stnd-2.ugs"];
 
 /// An ARGB 4444 still (see [`UGS_ARGB4444_STILLS`]).
 pub fn decode_ugs_argb4444(d: &[u8]) -> Result<Image, DtError> {
+    argb4444_still(d, Some((8 * 255 / 31) as u8))
+}
+
+/// An ARGB 4444 texture still (see [`UGS_TEXTURE_STILLS`]): each word as it is, alpha 0 clear.
+pub fn decode_ugs_texture(d: &[u8]) -> Result<Image, DtError> {
+    argb4444_still(d, None)
+}
+
+/// `[u16 w][u16 h]` then `w*h` little-endian ARGB 4444 words. `coloured_clear`: the alpha a pixel
+/// with colour but alpha 0 gets (the event window's pictures), or `None` to keep it clear.
+fn argb4444_still(d: &[u8], coloured_clear: Option<u8>) -> Result<Image, DtError> {
     let (Some(w), Some(h)) = (u16_at(d, 0), u16_at(d, 2)) else {
         return Err(DtError::Truncated { what: "UGS still header", offset: 0 });
     };
@@ -129,8 +147,8 @@ pub fn decode_ugs_argb4444(d: &[u8]) -> Result<Image, DtError> {
             let v = u16::from_le_bytes([p[0], p[1]]);
             let nib = |s: u16| ((v >> s) & 15) as u8 * 17;
             let (r, g, b, mut a) = (nib(8), nib(4), nib(0), nib(12));
-            if a == 0 && v & 0xfff != 0 {
-                a = (8 * 255 / 31) as u8;
+            if let Some(clear) = coloured_clear.filter(|_| a == 0 && v & 0xfff != 0) {
+                a = clear;
             }
             [r, g, b, a]
         })
@@ -583,6 +601,7 @@ pub(crate) fn decode_uncached(path: &Path) -> Result<Vec<Image>, DtError> {
         "bmp" => Ok(vec![decode_bmp(&d)?]),
         "ugs" if name == "objects.ugs" => Ok(decode_objects_ugs(&d)?.into_iter().map(|s| s.image).collect()),
         "ugs" if UGS_GREY_STILLS.contains(&name.as_str()) => Ok(vec![decode_ugs_grey(&d)?]),
+        "ugs" if UGS_TEXTURE_STILLS.contains(&name.as_str()) => Ok(vec![decode_ugs_texture(&d)?]),
         "ugs" if UGS_ARGB4444_STILLS.contains(&name.as_str()) => Ok(vec![decode_ugs_argb4444(&d)?]),
         "ugs" => decode_ugs(&d),
         _ => Err(DtError::BadMagic { what: "known graphics file (.ugs/.lit/.spi/.bmp)" }),
@@ -895,6 +914,55 @@ mod tests {
         assert_eq!(img.pixel(0, 1), [255, 255, 204, 255]);
         assert_eq!(img.pixel(1, 1), [255, 0, 0, 65]);
         assert!(decode_ugs_argb4444(&[2, 0, 2, 0, 1]).is_err());
+    }
+
+    #[test]
+    fn the_menu_buttons_are_an_argb4444_texture_not_a_grey_still() {
+        // `MB2` goes into an ARGB 4444 texture word for word (0x4820f4 format 1, 0x4822dc): a word
+        // of the round oval's marble middle (0xB149), clear, the silver frame (0xFDDE) and a
+        // coloured word with alpha 0, which stays clear (unlike the event window's pictures).
+        let mut d = vec![2, 0, 2, 0];
+        for v in [0xB149u16, 0x0000, 0xFDDE, 0x0F00] {
+            d.extend(v.to_le_bytes());
+        }
+        let img = decode_ugs_texture(&d).unwrap();
+        assert_eq!(img.pixel(0, 0), [17, 68, 153, 187]);
+        assert_eq!(img.pixel(1, 0), [0, 0, 0, 0]);
+        assert_eq!(img.pixel(0, 1), [221, 221, 238, 255]);
+        assert_eq!(img.pixel(1, 1), [255, 0, 0, 0]);
+        assert!(decode_ugs_texture(&[2, 0, 2, 0, 1]).is_err());
+        assert!(!UGS_GREY_STILLS.contains(&"mb2.ugs"), "MB2 read as grey + alpha: its middle comes out grey");
+        // The loader picks the decoder by the file's name, whatever its case.
+        let dir = std::env::temp_dir().join(format!("razdor-gfx-mb2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("MB2.ugs");
+        std::fs::write(&path, &d).unwrap();
+        let frames = decode_uncached(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].pixel(0, 0), [17, 68, 153, 187], "MB2.ugs as loaded");
+    }
+
+    #[test]
+    fn real_menu_buttons_have_a_violet_marble_middle() {
+        // The round oval's middle (texels 70..158 × 30..62 of `MB2`, inside the inner rim): blue
+        // well over red and green, about 73 % opaque, as the original shows it.
+        let Some(dt) = install() else { return };
+        let img = &dt.graphic("Graphics/Windows/MB2.ugs").unwrap()[0];
+        assert_eq!((img.width, img.height), (228, 251));
+        let mut sum = [0u64; 4];
+        let mut n = 0;
+        for y in 30..62 {
+            for x in 70..158 {
+                for (s, &c) in sum.iter_mut().zip(&img.pixel(x, y)) {
+                    *s += c as u64;
+                }
+                n += 1;
+            }
+        }
+        let [r, g, b, a] = sum.map(|s| s / n);
+        assert!(b > r + 60 && b > g + 60, "middle ({r}, {g}, {b}) is not violet-blue");
+        assert!((170..=200).contains(&a), "middle alpha {a}");
     }
 
     #[test]

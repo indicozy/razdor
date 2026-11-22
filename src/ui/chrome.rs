@@ -1048,6 +1048,7 @@ local! {
     static ADDITIVE: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static MULTIPLY: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static PREMULTIPLIED: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
+    static MENU_FRAME: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
     static GROUND_RING: std::cell::OnceCell<Option<Material>> = const { std::cell::OnceCell::new() };
 }
 
@@ -1086,6 +1087,37 @@ pub fn premultiplied(draw: impl FnOnce()) {
         .clone()
     });
     with_material(material, draw);
+}
+
+/// The main menu's oval buttons (`MB2`) as the original draws them (0x4c7d40, under the states
+/// 0x4c7774 leaves: `SRCBLEND = ONE`, `DESTBLEND = INVSRCALPHA`): the texture's colour times the
+/// vertex colour is added whole (stage 0's default `MODULATE`), and what is below is kept by one
+/// minus the stage's alpha. Every vertex alpha there is 0, and the alpha op picks the alpha:
+/// `BLENDTEXTUREALPHA` (a button not under the mouse, 0x4c7d6a) blends the texture's alpha with the
+/// vertex's by the texture's, which with the defaults `ALPHAARG1 = TEXTURE`, `ALPHAARG2 = CURRENT`
+/// is texture alpha × texture alpha (the marble middle, 11/15 opaque, keeps 46 % of what is below);
+/// `BLENDDIFFUSEALPHA` (the button under the mouse) gives 0, so the button is simply added. Here the
+/// drawn colour's alpha says which: 1 the first, 0 the second.
+const MENU_FRAME_MAIN: &str = "vec4 t = sharp_tex(uv); gl_FragColor = vec4(color.rgb * t.rgb, color.a * t.a * t.a);";
+
+/// Runs `draw` blending as the original's menu buttons ([`MENU_FRAME_MAIN`]), or premultiplied if
+/// the material cannot be made.
+pub fn menu_frame(draw: impl FnOnce()) {
+    use macroquad::miniquad::{BlendFactor, BlendState, BlendValue, Equation};
+    let material = MENU_FRAME.with(|m| {
+        m.get_or_init(|| {
+            let blend = BlendState::new(Equation::Add, BlendFactor::One, BlendFactor::OneMinusValue(BlendValue::SourceAlpha));
+            let params = macroquad::miniquad::PipelineParams { color_blend: Some(blend), ..Default::default() };
+            sharp::material(&sharp::fragment("", MENU_FRAME_MAIN), params, Vec::new())
+                .map_err(|e| razdor::diag!("menu frame material: {e}"))
+                .ok()
+        })
+        .clone()
+    });
+    match material {
+        Some(m) => with_material(Some(m), draw),
+        None => premultiplied(draw),
+    }
 }
 
 fn blend_material(blend: macroquad::miniquad::BlendState, what: &str) -> Option<Material> {

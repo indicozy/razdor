@@ -22,9 +22,11 @@ use web_time::UNIX_EPOCH;
 
 use super::gfx::Image;
 
-/// The entry layout. Bump it when the layout changes: format 1 entries (raw RGBA, no
-/// compression) are then no longer read and their folder is pruned at start.
-pub const FORMAT: u32 = 2;
+/// The entry layout and the decoders' output. Bump it when either changes: the older entries (format 1:
+/// raw RGBA, no compression; format 2: `MB2` decoded as grey + alpha, before 2026-11-22) are then no
+/// longer read and their folder is pruned at start. Without the bump a build of the same version kept
+/// showing the old decode from the cache.
+pub const FORMAT: u32 = 3;
 /// Past this size in the current folder (the entries' stored, compressed bytes) nothing new is
 /// written. 1 GiB on the desktop, 256 MiB on the phones (a player's report: the phones' cache
 /// grew to 2.30 GB under the old cap).
