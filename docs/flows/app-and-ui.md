@@ -345,7 +345,12 @@ the centre of its width, a landscape one with the band of rows `MENU_CROP_TOP` o
 512×512 `Castle.lit` at 16:9, so the towers' roofs stay); `RAZDOR_MENU_FRAME=cropped` sets it in snapshots. The menu's layers are filtered as the original's
 (`main_menu::layer_filter`, `chrome::Filter`): the background, the two flames and the words plain bilinear
 (LINEAR: stage 0 at 0x4c77b4–0x4c77d6 and 0x4c7e65), the logo and the ovals' frames sharp (POINT,
-0x4c7bab–0x4c7be1).
+0x4c7bab–0x4c7be1). The background itself is the owner's choice (2026-11-22): enlarged with Lanczos and sharpened
+(`ui::menu_backdrop`, ImageMagick's `-filter Lanczos -resize WxH! -unsharp 0x1.4+0.7+0.02` worked out the same way:
+Lanczos-3 one axis at a time, the axis enlarged more first, 16-bit values rounded after each pass, then the unsharp
+mask, a 13-tap Gaussian of sigma 1.4, gain 0.7, threshold 0.02), on a worker thread for the frame's crop and the
+screen's size in physical pixels, kept as a texture in memory (nothing on disk); until it is ready, the bilinear
+picture. Snapshots make it at once.
 The title menu held upright (`main_menu::portrait_menu`, pure, with unit tests): the five buttons are 1.6× the
 landscape size in one column, its middle at the middle of the area between the top safe inset and the foot lines
 (the owner's OnePlus, 1080×2376 at 2.75 px per dp: the column's top moved from ~1001 px to ~561 px, its middle

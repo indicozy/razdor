@@ -46,6 +46,7 @@ pub mod game_import;
 pub mod launch;
 pub mod main_menu;
 pub mod menu_art;
+pub mod menu_backdrop;
 pub mod map_import;
 pub mod frame_cap;
 pub mod map_anim;

@@ -169,7 +169,7 @@ fn layer_filter(layer: Layer) -> chrome::Filter {
 }
 
 /// The burning ruins over the whole screen, a little warmer where the fire glows, framed as the
-/// settings say (`MenuFrame`). Not panned: the screen behind a panned title stays covered (`ui::pan`).
+/// settings say (`MenuFrame`), enlarged with Lanczos and sharpened (`menu_backdrop`). Not panned: the screen behind a panned title stays covered (`ui::pan`).
 fn background() {
     super::pan::unpanned(|| match chrome::win("Castle") {
         Some(t) => {
@@ -177,10 +177,15 @@ fn background() {
             let screen = Rect::new(0.0, 0.0, sw, sh);
             let pic = (t.width(), t.height());
             let src = menu_source(MENU_FRAME.with(|f| f.get()), pic, (sw, sh));
-            chrome::filtered(layer_filter(Layer::Background), || match src {
-                Some(src) => chrome::tex_src(&t, src, screen, WHITE),
-                None => chrome::tex(&t, screen, WHITE),
-            });
+            // The owner's choice (2026-11-22): the picture enlarged with Lanczos and sharpened
+            // (`menu_backdrop`); until that is made, as the original filters it.
+            let crop = src.unwrap_or(Rect::new(0.0, 0.0, pic.0, pic.1));
+            if !super::menu_backdrop::show(crop, screen) {
+                chrome::filtered(layer_filter(Layer::Background), || match src {
+                    Some(src) => chrome::tex_src(&t, src, screen, WHITE),
+                    None => chrome::tex(&t, screen, WHITE),
+                });
+            }
         }
         None => clear_background(Color::from_rgba(60, 30, 12, 255)),
     });
