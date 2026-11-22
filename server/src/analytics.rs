@@ -21,6 +21,7 @@ use serde_json::Value;
 
 use crate::abuse;
 use crate::admin;
+use crate::budget;
 use crate::civil;
 use crate::files::{self, BATTLES, CRASHES};
 use crate::http::{client_ip, json, release_ok, ApiError, Peer};
@@ -246,6 +247,7 @@ pub async fn events(
         return Err(abuse::reject(&st, &adm.install, 1, e.to_string()).await);
     }
     release(&st, &adm.install, &raw.razdor).await?;
+    budget::analytics_gate(&st)?;
 
     let mut events: Vec<Event> = Vec::with_capacity(raw.events.len());
     let mut skipped = 0u32;
@@ -339,6 +341,7 @@ pub async fn perf(
     if stored_today(&st, "perf", &adm.install).await? >= i64::from(st.cfg.limits.perf_per_day) {
         return Err(ApiError::Limited);
     }
+    budget::analytics_gate(&st)?;
     let n = p.screens.len().max(1) as f32;
     let median = p.screens.iter().map(|s| s.median_ms).sum::<f32>() / n;
     let p99 = p.screens.iter().map(|s| s.p99_ms).sum::<f32>() / n;
@@ -391,12 +394,14 @@ pub async fn crash(
     if stored_today(&st, "crashes", &adm.install).await? >= i64::from(st.cfg.limits.crash_per_day) {
         return Err(ApiError::Limited);
     }
+    budget::analytics_gate(&st)?;
     let (loc, msg) = panic_key(&c.panic_text);
     let id = files::new_id()?;
     let report = serde_json::to_vec(&c).map_err(|e| ApiError::Internal(e.to_string()))?;
+    budget::analytics_gate(&st)?;
     let zst = files::zstd_blocking(report).await?;
     let file = format!("{id}.json.zst");
-    write_blocking(st.file(CRASHES, &file), zst).await?;
+    write_blocking(&st, st.file(CRASHES, &file), zst).await?;
     let now = st.clock.now();
     let row = id.clone();
     let install = adm.install.clone();
@@ -463,9 +468,10 @@ pub async fn crash_save(
     if !owned {
         return Err(ApiError::NotFound("no such crash"));
     }
+    budget::analytics_gate(&st)?;
     let zst = files::zstd_blocking(adm.rest.to_vec()).await?;
     let file = format!("{crash}.save.zst");
-    write_blocking(st.file(CRASHES, &file), zst).await?;
+    write_blocking(&st, st.file(CRASHES, &file), zst).await?;
     let now = st.clock.now();
     st.stats
         .call(move |c| {
@@ -548,7 +554,8 @@ pub async fn battles(
     let id = files::new_id()?;
     let zst = files::zstd_blocking(adm.rest.to_vec()).await?;
     let file = format!("{id}.rec.zst");
-    write_blocking(st.file(BATTLES, &file), zst).await?;
+    budget::analytics_gate(&st)?;
+    write_blocking(&st, st.file(BATTLES, &file), zst).await?;
     let row = id.clone();
     let inserted = st
         .stats
@@ -591,7 +598,7 @@ pub async fn battles(
         })
         .await;
     if let Err(e) = inserted {
-        files::remove_quiet(&st.file(BATTLES, &file));
+        budget::remove(&st.budget, &st.file(BATTLES, &file));
         return Err(e);
     }
     abuse::tally(&st, &adm.install, 1, 0, false).await?;
@@ -714,6 +721,7 @@ pub async fn install_delete(
     let d: InstallDelete = typed(&st, &adm.install, adm.value, 1).await?;
     let install = d.install_id.as_str().to_string();
     let root = st.root.clone();
+    let counted = st.clone();
     st.stats
         .call(move |c| {
             let tx = c.transaction()?;
@@ -741,7 +749,7 @@ pub async fn install_delete(
             }
             tx.commit()?;
             for (folder, name) in doomed {
-                files::remove_quiet(&files::path(&root, folder, &name));
+                budget::remove(&counted.budget, &files::path(&root, folder, &name));
             }
             Ok(())
         })
@@ -749,9 +757,10 @@ pub async fn install_delete(
     Ok(stored(None))
 }
 
-/// Writes a file on the blocking pool.
-pub async fn write_blocking(path: std::path::PathBuf, bytes: Vec<u8>) -> Result<(), ApiError> {
-    tokio::task::spawn_blocking(move || files::write_atomic(&path, &bytes))
+/// Writes a stored file on the blocking pool, counted by the storage budget.
+pub async fn write_blocking(st: &AppState, path: std::path::PathBuf, bytes: Vec<u8>) -> Result<(), ApiError> {
+    let st = st.clone();
+    tokio::task::spawn_blocking(move || budget::write(&st.budget, &path, &bytes))
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
         .map_err(|e| ApiError::Internal(format!("write: {e}")))

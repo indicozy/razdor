@@ -35,6 +35,8 @@ pub enum ApiError {
     NotFound(&'static str),
     Conflict(String),
     TooLarge(String),
+    /// The stored files are over the storage budget (507, no new uploads until space frees).
+    Full(String),
     Limited,
     Internal(String),
 }
@@ -59,6 +61,7 @@ impl IntoResponse for ApiError {
             ApiError::NotFound(m) => error_body(404, m),
             ApiError::Conflict(m) => error_body(409, m),
             ApiError::TooLarge(m) => error_body(413, m),
+            ApiError::Full(m) => error_body(507, m),
             ApiError::Limited => {
                 let mut r = error_body(429, "rate limit");
                 r.headers_mut().insert(header::RETRY_AFTER, "60".parse().expect("a header value"));

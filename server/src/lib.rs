@@ -5,6 +5,7 @@
 pub mod abuse;
 pub mod admin;
 pub mod analytics;
+pub mod budget;
 pub mod civil;
 pub mod clock;
 pub mod cloud;

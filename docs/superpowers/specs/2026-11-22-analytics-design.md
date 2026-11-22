@@ -65,8 +65,12 @@ Never sent: hero or save names, chat, typed text, anything outside the game.
 - A banned sender still gets 200 OK; its data is dropped silently. Cloud routes never do: a ban there is a 429 with
   Retry-After, and the client forgets its key only on `{"ok":true}` (cloud writes confirm with it; `{}` is silent).
 - Memory: every rate map is bounded (100k windows, oldest evicted) and pruned at most once a minute, on the request path.
-- Not yet (left for later): disk budget and free-space floor (507/429 when over), per-account row caps, expiry of
-  stale accounts, per-install caps for crash and perf reports, encryption of the `links` key column. The dashboard lists bans with reasons and an
+- Done (A1–A4, B): per-account row cap (160 saves). Per-install caps: 10 crash reports and 48 perf reports a UTC
+  day, past them 429 with no strike. Storage budget: the stored files (battles, crash reports, saves) count against
+  `max_data_bytes` (20 GiB), and the disk's free space must stay above `min_free_bytes` (2 GiB). Over either: saves and
+  accounts get 507 («Облако заполнено»), the analytics writes 429; pings and reads go on; the dashboard shows the figures.
+  Accounts idle 90 days (`account_expiry_days`) are deleted with their saves by the daily retention job.
+  Not yet: encryption of the `links` key column. The dashboard lists bans with reasons and an
   unban button.
 - Battle replay check: nightly on the owner's PC (where the DT install is): a script pulls new battles, replays
   them with the real engine, and posts verdicts (ok / suspicious). Only checked battles go into training data.

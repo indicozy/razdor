@@ -251,6 +251,19 @@ pub fn render(sm: &Summary) -> String {
     b.push_str("<p class=\"muted\">Syncs per day (saves, marks, settings, hub, bench, links, accounts):</p>");
     b.push_str(&bars(&sm.cloud.syncs_per_day));
 
+    b.push_str("<h2>Storage</h2>");
+    let s = &sm.storage;
+    let state = if s.over { "<span class=\"warn\">over the budget: no new uploads</span>" } else { "<span class=\"muted\">within the budget</span>" };
+    let _ = write!(
+        b,
+        "<p>Stored files: <b>{:.2} GB</b> of <b>{:.2} GB</b>. Free on the disk: <b>{:.2} GB</b> (floor {:.2} GB). {}</p>",
+        s.used_bytes as f64 / 1e9,
+        s.max_bytes as f64 / 1e9,
+        s.free_bytes as f64 / 1e9,
+        s.min_free_bytes as f64 / 1e9,
+        state
+    );
+
     b.push_str("<h2>Bans</h2><table><tr><th>kind</th><th>key</th><th class=\"n\">strikes</th><th>since</th><th>reason</th><th>state</th><th></th></tr>");
     for ban in &sm.bans {
         let state = if ban.active { "<span class=\"warn\">active</span>" } else { "<span class=\"muted\">lifted</span>" };

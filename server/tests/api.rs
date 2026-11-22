@@ -3,7 +3,8 @@
 //! deletion, the retention job (time injected) and the dashboard.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderMap, Request, StatusCode};
@@ -857,4 +858,82 @@ async fn an_old_cloud_database_counts_its_accounts_as_used_at_the_upgrade() {
         .await
         .expect("reads");
     assert_eq!(last, NOW);
+}
+
+/// A harness whose disk's free bytes are read from `free` (the service's statvfs is replaced).
+fn harness_disk(name: &str, limits: Limits, free: Arc<AtomicU64>) -> Harness {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}-{n}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let cfg = Config {
+        data_dir: dir.clone(),
+        trust_proxy: true,
+        secure_cookies: false,
+        admin_token_sha256: Some(sha256_hex(&[TOKEN.as_bytes()])),
+        admin_password_hash: Some(admin::hash_password("pw").expect("hashes")),
+        limits,
+        ..Config::default()
+    };
+    let disk = Box::new(move || free.load(Ordering::Relaxed));
+    let st = AppState::open_with(cfg, Clock::fixed(NOW), disk).expect("opens");
+    Harness { st, _dir: Dir(dir) }
+}
+
+#[tokio::test]
+async fn over_the_storage_budget_uploads_are_refused_and_the_rest_works() {
+    let limits = Limits { max_data_bytes: 1, ..Limits::default() };
+    let h = harness_disk("budget-bytes", limits, Arc::new(AtomicU64::new(1 << 40)));
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    let id = install(20);
+    // The budget is not yet spent: the first save goes in and takes it past its one byte.
+    let put = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map01.dtm", "manual", b"s")).await;
+    assert_eq!(put.status, StatusCode::OK);
+    let save = put.json()["id"].as_str().expect("an id").to_string();
+    let crash = json!({
+        "schema": 1, "install_id": id, "razdor": "1.5.4", "platform": "linux", "game": "dt", "screen": "map",
+        "at": NOW, "settings": {}, "panic_text": "panicked at src/x.rs:1:1:\nboom", "log": [], "has_save": false
+    });
+    assert_eq!(post_json(&h, "/v1/crash", &crash).await.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(call(&app, "POST", "/v1/battles", &[], battle_frame(&id, 100, 200, b"rec")).await.status, StatusCode::TOO_MANY_REQUESTS);
+    let more = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map02.dtm", "manual", b"t")).await;
+    assert_eq!(more.status, StatusCode::INSUFFICIENT_STORAGE);
+    assert!(more.json()["error"].as_str().unwrap_or("").contains("Облако заполнено"));
+    assert_eq!(post_json(&h, "/v1/account", &json!({ "schema": 1 })).await.status, StatusCode::INSUFFICIENT_STORAGE);
+    // Pings and reads keep working.
+    assert_eq!(post_json(&h, "/v1/ping", &ping_body(&id)).await.status, StatusCode::OK);
+    assert_eq!(call(&app, "GET", "/v1/hub", &key_header(&key), vec![]).await.status, StatusCode::OK);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM battles").await, 0);
+    // Deleting the save gives its bytes back: the budget is under its cap and a battle is stored.
+    assert_eq!(call(&app, "DELETE", &format!("/v1/saves/{save}"), &key_header(&key), vec![]).await.status, StatusCode::OK);
+    assert_eq!(h.st.budget.used(), 0);
+    assert_eq!(call(&app, "POST", "/v1/battles", &[], battle_frame(&id, 100, 200, b"rec")).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn under_the_free_space_floor_uploads_wait_for_space() {
+    let free = Arc::new(AtomicU64::new(1 << 40));
+    let limits = Limits { min_free_bytes: 1000, ..Limits::default() };
+    let h = harness_disk("budget-free", limits, free.clone());
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    free.store(10, Ordering::Relaxed);
+    let hdr = key_header(&key);
+    let put = || call(&app, "PUT", "/v1/saves", &hdr, save_frame("dt", "map01.dtm", "manual", b"s"));
+    assert_eq!(put().await.status, StatusCode::INSUFFICIENT_STORAGE);
+    assert_eq!(post_json(&h, "/v1/ping", &ping_body(&install(21))).await.status, StatusCode::OK);
+    free.store(1 << 40, Ordering::Relaxed);
+    assert_eq!(put().await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_stored_bytes_are_counted_again_at_start() {
+    let h = harness("budget-scan", Limits::default());
+    let id = install(22);
+    assert_eq!(call(&router(h.st.clone()), "POST", "/v1/battles", &[], battle_frame(&id, 100, 200, b"rec")).await.status, StatusCode::OK);
+    let used = h.st.budget.used();
+    assert!(used > 0);
+    let cfg = Config { data_dir: h.st.root.clone(), ..Config::default() };
+    let again = AppState::open(cfg, Clock::fixed(NOW)).expect("opens");
+    assert_eq!(again.budget.used(), used);
 }

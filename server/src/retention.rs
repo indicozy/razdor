@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use rusqlite::params;
 
+use crate::budget;
 use crate::civil::{day_of, DAY};
 use crate::cloud;
 use crate::files::{self, CRASHES};
@@ -60,6 +61,7 @@ pub async fn run_once(st: &AppState) -> Result<Report, ApiError> {
     let save_before = now - CRASH_SAVE_DAYS * DAY;
     let report_before = now - CRASH_REPORT_DAYS * DAY;
     let root = st.root.clone();
+    let counted = st.clone();
     let mut report = st
         .stats
         .call(move |c| {
@@ -129,7 +131,7 @@ pub async fn run_once(st: &AppState) -> Result<Report, ApiError> {
             tx.execute("DELETE FROM crashes WHERE received_at < ?1", params![report_before])?;
             tx.commit()?;
             for (folder, name) in doomed {
-                files::remove_quiet(&files::path(&root, folder, &name));
+                budget::remove(&counted.budget, &files::path(&root, folder, &name));
             }
             Ok(report)
         })

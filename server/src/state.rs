@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use sha2::{Digest, Sha256};
 
 use crate::abuse::Abuse;
+use crate::budget::{self, Budget, FreeFn};
 use crate::clock::Clock;
 use crate::config::Config;
 use crate::db::Db;
@@ -26,6 +27,8 @@ pub struct Inner {
     pub abuse: Mutex<Abuse>,
     /// Admin sessions: SHA-256 of the cookie's token -> expiry (seconds since 1970).
     pub sessions: Mutex<HashMap<String, i64>>,
+    /// The stored files' running total and the disk's free space (see `budget`).
+    pub budget: Budget,
 }
 
 #[derive(Clone)]
@@ -39,7 +42,14 @@ impl Deref for AppState {
 }
 
 impl AppState {
+    /// Opens the service on `cfg.data_dir`, with the disk's free space read by statvfs.
     pub fn open(cfg: Config, clock: Clock) -> Result<AppState, Box<dyn std::error::Error>> {
+        let free = budget::disk_free(&cfg.data_dir);
+        AppState::open_with(cfg, clock, free)
+    }
+
+    /// Opens the service with the free space read by `free` (the tests inject it).
+    pub fn open_with(cfg: Config, clock: Clock, free: FreeFn) -> Result<AppState, Box<dyn std::error::Error>> {
         let root = cfg.data_dir.clone();
         for folder in [files::BATTLES, files::CRASHES, files::SAVES] {
             std::fs::create_dir_all(root.join(folder))?;
@@ -49,6 +59,8 @@ impl AppState {
         let now = clock.now();
         cloud.setup(|c| schema::migrate_cloud(c, now))?;
         let ip_salt = load_or_create_salt(&root.join("ip_salt"))?;
+        let used = budget::scan(&root);
+        let budget = Budget::new(used, cfg.limits.max_data_bytes, cfg.limits.min_free_bytes, free);
         Ok(AppState(Arc::new(Inner {
             cfg,
             stats,
@@ -58,6 +70,7 @@ impl AppState {
             ip_salt,
             abuse: Mutex::new(Abuse::default()),
             sessions: Mutex::new(HashMap::new()),
+            budget,
         })))
     }
 

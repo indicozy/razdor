@@ -21,6 +21,7 @@ use serde_json::Value;
 
 use crate::abuse;
 use crate::analytics::ip_of;
+use crate::budget;
 use crate::civil;
 use crate::files::{self, SAVES};
 use crate::http::{json, ApiError, Peer};
@@ -171,6 +172,7 @@ pub async fn new_account(
     };
     // Accounts per IP per day (CGNAT-tolerant: a bucket of many players, not one player).
     abuse::account_create_gate(&st, ip).await?;
+    budget::cloud_gate(&st)?;
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw).map_err(|e| ApiError::Internal(format!("random: {e}")))?;
     let key_text = files::hex(&raw);
@@ -215,11 +217,8 @@ pub async fn remove_account(st: &AppState, id: &str) -> Result<(), ApiError> {
             Ok(())
         })
         .await?;
-    tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    })
+    let counted = st.clone();
+    tokio::task::spawn_blocking(move || budget::remove_tree(&counted.budget, &dir))
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?
     .map_err(|e| ApiError::Internal(format!("account files: {e}")))
@@ -368,6 +367,8 @@ pub async fn put_save(
 ) -> Result<Response, ApiError> {
     gate(&st, &headers, peer).await?;
     let id = account_of(&st, &headers).await?;
+    budget::cloud_gate(&st)?;
+    let counted = st.clone();
     let (meta, bytes): (SaveMeta, &[u8]) = frame::decode(&body).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     meta.validate().map_err(|e| ApiError::BadRequest(e.to_string()))?;
     if bytes.len() as u64 != meta.size {
@@ -418,7 +419,7 @@ pub async fn put_save(
                 return Err(ApiError::TooLarge("Облако заполнено, удалите старые сохранения".into()));
             }
             let path = root.join(SAVES).join(&account).join(format!("{row_id}.bin"));
-            files::write_atomic(&path, &bytes).map_err(|e| ApiError::Internal(format!("save file: {e}")))?;
+            budget::write(&counted.budget, &path, &bytes).map_err(|e| ApiError::Internal(format!("save file: {e}")))?;
             let inserted = tx.execute(
                 "INSERT INTO saves (id, account_id, game, map, kind, device, name, saved_at, razdor, size, sha256,
                  pinned, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
@@ -439,7 +440,7 @@ pub async fn put_save(
                 ],
             );
             if let Err(e) = inserted.and_then(|_| tx.commit()) {
-                files::remove_quiet(&path);
+                budget::remove(&counted.budget, &path);
                 return Err(e.into());
             }
             Ok((used + size) as u64)
@@ -491,6 +492,7 @@ pub async fn delete_save(
 ) -> Result<Response, ApiError> {
     gate(&st, &headers, peer).await?;
     let account = account_of(&st, &headers).await?;
+    let counted = st.clone();
     if !valid_id(&save) {
         return Err(ApiError::NotFound("no such save"));
     }
@@ -503,7 +505,7 @@ pub async fn delete_save(
                 return Err(ApiError::NotFound("no such save"));
             }
             tx.commit()?;
-            files::remove_quiet(&root.join(SAVES).join(&account).join(format!("{save}.bin")));
+            budget::remove(&counted.budget, &root.join(SAVES).join(&account).join(format!("{save}.bin")));
             Ok(())
         })
         .await?;

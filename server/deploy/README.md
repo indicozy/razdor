@@ -108,6 +108,21 @@ Rate limits: `/api` allows 40 requests a second per address with a burst of 120 
 gentle on purpose: many players share one address behind carrier NAT. The service has its own per-address
 limits (1200 a minute, `ip_per_minute`), counted on the address nginx sets.
 
+Storage and retention limits (the TOML `[limits]` table; the defaults are these):
+
+- `max_data_bytes = 21474836480` (20 GiB) and `min_free_bytes = 2147483648` (2 GiB). The stored files (battles,
+  crash reports, saves) count against the first; the disk's free space must stay above the second. Past either,
+  no new uploads: saves and accounts get 507 (the client shows «Облако заполнено»), the analytics writes 429.
+  Pings and reads go on. The count is kept in memory, scanned from the data folder at start; the dashboard's
+  Storage block shows it, and the log says once a minute while the budget refuses uploads.
+- `crash_per_day = 10` and `perf_per_day = 48` per install and UTC day (429, no ban).
+- `saves_per_account = 160` (a save past it is a 409; nothing is deleted).
+- `account_expiry_days = 90`: an account not used for that long (a keyed request marks it used, at most once an
+  hour) is deleted by the daily retention job, with its saves. `0` keeps every account.
+
+The count drops when the service deletes a file (a save, a player's delete, the expiry); files removed by hand
+on the host are not seen until the next restart.
+
 ## 6. Backups
 
 `backup.sh` needs the host's `sqlite3` and `rsync`. The data folder is the host folder

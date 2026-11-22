@@ -1770,6 +1770,7 @@ dependencies = [
  "argon2",
  "axum",
  "getrandom 0.3.4",
+ "libc",
  "razdor-wire",
  "rusqlite",
  "serde",

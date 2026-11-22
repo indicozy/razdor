@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use rusqlite::params;
 use serde::Serialize;
 
+use crate::budget::Figures;
 use crate::civil::{day_of, ymd};
 use crate::http::ApiError;
 use crate::state::AppState;
@@ -88,6 +89,8 @@ pub struct Summary {
     pub experiments: Vec<Named>,
     pub bans: Vec<BanRow>,
     pub cloud: CloudStats,
+    /// The stored files against the storage budget (see `budget`).
+    pub storage: Figures,
 }
 
 fn named(rows: Vec<(String, i64)>) -> Vec<Named> {
@@ -303,5 +306,6 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
         experiments,
         bans,
         cloud,
+        storage: st.budget.figures(),
     })
 }
