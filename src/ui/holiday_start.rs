@@ -5,11 +5,55 @@
 //! logged and the start is tried again on the next start. The menu only: nothing is loaded here.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
 use razdor::hub::{HolidayRef, Hub, Source};
 use razdor::i18n::lang;
 use razdor::local;
+
+/// The season start's worker is running (the main menu's loader shows «Новогодние файлы…» for it).
+static START_RUNNING: AtomicBool = AtomicBool::new(false);
+/// A holiday file check (`files_tick`) or the season start has finished since the audio last looked:
+/// the menu's music may now have its holiday file (`take_landed`).
+static LANDED: AtomicBool = AtomicBool::new(false);
+
+/// The loader's text while a background job runs, from the three jobs' states (pure): the season
+/// start or the holiday files (the Christmas texts), else the hub's catalog fetch. None when none runs.
+/// The keys are English; `tr` gives the language's text.
+pub fn loading_label(season_start: bool, files: bool, catalog: bool) -> Option<&'static str> {
+    if season_start || files {
+        Some("New Year's files…")
+    } else if catalog {
+        Some("Loading…")
+    } else {
+        None
+    }
+}
+
+/// The loader's text this frame (`loading_label` of the live jobs). In a snapshot the catalog and the
+/// holiday jobs never run, so `RAZDOR_LOADER=holiday|catalog` shows one of them for the screenshots.
+pub fn loader_label() -> Option<&'static str> {
+    if super::clock::is_snapshot() {
+        return match std::env::var("RAZDOR_LOADER").ok().as_deref() {
+            Some("holiday") => loading_label(true, false, false),
+            Some("catalog") => loading_label(false, false, true),
+            _ => None,
+        };
+    }
+    loading_label(START_RUNNING.load(Ordering::Relaxed), files_busy(), super::launch::fetching())
+}
+
+/// Whether the holiday files are being checked and downloaded right now.
+fn files_busy() -> bool {
+    FILES.with(|s| matches!(*s.borrow(), Files::Installing(_)))
+}
+
+/// Takes the one-shot «holiday files may have landed» flag: the audio asks it each frame and, when the
+/// menu's music plays without its holiday file, starts that music again from the file.
+pub fn take_landed() -> bool {
+    LANDED.swap(false, Ordering::Relaxed)
+}
 
 use super::{finished, holiday, holiday_windows, launch, App};
 
@@ -74,16 +118,25 @@ pub fn files_tick(start_due: bool) {
         },
         Files::Installing(rx) => match rx.try_recv() {
             Err(TryRecvError::Empty) => Files::Installing(rx),
-            Ok(Ok(0)) => Files::Done,
+            // The check has ended (even part-way: a file may have landed): the audio may pick it up.
+            Ok(Ok(0)) => {
+                LANDED.store(true, Ordering::Relaxed);
+                Files::Done
+            }
             Ok(Ok(n)) => {
                 razdor::diag!("holiday: {n} file(s) of the look are updated from the catalog");
+                LANDED.store(true, Ordering::Relaxed);
                 Files::Done
             }
             Ok(Err(why)) => {
                 razdor::diag!("holiday: the files are not all there ({why}); they are tried again on the next launch");
+                LANDED.store(true, Ordering::Relaxed);
                 Files::Done
             }
-            Err(TryRecvError::Disconnected) => Files::Done,
+            Err(TryRecvError::Disconnected) => {
+                LANDED.store(true, Ordering::Relaxed);
+                Files::Done
+            }
         },
     };
     FILES.with(|s| *s.borrow_mut() = next);
@@ -114,6 +167,8 @@ impl App {
         if let Some(job) = self.holiday_job.as_ref() {
             let Some(done) = finished(job) else { return };
             self.holiday_job = None;
+            START_RUNNING.store(false, Ordering::Relaxed);
+            LANDED.store(true, Ordering::Relaxed);
             match done {
                 Ok(Ok(start)) => self.holiday_started(start),
                 Ok(Err(why)) => razdor::diag!("holiday: the season start is not done ({why}); it is tried again on the next start"),
@@ -134,6 +189,7 @@ impl App {
             let _ = tx.send(run(local));
         });
         if spawned.is_ok() {
+            START_RUNNING.store(true, Ordering::Relaxed);
             self.holiday_job = Some(rx);
         }
     }
@@ -156,5 +212,33 @@ impl App {
         }
         razdor::diag!("holiday: the season start is done (mod {}, switch {})", start.id, steps.switch);
         holiday_windows::open_greeting();
+    }
+}
+
+/// Whether the menu's music must start again from the holiday file (pure): the holiday files have just
+/// landed (`take_landed`), the file is there now, and the music that plays was not read from it.
+pub fn pickup_due(landed: bool, file_now: bool, file_played: bool) -> bool {
+    landed && file_now && !file_played
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_loader_shows_the_holiday_text_first_then_the_catalog_fetch() {
+        assert_eq!(loading_label(true, true, true), Some("New Year's files…"));
+        assert_eq!(loading_label(false, true, true), Some("New Year's files…"));
+        assert_eq!(loading_label(true, false, false), Some("New Year's files…"), "the season start alone");
+        assert_eq!(loading_label(false, false, true), Some("Loading…"), "the catalog alone");
+        assert_eq!(loading_label(false, false, false), None, "nothing runs: no loader");
+    }
+
+    #[test]
+    fn the_menu_music_is_picked_up_only_when_a_file_landed_and_the_music_lacks_it() {
+        assert!(pickup_due(true, true, false), "the file landed and the install's track plays");
+        assert!(!pickup_due(false, true, false), "no landing this frame");
+        assert!(!pickup_due(true, false, false), "still no file");
+        assert!(!pickup_due(true, true, true), "the holiday track already plays");
     }
 }

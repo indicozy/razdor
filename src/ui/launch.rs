@@ -30,6 +30,11 @@ pub fn catalog() -> Option<&'static Result<Catalog, String>> {
     CATALOG.get()
 }
 
+/// Whether the launch's fetch is running now (started, and its catalog not come yet): the main menu's loader.
+pub fn fetching() -> bool {
+    STARTED.load(Ordering::SeqCst) && CATALOG.get().is_none()
+}
+
 fn fetch() -> Result<Catalog, String> {
     let local = hub::local_dir().ok_or("no folder for the hub")?;
     // The zips older installs kept for their mods are not kept any more (backlog 1609 part 2, step 3).

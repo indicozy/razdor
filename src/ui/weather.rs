@@ -867,6 +867,41 @@ pub fn draw(pass: &Pass) {
     });
 }
 
+local! {
+    /// The menu's snow masks: every pixel is snowy (red 1), and no lowland rain.
+    static MENU_SNOW: Texture2D = Texture2D::from_rgba8(1, 1, &[255, 0, 0, 0]);
+    static MENU_NO_LOWLAND: Texture2D = Texture2D::from_rgba8(1, 1, &[0, 0, 0, 0]);
+}
+
+/// The holiday look's snow over the main menu (`holiday`): the map's own snow pass, with the window's
+/// pixels as the ground (an identity projection, one cell a pixel), every pixel snowy, no fog and no other
+/// weather. `w` × `h` is the screen in pixels; `cheap` keeps only the nearest depth of flakes (the cheap path).
+pub fn draw_menu_snow(w: f32, h: f32, cheap: bool, t: f64) {
+    if w < 1.0 || h < 1.0 {
+        return;
+    }
+    let whole = [0, 0, w.ceil() as i32, h.ceil() as i32];
+    let (biome, lowland) = (MENU_SNOW.with(|t| t.clone()), MENU_NO_LOWLAND.with(|t| t.clone()));
+    let pass = Pass {
+        biome: &biome,
+        lowland: &lowland,
+        fog: None,
+        map: [w, h],
+        draw: [0.0, 0.0, w, h],
+        projection: Projection::Flat { scale: 1.0, offset: [0.0, 0.0] },
+        levels: Levels { snow: if cheap { 0.4 } else { HOLIDAY_SNOW }, ..Default::default() },
+        phase: (t.rem_euclid(PERIOD as f64)) as f32,
+        tint: [1.0, 1.0, 1.0],
+        layers: if cheap { 1.0 } else { 3.0 },
+        zoom: 1.0,
+        sun: 0.0,
+        row_height: 1.0,
+        explored: whole,
+        boxes: Boxes { snow: Some(whole), ..Default::default() },
+    };
+    draw(&pass);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

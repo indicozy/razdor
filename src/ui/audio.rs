@@ -795,9 +795,17 @@ struct Track {
     volume: f32,
     /// The holiday look's setting when it started: a change of the setting restarts the menu's music.
     holiday: bool,
+    /// Whether the menu's music was read from the holiday file (`holiday_menu_file`) when it started:
+    /// when the file lands later (`holiday_start::take_landed`), the music starts again from it.
+    file: bool,
 }
 
 impl Track {
+    /// Whether this track plays `track` from the same source as now: the same look (`holiday`) and the
+    /// same file (`file`), so a fade back or a loop's replay may reuse it.
+    fn same_source(&self, track: &str) -> bool {
+        self.track == track && self.holiday == super::holiday::on() && self.file == holiday_menu_file(track).is_some()
+    }
     /// Applies the fade's level of the music volume `gain`.
     fn set_volume(&mut self, gain: f32) {
         let volume = self.fade.level() * gain;
@@ -1010,8 +1018,13 @@ impl Audio {
             }
         }
         let mut change = b.jukebox.update(mood, crate::ui::clock::now());
-        // The holiday look switched on or off while the menu's music plays: it starts again from the other file.
-        if change.is_none() && b.music.as_ref().is_some_and(|t| t.track == jukebox::MENU && t.holiday != super::holiday::on()) {
+        // The holiday look switched on or off while the menu's music plays, or its holiday file landed
+        // after the music started (the launch's download): it starts again from the other file.
+        let landed = super::holiday_start::take_landed();
+        let file_now = landed && holiday_menu_file(jukebox::MENU).is_some();
+        if change.is_none()
+            && b.music.as_ref().is_some_and(|t| t.track == jukebox::MENU && (t.holiday != super::holiday::on() || super::holiday_start::pickup_due(landed, file_now, t.file)))
+        {
             change = Some(Change::Play(jukebox::MENU));
         }
         b.apply(change, &self.settings, self.log);
@@ -1169,7 +1182,7 @@ impl Backend {
         let now = crate::ui::clock::now();
         // A looping track that came to its end starts again where its fade is.
         if let (Change::Play(track), Some(t)) = (change, self.music.as_mut()) {
-            if t.track == track && t.holiday == super::holiday::on() {
+            if t.same_source(track) {
                 stop_sound(&t.sound);
                 play_sound(&t.sound, PlaySoundParams { looped: false, volume: t.volume });
                 t.start = now;
@@ -1189,8 +1202,8 @@ impl Backend {
                 }
             }
             // A track still fading out comes back from the level it has reached.
-            Change::Play(track) if self.fading.iter().any(|t| t.track == track && t.holiday == super::holiday::on()) => {
-                let k = self.fading.iter().position(|t| t.track == track && t.holiday == super::holiday::on()).unwrap_or_default();
+            Change::Play(track) if self.fading.iter().any(|t| t.same_source(track)) => {
+                let k = self.fading.iter().position(|t| t.same_source(track)).unwrap_or_default();
                 let mut t = self.fading.remove(k);
                 t.fade = t.fade.toward(1.0, secs);
                 self.jukebox.started(track, t.start, t.secs);
@@ -1205,6 +1218,7 @@ impl Backend {
                 // Razdor's own: a read that fails for now is retried after a wait (`transient`),
                 // a file that cannot be played stays failed for the run.
                 let holiday = super::holiday::on();
+                let from_file = holiday_menu_file(track).is_some();
                 let loaded: Result<(Sound, f64), (String, bool)> = match self.read_track(track, &file) {
                     Ok(pcm) => {
                         let len = pcm.duration();
@@ -1219,7 +1233,7 @@ impl Backend {
                         let volume = fade.level() * gain;
                         play_sound(&sound, PlaySoundParams { looped: false, volume });
                         self.played = true;
-                        self.music = Some(Track { track, sound, fade, start: now, secs: len, volume, holiday });
+                        self.music = Some(Track { track, sound, fade, start: now, secs: len, volume, holiday, file: from_file });
                         self.jukebox.started(track, now, len);
                         if log {
                             razdor::diag!("audio: music {track} ({file}, {len:.1} s, decoded in {} ms) at {gain:.1}, fading in over {secs:.1} s", t0.elapsed().as_millis());

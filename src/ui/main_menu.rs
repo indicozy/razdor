@@ -346,13 +346,78 @@ fn link(label: &str, x: f32, y: f32, right: bool, size: f32) -> bool {
 
 /// The menu's ruins and logo without the buttons (behind the load and new-game windows).
 pub fn backdrop() {
+    backdrop_with(false);
+}
+
+/// The main menu's backdrop: as [`backdrop`], and with the holiday look on, the snow over the ruins
+/// and under the logo, the buttons and the windows.
+fn menu_backdrop() {
+    backdrop_with(true);
+}
+
+fn backdrop_with(menu: bool) {
     // The ruins, the logo and the foot are the interface's own: a title window's scale (set by
     // the window's frame, `window_layout::title_scale`) does not reach them.
     let _scale = super::display::enter_window_scale(None);
     // Timed for the other screens too (`ui::hub_view`, `new_game`, `saves`, ...): their stage lines name them.
     frame_probe::time(frame_probe::Stage::MenuBackground, background);
+    if menu && super::holiday::on() {
+        // The snow is the map's snow pass (`weather::draw_menu_snow`): its cost is the menu's frame time.
+        let t = super::clock::now();
+        let cheap = super::holiday::cheap();
+        frame_probe::time(frame_probe::Stage::MenuBackground, || super::weather::draw_menu_snow(screen_width(), screen_height(), cheap, t));
+    }
     frame_probe::time(frame_probe::Stage::MenuLogo, logo);
     frame_probe::time(frame_probe::Stage::MenuWidgets, foot_lines);
+}
+
+/// The dots of the loader's spinning mark.
+const SPIN_DOTS: usize = 8;
+
+/// The loader's dot `i` of `n` at time `t` (seconds): the head turns about one dot in six a second,
+/// and each dot behind it is fainter (0.2 to 1, pure).
+pub fn spinner_alpha(i: usize, n: usize, t: f64) -> f32 {
+    let n = n.max(1);
+    let head = (t * 6.0).rem_euclid(n as f64) as f32;
+    let behind = (i as f32 - head).rem_euclid(n as f32);
+    1.0 - 0.8 * behind / n as f32
+}
+
+/// The loader in the bottom-left, a spinning mark and a short text, while a background job runs
+/// (`holiday_start::loader_label`). It sits just above the bottom-left links (or the version line held
+/// upright), so it covers nothing the menu has there. `phone`: the phone's dp; the text is 13 dp there.
+fn loader(k: f32, phone: Option<f32>) {
+    let Some(label) = super::holiday_start::loader_label() else { return };
+    let t = super::clock::now();
+    let ink = Color::new(0.92, 0.92, 0.92, 1.0);
+    // The bottom-left links' top, and the text's height above it.
+    let link = 18.0 * k * super::display::button_grow();
+    let links_top = screen_height() - 22.0 * k - sideways_foot_extra(k) - link * 1.3;
+    let (size, x, y) = match phone {
+        Some(dp) => {
+            let size = VERSION_PHONE_DP * dp;
+            let safe = super::display::safe_area();
+            match upright_menu() {
+                // Held upright, the bottom-left holds the promo's picture and its caption: the loader
+                // goes to the top-left, under the safe inset, where the menu has nothing.
+                Some(_) => (size, safe.left + 16.0 * k, safe.top + 16.0 * k + size),
+                None => {
+                    let y = links_top - 0.6 * size;
+                    (size, foot_x0(k, y, size, screen_height(), &safe), y)
+                }
+            }
+        }
+        None => (14.0 * k, 16.0 * k, links_top - 8.0 * k),
+    };
+    let r = size * 0.42;
+    let (cx, cy) = (x + r, y - size * 0.35);
+    for i in 0..SPIN_DOTS {
+        let a = i as f32 / SPIN_DOTS as f32 * std::f32::consts::TAU;
+        let alpha = spinner_alpha(i, SPIN_DOTS, t);
+        draw_circle(cx + r * a.cos(), cy + r * a.sin(), size * 0.1, Color::new(ink.r, ink.g, ink.b, alpha));
+    }
+    let text = tr(label);
+    super::dt_font::legacy_metrics_if(phone.is_some(), || chrome::shadow_text(text, x + 2.0 * r + size * 0.6, y, size, ink));
 }
 
 /// The menu's foot (4c7774): the version line (`[SpecialTexts] VerInfo`), small and white, on the
@@ -653,7 +718,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
     let sideways = screen_width() > screen_height() && super::display::dp_px().is_some();
     SIDE_TILES.with(|t| t.set(sideways && !no_install));
     let mod_choice = (!mods.is_empty()).then(|| super::new_game::mod_choice(mods, active, busy));
-    backdrop();
+    menu_backdrop();
     let mut pick = None;
     // The holiday windows (the season's welcome, the letter) are modals over the menu: no button under them.
     let asking = super::holiday_windows::up();
@@ -698,6 +763,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
             chrome::shadow_text(&version, screen_width() - 16.0 * k - vw, version_y, vsize, vcolour);
         });
     });
+    frame_probe::time(frame_probe::Stage::MenuWidgets, || loader(k, phone));
     frame_probe::time(frame_probe::Stage::AdCapsule, || thorny_promo(k, version_y - vsize - 6.0 * k));
     // An update put in place says so (an "Always" update has no window of its own).
     frame_probe::time(frame_probe::Stage::MenuWidgets, super::update_view::title_line);
@@ -4431,5 +4497,19 @@ mod tests {
         // Nothing past the hub, nothing negative.
         assert_eq!(mod_menu_pick(4, 3), None);
         assert_eq!(mod_menu_pick(-1, 3), None);
+    }
+
+    #[test]
+    fn the_loader_head_is_brightest_and_the_dots_behind_fade_to_a_fifth() {
+        let n = 8;
+        for k in 0..20 {
+            let t = k as f64 / 6.0;
+            let alphas: Vec<f32> = (0..n).map(|i| spinner_alpha(i, n, t)).collect();
+            let head = alphas.iter().cloned().fold(f32::MIN, f32::max);
+            assert!((head - 1.0).abs() < 1e-5, "the head is full at t={t}");
+            assert!(alphas.iter().all(|a| (0.2 - 1e-5..=1.0 + 1e-5).contains(a)), "every dot is 0.2 to 1 at t={t}");
+        }
+        assert!((spinner_alpha(0, n, 0.0) - 1.0).abs() < 1e-6, "at t=0 dot 0 is the head");
+        assert!((spinner_alpha(n - 1, n, 0.0) - (1.0 - 0.8 * 7.0 / 8.0)).abs() < 1e-6, "the dot just behind the head is the faintest");
     }
 }
