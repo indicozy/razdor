@@ -116,7 +116,8 @@ Storage and retention limits (the TOML `[limits]` table; the defaults are these)
   Pings and reads go on. The count is kept in memory, scanned from the data folder at start; the dashboard's
   Storage block shows it, and the log says once a minute while the budget refuses uploads.
 - `crash_per_day = 10` and `perf_per_day = 48` per install and UTC day (429, no ban).
-- `saves_per_account = 160` (a save past it is a 409; nothing is deleted).
+- `saves_per_device = 100` (a save past it is refused with the full-cloud 413; nothing is deleted; the
+  client's `cloud_saves_per_device` must not exceed it) and `saves_per_account = 400` (a safety net, 413 too).
 - `account_expiry_days = 90`: an account not used for that long (a keyed request marks it used, at most once an
   hour) is deleted by the daily retention job, with its saves. `0` keeps every account.
 

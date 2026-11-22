@@ -35,7 +35,10 @@ pub struct Limits {
     pub invalid_percent: u32,
     /// Bad requests in a row that ban an install.
     pub bad_in_a_row: u32,
-    /// Saves an account may keep (all maps and kinds); a save past it is a 409, nothing is deleted.
+    /// Cloud saves a device may keep (its mirror's cap; the client's `cloud_saves_per_device` must not
+    /// exceed it). A save past it is refused with the full-cloud message; nothing is deleted.
+    pub saves_per_device: u32,
+    /// Cloud saves an account may keep (a safety net: four devices' worth). Refused past it, as above.
     pub saves_per_account: u32,
     /// Crash reports per install per UTC day; past it a 429 (no ban).
     pub crash_per_day: u32,
@@ -66,7 +69,8 @@ impl Default for Limits {
             battles_per_hour: limits::BATTLES_PER_HOUR,
             invalid_percent: limits::INVALID_PERCENT,
             bad_in_a_row: limits::BAD_REQUESTS_IN_A_ROW,
-            saves_per_account: 160,
+            saves_per_device: limits::SAVES_PER_DEVICE as u32,
+            saves_per_account: limits::SAVES_PER_ACCOUNT as u32,
             crash_per_day: 10,
             perf_per_day: 48,
             max_data_bytes: 20 << 30,

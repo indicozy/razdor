@@ -78,23 +78,15 @@ impl Validate for LinkRedeemed {
     }
 }
 
-/// The three kinds of cloud save. Limits per map: [`per_map_limit`].
+/// The three kinds of cloud save. The kind is metadata (the load list's and the sync's order), not a
+/// limit: the cap is per device, see [`limits::SAVES_PER_DEVICE`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SaveKind {
     Manual,
     Quick,
-    /// The «Продолжить» slot: one per map.
+    /// The device's «Продолжить» slot.
     Session,
-}
-
-/// How many saves of `kind` one account keeps per map.
-pub fn per_map_limit(kind: SaveKind) -> usize {
-    match kind {
-        SaveKind::Manual => limits::MANUAL_SAVES_PER_MAP,
-        SaveKind::Quick => limits::QUICK_SAVES_PER_MAP,
-        SaveKind::Session => limits::SESSION_SAVES_PER_MAP,
-    }
 }
 
 /// A save's metadata: the header of a put, and what a list shows. Its key is the game or mod, its
@@ -105,6 +97,9 @@ pub struct SaveMeta {
     pub game: String,
     pub map: String,
     pub kind: SaveKind,
+    /// The device's random id (32 lowercase hex, kept on the device). A device uploads and deletes
+    /// only its own rows. Empty on rows from before device ids (never sent by a current client).
+    pub device_id: String,
     /// The device's name as the player gave it (or the OS's): «ПК», «телефон».
     pub device: String,
     /// The save's display name (the player's own text; empty for a session slot).
@@ -114,7 +109,11 @@ pub struct SaveMeta {
     pub razdor: String,
     /// The file's length in bytes, after zstd on the client; must equal the body's.
     pub size: u64,
+    /// The hash of the packed bytes (the server checks the body against it).
     pub sha256: String,
+    /// The hash of the raw save content (before zstd): the save's identity on every device, so a
+    /// device knows whether it already holds the save. Empty on rows from before device ids.
+    pub raw_sha256: String,
     pub pinned: bool,
 }
 
@@ -123,12 +122,19 @@ impl Validate for SaveMeta {
         check::schema(self.schema)?;
         check::key("game", &self.game, limits::MAX_KEY)?;
         check::key("map", &self.map, limits::MAX_KEY)?;
+        if !self.device_id.is_empty() {
+            check::hex("device_id", &self.device_id, 32, 32)?;
+        }
         check::text("device", &self.device, limits::MAX_TEXT)?;
         check::opt_text("name", &self.name, limits::MAX_SAVE_NAME)?;
         check::number("saved_at", self.saved_at, 4_102_444_800)?;
         check::text("razdor", &self.razdor, limits::MAX_VERSION)?;
         check::number("size", self.size, limits::MAX_SAVE_BODY as u64)?;
-        check::sha256("sha256", &self.sha256)
+        check::sha256("sha256", &self.sha256)?;
+        if !self.raw_sha256.is_empty() {
+            check::sha256("raw_sha256", &self.raw_sha256)?;
+        }
+        Ok(())
     }
 }
 
@@ -146,7 +152,8 @@ impl Validate for SaveEntry {
     }
 }
 
-/// The answer to `GET SAVES`: every save of the account, and the quota's use.
+/// The answer to `GET SAVES`: every save of the account (metadata only; a save is downloaded by its
+/// id), and the quota's use.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveList {
     pub saves: Vec<SaveEntry>,
@@ -161,8 +168,9 @@ impl Validate for SaveList {
     }
 }
 
-/// The answer to a put: the save's id. A put over the per-map limit or the quota is refused by the
-/// server with the cloud's error, never by deleting another save.
+/// The answer to a put: the save's id. A put over the device's cap or the quota is refused by the
+/// server with the cloud's error, never by deleting another save (the client deletes its own stale
+/// rows first, see `DELETE /v1/saves/{id}`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavePut {
     pub id: String,

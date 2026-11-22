@@ -83,10 +83,10 @@ pub const IP_BAN_MAX_SECS: u64 = 24 * 3600;
 pub const CLIENT_QUEUE_BYTES: u64 = 5 * 1024 * 1024;
 /// The cloud quota per account, counted after zstd compression on the client.
 pub const CLOUD_BYTES_PER_ACCOUNT: u64 = 20 * 1024 * 1024;
-/// Cloud saves per map and kind (the 3 + 3 + 1 of the cloud spec).
-pub const MANUAL_SAVES_PER_MAP: usize = 3;
-pub const QUICK_SAVES_PER_MAP: usize = 3;
-pub const SESSION_SAVES_PER_MAP: usize = 1;
+/// Cloud saves a device keeps (its mirror's cap; the remote config's `cloud_saves_per_device` default,
+/// and the most a device may ask for). The account keeps four devices' worth, as a safety net.
+pub const SAVES_PER_DEVICE: usize = 100;
+pub const SAVES_PER_ACCOUNT: usize = 4 * SAVES_PER_DEVICE;
 
 // Body sizes, per endpoint.
 

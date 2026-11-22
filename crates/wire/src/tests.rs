@@ -56,12 +56,14 @@ fn meta() -> SaveMeta {
         game: "dt".into(),
         map: "Пепельная Марка".into(),
         kind: SaveKind::Manual,
+        device_id: "0123456789abcdef0123456789abcdef".into(),
         device: "ПК".into(),
         name: "перед боем".into(),
         saved_at: 1_700_000_000,
         razdor: "1.5.4".into(),
         size: 1000,
         sha256: SHA.into(),
+        raw_sha256: SHA.into(),
         pinned: true,
     }
 }
@@ -367,9 +369,18 @@ fn save_rules() {
     let mut m = meta();
     m.name = "x".repeat(limits::MAX_SAVE_NAME + 1);
     refused(&m, "name");
-    assert_eq!(crate::cloud::per_map_limit(SaveKind::Manual), 3);
-    assert_eq!(crate::cloud::per_map_limit(SaveKind::Quick), 3);
-    assert_eq!(crate::cloud::per_map_limit(SaveKind::Session), 1);
+    let mut m = meta();
+    m.raw_sha256 = "short".into();
+    refused(&m, "raw_sha256");
+    let mut m = meta();
+    m.device_id = "not-hex".into();
+    refused(&m, "device_id");
+    // An old row (no device id, no raw hash) is listable; a current upload needs both (the server).
+    let mut m = meta();
+    m.device_id.clear();
+    m.raw_sha256.clear();
+    assert!(m.validate().is_ok(), "rows from before device ids stay listable");
+    assert_eq!(limits::SAVES_PER_ACCOUNT, 4 * limits::SAVES_PER_DEVICE);
 }
 
 #[test]

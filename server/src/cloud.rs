@@ -1,6 +1,6 @@
 //! The cloud endpoints (`2026-11-22-cloud-saves-design.md`): the account (a random key, no login),
-//! linking a second device with a code, the saves (per-map limits and the 20 MB quota, refusals
-//! never delete), the completed-game marks (merged: the best level per map wins), the synced
+//! linking a second device with a code, the saves (a cap per device, the 20 MB quota; refusals
+//! never delete; a device deletes its own stale rows), the completed-game marks (merged: the best level per map wins), the synced
 //! settings (the newest change per key wins), the installed Hub items and the bench reports.
 //! Keyed requests carry the account key in `x-razdor-key`; the server keeps only its SHA-256.
 
@@ -10,7 +10,7 @@ use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use razdor_wire::cloud::{
-    per_map_limit, AccountCreated, AccountNew, BenchReport, HubList, LinkIssued, LinkRedeem, LinkRedeemed,
+    AccountCreated, AccountNew, BenchReport, HubList, LinkIssued, LinkRedeem, LinkRedeemed,
     MarkLevel, Marks, SaveEntry, SaveKind, SaveList, SaveMeta, SavePut, SyncedSettings,
 };
 use razdor_wire::ids::{AccountKey, LinkCode};
@@ -27,7 +27,7 @@ use crate::files::{self, SAVES};
 use crate::http::{json, ApiError, Peer};
 use crate::state::{sha256_hex, AppState};
 
-/// The saves a device may list per account: the list is the whole account (no paging needed).
+/// The most saves one list returns: the account is at most `saves_per_account` rows, so no paging is needed.
 const BENCH_KEPT: i64 = 50;
 
 /// A cloud request is never answered with the silent 200 that a banned analytics sender gets: the
@@ -134,7 +134,7 @@ fn kind_from(s: &str) -> rusqlite::Result<SaveKind> {
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e)))
 }
 
-const SAVE_COLUMNS: &str = "id, game, map, kind, device, name, saved_at, razdor, size, sha256, pinned";
+const SAVE_COLUMNS: &str = "id, game, map, kind, device, name, saved_at, razdor, size, sha256, pinned, device_id, raw_sha256";
 
 /// A stored save's id and metadata, read in the order of [`SAVE_COLUMNS`].
 fn meta_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<(String, SaveMeta)> {
@@ -151,6 +151,8 @@ fn meta_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<(String, SaveMeta)> {
         size: r.get::<_, i64>(8)? as u64,
         sha256: r.get(9)?,
         pinned: r.get::<_, i64>(10)? != 0,
+        device_id: r.get(11)?,
+        raw_sha256: r.get(12)?,
     };
     Ok((r.get(0)?, meta))
 }
@@ -357,8 +359,8 @@ pub async fn list_saves(
     Ok(json(&SaveList { saves, used_bytes: used, quota_bytes: limits::CLOUD_BYTES_PER_ACCOUNT }))
 }
 
-/// `PUT /v1/saves`: a save (framed: its metadata, then the file). Refused over the map's limit or the
-/// quota; nothing is deleted to make room.
+/// `PUT /v1/saves`: a save (framed: its metadata, then the file). Refused over the device's cap, the
+/// account's cap or the quota; nothing is deleted to make room (the client deletes its own stale rows).
 pub async fn put_save(
     State(st): State<AppState>,
     peer: Peer,
@@ -380,10 +382,13 @@ pub async fn put_save(
     if meta.size == 0 {
         return Err(ApiError::BadRequest("an empty save is refused".into()));
     }
+    if meta.device_id.is_empty() || meta.raw_sha256.is_empty() {
+        return Err(ApiError::BadRequest("a save needs its device id and its raw hash".into()));
+    }
     let save_id = files::new_id()?;
     let bytes = bytes.to_vec();
-    let rows_cap = st.cfg.limits.saves_per_account as i64;
-    let limit = per_map_limit(meta.kind) as i64;
+    let device_cap = st.cfg.limits.saves_per_device as i64;
+    let account_cap = st.cfg.limits.saves_per_account as i64;
     let kind = kind_name(meta.kind);
     let quota = limits::CLOUD_BYTES_PER_ACCOUNT as i64;
     let size = meta.size as i64;
@@ -395,19 +400,15 @@ pub async fn put_save(
         .cloud
         .call(move |c| {
             let tx = c.transaction()?;
-            let on_map: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM saves WHERE account_id = ?1 AND game = ?2 AND map = ?3 AND kind = ?4",
-                params![account, meta.game, meta.map, kind],
+            // The device's cap and the account's (a safety net): the same refusal as a full cloud, so
+            // the client shows it alike. The client deletes its own stale rows before it uploads.
+            let on_device: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM saves WHERE account_id = ?1 AND device_id = ?2",
+                params![account, meta.device_id],
                 |r| r.get(0),
             )?;
-            if on_map >= limit {
-                return Err(ApiError::Conflict(format!(
-                    "На этой карте уже максимум сохранений этого вида ({limit}). Удалите старое."
-                )));
-            }
-            // The account's row cap: the same refusal as a full cloud, so the client shows it alike.
             let rows: i64 = tx.query_row("SELECT COUNT(*) FROM saves WHERE account_id = ?1", params![account], |r| r.get(0))?;
-            if rows >= rows_cap {
+            if on_device >= device_cap || rows >= account_cap {
                 return Err(ApiError::TooLarge("Облако заполнено, удалите старые сохранения".into()));
             }
             let used: i64 = tx.query_row(
@@ -422,7 +423,8 @@ pub async fn put_save(
             budget::write(&counted.budget, &path, &bytes).map_err(|e| ApiError::Internal(format!("save file: {e}")))?;
             let inserted = tx.execute(
                 "INSERT INTO saves (id, account_id, game, map, kind, device, name, saved_at, razdor, size, sha256,
-                 pinned, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                 pinned, created_at, device_id, raw_sha256) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                 ?13, ?14, ?15)",
                 params![
                     row_id,
                     account,
@@ -436,7 +438,9 @@ pub async fn put_save(
                     size,
                     meta.sha256,
                     meta.pinned,
-                    now
+                    now,
+                    meta.device_id,
+                    meta.raw_sha256
                 ],
             );
             if let Err(e) = inserted.and_then(|_| tx.commit()) {

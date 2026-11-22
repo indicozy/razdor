@@ -174,7 +174,9 @@ CREATE TABLE IF NOT EXISTS saves (
     size INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
     pinned INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    device_id TEXT NOT NULL DEFAULT '',
+    raw_sha256 TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS saves_account ON saves(account_id, game, map, kind);
 CREATE TABLE IF NOT EXISTS marks (
@@ -208,5 +210,16 @@ pub fn migrate_cloud(c: &rusqlite::Connection, now: i64) -> rusqlite::Result<()>
         c.execute_batch("ALTER TABLE accounts ADD COLUMN last_active INTEGER NOT NULL DEFAULT 0;")?;
     }
     c.execute("UPDATE accounts SET last_active = ?1 WHERE last_active = 0", rusqlite::params![now])?;
+    // The saves of a device are counted per device (the cap). A file from before device ids gets the
+    // two columns with empty defaults: those rows belong to no device, so no client deletes them.
+    for (column, def) in [("device_id", "''"), ("raw_sha256", "''")] {
+        let has: bool = c
+            .prepare("SELECT 1 FROM pragma_table_info('saves') WHERE name = ?1")?
+            .exists([column])?;
+        if !has {
+            c.execute_batch(&format!("ALTER TABLE saves ADD COLUMN {column} TEXT NOT NULL DEFAULT {def};"))?;
+        }
+    }
+    c.execute_batch("CREATE INDEX IF NOT EXISTS saves_device ON saves(account_id, device_id);")?;
     Ok(())
 }

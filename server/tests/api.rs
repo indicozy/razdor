@@ -132,10 +132,19 @@ fn key_header(key: &str) -> Vec<(&'static str, String)> {
     vec![("x-razdor-key", key.to_string())]
 }
 
+const DEVICE_A: &str = "0123456789abcdef0123456789abcdef";
+const DEVICE_B: &str = "fedcba9876543210fedcba9876543210";
+
 fn save_frame(game: &str, map: &str, kind: &str, bytes: &[u8]) -> Vec<u8> {
+    save_frame_from(DEVICE_A, game, map, kind, bytes)
+}
+
+/// A framed save uploaded by `device` (its id, empty for none); the raw hash is the content's.
+fn save_frame_from(device: &str, game: &str, map: &str, kind: &str, bytes: &[u8]) -> Vec<u8> {
     let meta = json!({
-        "schema": 1, "game": game, "map": map, "kind": kind, "device": "PC", "name": "slot",
-        "saved_at": NOW, "razdor": "1.5.4", "size": bytes.len(), "sha256": sha256_hex(&[bytes]), "pinned": false
+        "schema": 1, "game": game, "map": map, "kind": kind, "device_id": device, "device": "PC", "name": "slot",
+        "saved_at": NOW, "razdor": "1.5.4", "size": bytes.len(), "sha256": sha256_hex(&[bytes]),
+        "raw_sha256": sha256_hex(&[bytes]), "pinned": false
     });
     frame::encode(&meta, bytes).expect("frames")
 }
@@ -565,19 +574,41 @@ async fn an_account_saves_lists_fetches_and_deletes() {
 }
 
 #[tokio::test]
-async fn a_map_takes_three_manual_saves_and_a_fourth_is_refused() {
-    let h = harness("per-map", Limits::default());
+async fn a_device_keeps_its_cap_and_another_device_has_its_own() {
+    let limits = Limits { saves_per_device: 2, ..Limits::default() };
+    let h = harness("per-device", limits);
     let key = account(&h).await;
     let app = router(h.st.clone());
-    for _ in 0..3 {
-        let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map02.dtm", "manual", b"s")).await;
+    for map in ["map02.dtm", "map03.dtm"] {
+        let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", map, "manual", b"s")).await;
         assert_eq!(r.status, StatusCode::OK);
     }
-    let fourth = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map02.dtm", "manual", b"s")).await;
-    assert_eq!(fourth.status, StatusCode::CONFLICT);
-    // Another kind on the same map has its own room.
-    let quick = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map02.dtm", "quick", b"s")).await;
-    assert_eq!(quick.status, StatusCode::OK);
+    // No per-map window any more: the device's cap refuses the third save, whatever its map or kind.
+    let third = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", "map02.dtm", "quick", b"s")).await;
+    assert_eq!(third.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(third.json()["error"].as_str().unwrap_or("").contains("Облако заполнено"));
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 2, "nothing was deleted");
+    // The other device has its own room.
+    let other = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_B, "dt", "map02.dtm", "manual", b"s")).await;
+    assert_eq!(other.status, StatusCode::OK);
+    // A save with no device id is a 400: its row must say whose it is.
+    let no_device = save_frame_from("", "dt", "map04.dtm", "manual", b"t");
+    assert_eq!(call(&app, "PUT", "/v1/saves", &key_header(&key), no_device).await.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn the_list_shows_every_device_with_its_device_id_and_raw_hash() {
+    let h = harness("list-devices", Limits::default());
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", "a.dtm", "manual", b"one")).await;
+    call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_B, "dt", "a.dtm", "manual", b"two")).await;
+    let list = call(&app, "GET", "/v1/saves", &key_header(&key), vec![]).await.json();
+    let saves = list["saves"].as_array().expect("saves");
+    assert_eq!(saves.len(), 2);
+    assert!(saves.iter().any(|s| s["meta"]["device_id"] == json!(DEVICE_A)));
+    assert!(saves.iter().any(|s| s["meta"]["device_id"] == json!(DEVICE_B)));
+    assert!(saves.iter().all(|s| s["meta"]["raw_sha256"].as_str().is_some_and(|h| h.len() == 64)));
 }
 
 #[tokio::test]
@@ -898,6 +929,32 @@ async fn an_old_cloud_database_counts_its_accounts_as_used_at_the_upgrade() {
         .await
         .expect("reads");
     assert_eq!(last, NOW);
+}
+
+#[tokio::test]
+async fn an_old_saves_table_gets_the_device_columns_with_empty_defaults() {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("old-saves-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("dir");
+    let _dir = Dir(dir.clone());
+    {
+        let c = rusqlite::Connection::open(dir.join("cloud.sqlite")).expect("opens");
+        c.execute_batch(
+            "CREATE TABLE saves (id TEXT PRIMARY KEY, account_id TEXT NOT NULL, game TEXT NOT NULL, map TEXT NOT NULL,
+             kind TEXT NOT NULL, device TEXT NOT NULL, name TEXT NOT NULL, saved_at INTEGER NOT NULL, razdor TEXT NOT NULL,
+             size INTEGER NOT NULL, sha256 TEXT NOT NULL, pinned INTEGER NOT NULL, created_at INTEGER NOT NULL);
+             INSERT INTO saves VALUES ('old-row', 'acc', 'dt', 'a.dtm', 'manual', 'PC', 'slot', 5, '1.5.4', 3, 'aa', 0, 5);",
+        )
+        .expect("the old saves table");
+    }
+    let cfg = Config { data_dir: dir.clone(), ..Config::default() };
+    let st = AppState::open(cfg, Clock::fixed(NOW)).expect("opens over the old file");
+    let (device, raw): (String, String) = st
+        .cloud
+        .call(|c| Ok(c.query_row("SELECT device_id, raw_sha256 FROM saves WHERE id = 'old-row'", [], |r| Ok((r.get(0)?, r.get(1)?)))?))
+        .await
+        .expect("reads");
+    assert_eq!((device.as_str(), raw.as_str()), ("", ""), "an old row belongs to no device");
 }
 
 /// A harness whose disk's free bytes are read from `free` (the service's statvfs is replaced).
