@@ -25,9 +25,9 @@ static LANDED: AtomicBool = AtomicBool::new(false);
 /// The keys are English; `tr` gives the language's text.
 pub fn loading_label(season_start: bool, files: bool, catalog: bool) -> Option<&'static str> {
     if season_start || files {
-        Some("New Year's files…")
+        Some(razdor::i18n::n_("New Year's files…"))
     } else if catalog {
-        Some("Loading…")
+        Some(razdor::i18n::n_("Loading…"))
     } else {
         None
     }

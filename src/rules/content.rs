@@ -236,23 +236,23 @@ pub struct Switch {
 /// Every experimental switch, in the rules window's order: the fixes, then the cheats. The order
 /// inside a group is the order a run's mark names its reason by.
 pub const SWITCHES: [Switch; 17] = [
-    Switch { key: "fast_ai", name: "Faster AI", group: Group::Fixes, inherited_bit: 0, get: |r| r.fast_ai, set: |r, v| r.fast_ai = v },
-    Switch { key: "bless_once", name: "Bless once a turn", group: Group::Fixes, inherited_bit: BLESS_ONCE, get: |r| r.bless_once, set: |r, v| r.bless_once = v },
-    Switch { key: "undead_poison_immune", name: "Poison spares the Undead", group: Group::Fixes, inherited_bit: UNDEAD_POISON_IMMUNE, get: |r| r.undead_poison_immune, set: |r, v| r.undead_poison_immune = v },
-    Switch { key: "unlimited_spells", name: "No spell book limit", group: Group::Fixes, inherited_bit: UNLIMITED_SPELLS, get: |r| r.unlimited_spells, set: |r, v| r.unlimited_spells = v },
-    Switch { key: "merchant_item", name: "Merchant discount from an item", group: Group::Fixes, inherited_bit: MERCHANT_ITEM, get: |r| r.merchant_item, set: |r, v| r.merchant_item = v },
-    Switch { key: "rear_service_flat", name: "Rear Service always −30%", group: Group::Fixes, inherited_bit: REAR_SERVICE_FLAT, get: |r| r.rear_service_flat, set: |r, v| r.rear_service_flat = v },
-    Switch { key: "building_store", name: "Store in your own buildings", group: Group::Fixes, inherited_bit: BUILDING_STORE, get: |r| r.building_store, set: |r, v| r.building_store = v },
-    Switch { key: "death_curse_counter", name: "Death curse on counter blows", group: Group::Fixes, inherited_bit: 0, get: |r| r.death_curse_counter, set: |r, v| r.death_curse_counter = v },
-    Switch { key: "no_corpse_garrison", name: "No corpses in garrisons", group: Group::Fixes, inherited_bit: 0, get: |r| r.no_corpse_garrison, set: |r, v| r.no_corpse_garrison = v },
-    Switch { key: "strict_initiative", name: "Strict initiative order", group: Group::Fixes, inherited_bit: 0, get: |r| r.strict_initiative, set: |r, v| r.strict_initiative = v },
-    Switch { key: "simultaneous_bonuses", name: "All special bonuses simultaneously", group: Group::Cheats, inherited_bit: 0, get: |r| r.simultaneous_bonuses, set: |r, v| r.simultaneous_bonuses = v },
-    Switch { key: "unlimited_items", name: "No item limits", group: Group::Cheats, inherited_bit: 0, get: |r| r.unlimited_items, set: |r, v| r.unlimited_items = v },
-    Switch { key: "two_potions", name: "At most two potions per character", group: Group::Cheats, inherited_bit: 0, get: |r| r.two_potions, set: |r, v| r.two_potions = v },
-    Switch { key: "six_cells", name: "Six equipment cells", group: Group::Cheats, inherited_bit: 0, get: |r| r.six_cells, set: |r, v| r.six_cells = v },
-    Switch { key: "free_units", name: "Free units", group: Group::Cheats, inherited_bit: 0, get: |r| r.free_units, set: |r, v| r.free_units = v },
-    Switch { key: "auto_promotion", name: "Automatic promotion", group: Group::Cheats, inherited_bit: 0, get: |r| r.auto_promotion, set: |r, v| r.auto_promotion = v },
-    Switch { key: "undying_units", name: "Units don't die", group: Group::Cheats, inherited_bit: 0, get: |r| r.undying_units, set: |r, v| r.undying_units = v },
+    Switch { key: "fast_ai", name: crate::i18n::n_("Faster AI"), group: Group::Fixes, inherited_bit: 0, get: |r| r.fast_ai, set: |r, v| r.fast_ai = v },
+    Switch { key: "bless_once", name: crate::i18n::n_("Bless once a turn"), group: Group::Fixes, inherited_bit: BLESS_ONCE, get: |r| r.bless_once, set: |r, v| r.bless_once = v },
+    Switch { key: "undead_poison_immune", name: crate::i18n::n_("Poison spares the Undead"), group: Group::Fixes, inherited_bit: UNDEAD_POISON_IMMUNE, get: |r| r.undead_poison_immune, set: |r, v| r.undead_poison_immune = v },
+    Switch { key: "unlimited_spells", name: crate::i18n::n_("No spell book limit"), group: Group::Fixes, inherited_bit: UNLIMITED_SPELLS, get: |r| r.unlimited_spells, set: |r, v| r.unlimited_spells = v },
+    Switch { key: "merchant_item", name: crate::i18n::n_("Merchant discount from an item"), group: Group::Fixes, inherited_bit: MERCHANT_ITEM, get: |r| r.merchant_item, set: |r, v| r.merchant_item = v },
+    Switch { key: "rear_service_flat", name: crate::i18n::n_("Rear Service always −30%"), group: Group::Fixes, inherited_bit: REAR_SERVICE_FLAT, get: |r| r.rear_service_flat, set: |r, v| r.rear_service_flat = v },
+    Switch { key: "building_store", name: crate::i18n::n_("Store in your own buildings"), group: Group::Fixes, inherited_bit: BUILDING_STORE, get: |r| r.building_store, set: |r, v| r.building_store = v },
+    Switch { key: "death_curse_counter", name: crate::i18n::n_("Death curse on counter blows"), group: Group::Fixes, inherited_bit: 0, get: |r| r.death_curse_counter, set: |r, v| r.death_curse_counter = v },
+    Switch { key: "no_corpse_garrison", name: crate::i18n::n_("No corpses in garrisons"), group: Group::Fixes, inherited_bit: 0, get: |r| r.no_corpse_garrison, set: |r, v| r.no_corpse_garrison = v },
+    Switch { key: "strict_initiative", name: crate::i18n::n_("Strict initiative order"), group: Group::Fixes, inherited_bit: 0, get: |r| r.strict_initiative, set: |r, v| r.strict_initiative = v },
+    Switch { key: "simultaneous_bonuses", name: crate::i18n::n_("All special bonuses simultaneously"), group: Group::Cheats, inherited_bit: 0, get: |r| r.simultaneous_bonuses, set: |r, v| r.simultaneous_bonuses = v },
+    Switch { key: "unlimited_items", name: crate::i18n::n_("No item limits"), group: Group::Cheats, inherited_bit: 0, get: |r| r.unlimited_items, set: |r, v| r.unlimited_items = v },
+    Switch { key: "two_potions", name: crate::i18n::n_("At most two potions per character"), group: Group::Cheats, inherited_bit: 0, get: |r| r.two_potions, set: |r, v| r.two_potions = v },
+    Switch { key: "six_cells", name: crate::i18n::n_("Six equipment cells"), group: Group::Cheats, inherited_bit: 0, get: |r| r.six_cells, set: |r, v| r.six_cells = v },
+    Switch { key: "free_units", name: crate::i18n::n_("Free units"), group: Group::Cheats, inherited_bit: 0, get: |r| r.free_units, set: |r, v| r.free_units = v },
+    Switch { key: "auto_promotion", name: crate::i18n::n_("Automatic promotion"), group: Group::Cheats, inherited_bit: 0, get: |r| r.auto_promotion, set: |r, v| r.auto_promotion = v },
+    Switch { key: "undying_units", name: crate::i18n::n_("Units don't die"), group: Group::Cheats, inherited_bit: 0, get: |r| r.undying_units, set: |r, v| r.undying_units = v },
 ];
 
 /// The «Правила» choice of the rules window: DT (every fix off), Razdor (every fix on), or a mix
@@ -327,7 +327,7 @@ impl ExperimentalRules {
     pub fn first_on_in(&self, group: Group) -> Option<&'static str> {
         Self::switches(group)
             .find(|s| (s.get)(self) && self.inherited & s.inherited_bit == 0)
-            .map(|s| crate::i18n::n_(s.name))
+            .map(|s| s.name)
     }
 
     /// The first cheat that is on (the reason of a yellow mark), else the first fix on.

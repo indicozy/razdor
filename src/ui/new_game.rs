@@ -1745,15 +1745,15 @@ fn experimental_menu() {
     let hdr_h = 26.0 * big;
     // The two headed groups (the owner's decision, 2026-11-22): the fixes on top of DT, then the cheats.
     let groups: [(&str, Vec<&'static Switch>); 2] = [
-        ("Fixes", ExperimentalRules::switches(SwitchGroup::Fixes).collect()),
-        ("Cheats", ExperimentalRules::switches(SwitchGroup::Cheats).collect()),
+        (n_("Fixes"), ExperimentalRules::switches(SwitchGroup::Fixes).collect()),
+        (n_("Cheats"), ExperimentalRules::switches(SwitchGroup::Cheats).collect()),
     ];
     // The «Правила» choice: DT or Razdor (two buttons); its state line says what it is now.
     let preset = now.preset();
     let state_text = tr(match preset {
-        Preset::Dt => "Rules DT: no fix is on; the rules are the original's.",
-        Preset::Razdor => "Razdor's rules: every fix is on. Cheats are separate.",
-        Preset::Mixed => "Mixed: some fixes are on and some are off. Pick DT or Razdor's rules to set them all.",
+        Preset::Dt => n_("Rules DT: no fix is on; the rules are the original's."),
+        Preset::Razdor => n_("Razdor's rules: every fix is on. Cheats are separate."),
+        Preset::Mixed => n_("Mixed: some fixes are on and some are off. Pick DT or Razdor's rules to set them all."),
     });
     // An upright phone's window takes the screen less the safe area (cutouts) and 12 px each side.
     let safe = super::display::safe_area();
