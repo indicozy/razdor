@@ -8,7 +8,7 @@ sidebar:
 ## Language
 
 You can select a language in two ways:
-1. Click the "Language" button on the "Screen" tab of the settings.
+1. Click the "Language" button on the "General" tab of the settings.
 2. Use the **F2** key on any screen to quickly cycle to the next language in the list.
 
 The following are available in the list:

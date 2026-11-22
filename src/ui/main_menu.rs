@@ -2053,7 +2053,7 @@ impl Group {
         match self {
             Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
-            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::MenuFrame, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation, Row::Language],
+            Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::MenuFrame, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation],
             Group::Controls => &[Row::Keys],
             Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId, Row::CloudSaves, Row::CloudState, Row::CloudSpace, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
         }
@@ -2619,6 +2619,16 @@ fn value_text_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: 
     }
 }
 
+/// The language row (Razdor's «Язык»): the picker's button, on the General tab (`general_desktop`,
+/// `general_phone`). The list: Russian, English and the translations found in the install.
+fn language_row(c: &mut RowCol, geo: &RowGeo) {
+    let current = super::language::current_label();
+    let (clicked, lr) = labelled_row_help(c, geo, tr("Language"), &current, Row::Language.help_text());
+    if clicked || super::snapshot::open_language_list() {
+        super::language::open_list(lr, geo.k);
+    }
+}
+
 /// One row of a settings pane (the same widgets the settings window had them in).
 fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings, over_map: bool) {
     let yes_no = |on: bool| -> &'static str {
@@ -3133,14 +3143,7 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 };
             }
         }
-        Row::Language => {
-            // The language list (Razdor's): Russian, English and the translations found in the install.
-            let current = super::language::current_label();
-            let (clicked, lr) = labelled_row_help(c, geo, tr("Language"), &current, Row::Language.help_text());
-            if clicked || super::snapshot::open_language_list() {
-                super::language::open_list(lr, geo.k);
-            }
-        }
+        Row::Language => language_row(c, geo),
         Row::Keys => {
             // The keys window (Razdor's, the owner's request): every action's key, rebound by a click.
             if labelled_row(c, geo, tr("Keyboard shortcuts"), tr("Keys…")).0 {
@@ -3462,7 +3465,8 @@ fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
 }
 
 /// The General tab on the desktop: the original's two volume rows and seven checkboxes at their
-/// places in `pane` (they fit it, so it does not scroll). The speed sliders are on their tabs now.
+/// places in `pane` (they fit it, so it does not scroll), then Razdor's language picker below them.
+/// The speed sliders are on their tabs now.
 fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane: Rect, k: f32) {
     let row = |i: usize| Rect::new(pane.x + 10.0 * k, pane.y + i as f32 * 37.5 * k, pane.w - 20.0 * k, 30.0 * k);
     for i in 0..2 {
@@ -3475,20 +3479,32 @@ fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane:
     // The gap sits before the battle group: its first checkbox, «Улучшенный интеллект противника в
     // битве» (`Option9`), is the fifth of the seven (index 4).
     let cy = |i: usize| row(2).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 4 { 11.0 * k } else { 0.0 };
-    for (i, (key, label, on, ink)) in general_checks(audio, install_wide).into_iter().enumerate() {
+    let checks = general_checks(audio, install_wide);
+    let n = checks.len();
+    for (i, (key, label, on, ink)) in checks.into_iter().enumerate() {
         if option_check(cx, cy(i), &label, on, ink) {
             toggle_check(audio, key, on);
         }
     }
+    // Razdor's language picker (Row::Language, the Screen tab's before): under the checkboxes, after the
+    // same gap as the battle group, in the desktop's row height. The original's rows are not moved.
+    // Its label lines up with the checkboxes' boxes (8 px in from `cx`); the right edge stays as the sliders'.
+    let mut c = RowCol { x: cx + 8.0 * k, w: pane.w - 36.0 * k, y: cy(n) + 11.0 * k };
+    language_row(&mut c, &RowGeo::desktop(k, super::display::button_grow()));
 }
 
 /// The General tab on a phone (dp at `u`): each slider on one line (its label, then its track),
 /// 40 dp high at a 44 dp pitch; each checkbox 34 dp for one line of its label, more when it wraps.
 /// The pane scrolls, and a row only partly in the view is drawn and clicked where it shows.
 fn general_phone(audio: &mut super::audio::Settings, install_wide: bool, view: Rect, u: f32, list_k: f32) {
-    let top = pane_begin(view, 24.0 * u, list_k);
+    let first = pane_begin(view, 24.0 * u, list_k);
     let x0 = view.x + 4.0 * u;
     let cw = view.w - 28.0 * list_k - 8.0 * u;
+    // Razdor's language picker first, at the column's top (the first thing a new player looks for); the
+    // sliders and checkboxes follow it, below.
+    let mut lang = RowCol { x: x0, w: cw, y: first };
+    super::dt_font::legacy_metrics_if(true, || language_row(&mut lang, &RowGeo::phone_compact(u)));
+    let top = lang.y;
     let (slider_h, pitch) = (40.0 * u, 44.0 * u);
     let rows: Vec<(String, f32)> = (0..2).map(|i| slider_row(audio, i)).collect();
     let checks = general_checks(audio, install_wide);
@@ -3521,7 +3537,7 @@ fn general_phone(audio: &mut super::audio::Settings, install_wide: bool, view: R
             toggle_check(audio, key, *on);
         }
     }
-    pane_end(top, content_bottom);
+    pane_end(first, content_bottom);
 }
 
 /// The «?» pop-up (backlog 1508): the game's hint box (`widgets::hint_box_always`) with the text
@@ -4738,15 +4754,19 @@ mod tests {
         assert!(Row::MapView.shown(&first) && Row::SpriteSize.shown(&first));
     }
 
-    /// Every setting row is in exactly one group, and the groups are the five the owner asked for.
+    /// Every setting row is in exactly one group or on the General tab, and the groups are the five the owner asked for.
     #[test]
     fn every_setting_row_belongs_to_exactly_one_group() {
+        // The General tab's own row (not in a group): the language picker, drawn under the checkboxes.
+        let general = [Row::Language];
         for row in Row::ALL {
-            let groups = Group::ALL.iter().filter(|g| g.rows().contains(&row)).count();
+            let groups = Group::ALL.iter().filter(|g| g.rows().contains(&row)).count() + general.contains(&row) as usize;
             assert_eq!(groups, 1, "{row:?} is in {groups} groups");
         }
-        let listed: usize = Group::ALL.iter().map(|g| g.rows().len()).sum();
+        let listed: usize = Group::ALL.iter().map(|g| g.rows().len()).sum::<usize>() + general.len();
         assert_eq!(listed, Row::ALL.len());
+        // The language picker moved from the Screen tab to the General one (the owner's request, 2026-11-22).
+        assert!(!Group::Screen.rows().contains(&Row::Language));
         assert_eq!(Group::ALL.len(), 5);
         for g in Group::ALL {
             assert_eq!(Group::from_name(g.name()), Some(g));
