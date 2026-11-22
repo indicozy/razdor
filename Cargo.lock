@@ -1459,6 +1459,7 @@ dependencies = [
  "macroquad",
  "png",
  "quad-snd",
+ "razdor-wire",
  "rfd",
  "rustybuzz",
  "serde",
@@ -1470,6 +1471,14 @@ dependencies = [
  "web-time",
  "winapi",
  "zip",
+]
+
+[[package]]
+name = "razdor-wire"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

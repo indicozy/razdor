@@ -25,6 +25,7 @@ Razdor implements them.
 | A trailer shot (dev-only): the camera script, auto-answered events, the recorder and its sound | [trailer.md](trailer.md) (the format: `docs/trailer-shots.md`) |
 | The 2.5D cards: labelling the owner's ground flags, training and applying the ground classifier, the engine cut for mods | [ground-classifier.md](ground-classifier.md) |
 | A player's report | the `player-report` skill, then the flow of the area |
+| Analytics, crash reports, battle records, the cloud saves and the account (planned, not built: phase 1 is the shared types in `crates/wire`) | [docs/superpowers/plans/2026-11-22-analytics-and-cloud.md](../superpowers/plans/2026-11-22-analytics-and-cloud.md), `crates/wire/README.md` |
 
 ## Where the truth is
 

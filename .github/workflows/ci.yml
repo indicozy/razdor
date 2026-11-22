@@ -32,10 +32,10 @@ jobs:
           restore-keys: ci-${{ runner.os }}-
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --release
+        run: cargo test --release --workspace
 
       - name: Guard hook cases
         run: sh .claude/hooks/test-guard.sh

@@ -1,0 +1,12 @@
+[package]
+name = "razdor-wire"
+version = "0.1.0"
+edition = "2021"
+authors = ["@indicozy"]
+license = "GPL-3.0-only"
+publish = false
+description = "Razdor's shared API types: the game and its server (serde only, no I/O)."
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
