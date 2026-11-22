@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "entries": [
+    {
+      "id": "sample-map",
+      "kind": "map",
+      "title": {"ru": "Образец карты", "en": "Sample map"},
+      "author": "sample author",
+      "version": "1.0",
+      "files": [
+        {"path": "Sample.DTm", "name": "Sample.DTm", "lang": "ru", "size": 100,
+         "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+      ]
+    }
+  ]
+}
