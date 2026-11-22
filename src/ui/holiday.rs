@@ -145,6 +145,33 @@ pub fn off_target(christmas_played: bool, previous: Option<String>) -> Option<Op
     christmas_played.then_some(previous)
 }
 
+/// Where a switch to the Christmas mod `id` stands (pure): done when the game plays it, still owed while a
+/// mod switch runs or is queued (`busy`), and missed otherwise (the switch failed or was refused). A missed
+/// switch keeps the switch pending for the next launch or turn-on.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Awaited {
+    Done,
+    Waiting,
+    Missed,
+}
+
+pub fn awaited(id: &str, active: Option<&str>, busy: bool) -> Awaited {
+    if active == Some(id) {
+        Awaited::Done
+    } else if busy {
+        Awaited::Waiting
+    } else {
+        Awaited::Missed
+    }
+}
+
+/// The mod choice that waits behind a running switch (pure): the queued choice (`queued`, the latest one; the
+/// outer Option is "one is queued", the inner the mod, None the base game) when it differs from the game
+/// played, else None (nothing to switch).
+pub fn queued_next(queued: Option<Option<String>>, active: Option<&str>) -> Option<Option<String>> {
+    queued.filter(|next| next.as_deref() != active)
+}
+
 /// The season a date falls in, named by its year: 1 December to 31 December of `y` is `Some(y)`,
 /// 1 January to 15 January of `y` is `Some(y - 1)`, every other date is `None` (no season).
 pub fn season(y: i64, m: u32, d: u32) -> Option<i64> {
@@ -481,6 +508,23 @@ mod tests {
         assert_eq!(edge(true, false), Some(false), "turned off");
         assert_eq!(edge(true, true), None);
         assert_eq!(edge(false, false), None);
+    }
+
+    #[test]
+    fn a_switch_to_the_christmas_mod_is_done_only_when_the_game_plays_it() {
+        assert_eq!(awaited("holiday", Some("holiday"), false), Awaited::Done);
+        assert_eq!(awaited("holiday", Some("holiday"), true), Awaited::Done, "played: done whatever runs");
+        assert_eq!(awaited("holiday", Some("evolution"), true), Awaited::Waiting, "another switch runs: the switch waits");
+        assert_eq!(awaited("holiday", None, false), Awaited::Missed, "nothing runs and it is not played: missed, still pending");
+    }
+
+    #[test]
+    fn a_queued_mod_choice_runs_only_when_it_differs_from_the_game_played() {
+        assert_eq!(queued_next(None, Some("evolution")), None, "nothing queued");
+        assert_eq!(queued_next(Some(Some("holiday".into())), Some("evolution")), Some(Some("holiday".into())));
+        assert_eq!(queued_next(Some(Some("holiday".into())), Some("holiday")), None, "already played");
+        assert_eq!(queued_next(Some(None), Some("holiday")), Some(None), "the base game is a choice too");
+        assert_eq!(queued_next(Some(None), None), None, "the base game is already played");
     }
 
     #[test]

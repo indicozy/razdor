@@ -381,6 +381,9 @@ pub struct App {
     holiday_greet: bool,
     /// The last `holiday::game_generation` the App took notice of (the live reload hook).
     holiday_generation: u64,
+    /// The Christmas mod the holiday switch is switching to (`holiday_start`), until the game plays it
+    /// (`holiday_switch_check`).
+    holiday_awaiting: Option<String>,
     /// Modal windows waiting to be read (noon reports, victories), first on top.
     pub dialogs: VecDeque<Dialog>,
     pub map_view: MapView,
@@ -435,6 +438,9 @@ pub struct App {
     active_mod: Option<String>,
     /// A mod switch whose folder is built on a worker (`choose_mod`, 1441), until it is applied.
     mod_switch: Option<ModSwitch>,
+    /// A mod choice made while a switch runs (`choose_mod`): the latest one, started when that switch lands
+    /// (`poll_mod_switch`). The outer Option is "one is queued"; the inner is the mod (None: the base game).
+    mod_queued: Option<Option<String>>,
     /// A refused save waiting for its mod (1552, `lacking.rs`).
     lacking: Option<lacking::Lacking>,
     /// The refusal window's mod row for this frame (set by `poll_lacking`).
@@ -508,6 +514,7 @@ impl App {
             holiday_seen: false,
             holiday_greet: false,
             holiday_generation: 0,
+            holiday_awaiting: None,
             dialogs: VecDeque::new(),
             map_view: MapView::default(),
             pending_load: None,
@@ -535,6 +542,7 @@ impl App {
             mods: hub_mods(),
             active_mod: hub_active(),
             mod_switch: None,
+            mod_queued: None,
             map_repair: start_map_repair(),
             map_repair_done: None,
             lacking: None,
@@ -576,6 +584,7 @@ impl App {
     /// applies it when it lands (`poll_mod_switch`). Meanwhile the window says so and starts nothing.
     fn choose_mod(&mut self, id: Option<String>) {
         if self.mod_switch.is_some() {
+            self.mod_queued = Some(id);
             return;
         }
         // The mod's choice is written into the hub's folder, which is being moved (`migrate`).
@@ -614,6 +623,10 @@ impl App {
             }
         }
         self.lacking_switched();
+        // A choice made meanwhile starts now (a holiday switch that landed during this one keeps its turn).
+        if let Some(next) = holiday::queued_next(self.mod_queued.take(), self.active_mod.as_deref()) {
+            self.choose_mod(next);
+        }
     }
 
     /// Takes the hub maps' repair once it is done (each frame): the restored maps join the list, and

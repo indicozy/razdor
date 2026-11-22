@@ -172,13 +172,16 @@ impl App {
     /// switch is pending (on the turn-on, at a launch that left it pending, or with `RAZDOR_HOLIDAY=1`). The
     /// worker runs once per launch or turn-on (`holiday_tried`): a failure waits for the next one.
     pub(super) fn holiday_switch_tick(&mut self) {
-        // The live reload hook: the game played or the look changed (`holiday::game_generation`). The main
-        // menu's art, music and snow are reloaded from here (part 2); for now the change is only logged.
+        // The live reload hook: the game played or the look changed (`holiday::game_generation`). Nothing else
+        // needs doing here: a mod switch (`apply_mod`) already replaces the menu's pictures (`Assets::adopt_install`
+        // resets the chrome textures), the audio follows the install and restarts the menu's music when the look
+        // changed (`Audio::tick`), and the snow reads `holiday::on` each frame. The log shows the change.
         let generation = holiday::game_generation();
         if generation != self.holiday_generation {
             self.holiday_generation = generation;
-            razdor::diag!("holiday: the game or the look changed (generation {generation})");
+            razdor::diag!("holiday: the game or the look changed (generation {generation}, on {})", holiday::on());
         }
+        self.holiday_switch_check();
         if let Some(job) = self.holiday_job.as_ref() {
             let Some(done) = finished(job) else { return };
             self.holiday_job = None;
@@ -249,15 +252,40 @@ impl App {
         }
         let christmas_played = self.active_mod.as_deref() == Some(start.id.as_str());
         let steps = holiday::on_steps(true, christmas_played);
-        self.audio.settings.holiday_pending = false;
         if steps.switch {
+            // The switch stays pending until the game plays the mod (`holiday_switch_check`); a choice made
+            // while another switch runs waits behind it (`choose_mod`).
             self.audio.settings.holiday_previous = self.active_mod.clone();
+            self.holiday_awaiting = Some(start.id.clone());
             self.choose_mod(Some(start.id.clone()));
+        } else {
+            self.audio.settings.holiday_pending = false;
         }
         self.audio.settings.save();
         razdor::diag!("holiday: the look is on (mod {}, switched {})", start.id, steps.switch);
         if std::mem::take(&mut self.holiday_greet) {
             holiday_windows::open_greeting();
+        }
+    }
+
+    /// The switch to the Christmas mod (`holiday_awaiting`) is checked each frame: done when the game plays the
+    /// mod (the switch is no longer pending); missed when no mod switch runs or waits and it is not played (the
+    /// switch stays pending for the next launch or turn-on, as a failed download does).
+    fn holiday_switch_check(&mut self) {
+        let Some(id) = self.holiday_awaiting.clone() else { return };
+        let busy = self.mod_switch.is_some() || self.mod_queued.is_some();
+        match holiday::awaited(&id, self.active_mod.as_deref(), busy) {
+            holiday::Awaited::Waiting => {}
+            holiday::Awaited::Done => {
+                self.holiday_awaiting = None;
+                self.audio.settings.holiday_pending = false;
+                self.audio.settings.save();
+                razdor::diag!("holiday: the game plays the Christmas mod {id}; the switch is done");
+            }
+            holiday::Awaited::Missed => {
+                self.holiday_awaiting = None;
+                razdor::diag!("holiday: the game did not switch to the Christmas mod {id}; the switch stays pending");
+            }
         }
     }
 
@@ -267,6 +295,18 @@ impl App {
         self.audio.settings.holiday_pending = false;
         let previous = self.audio.settings.holiday_previous.take();
         self.audio.settings.save();
+        // A switch to the Christmas mod still owed is cancelled: a queued one is dropped, and one that runs goes
+        // back to the game remembered once it lands.
+        if let Some(id) = self.holiday_awaiting.take() {
+            if self.mod_queued.as_ref() == Some(&Some(id.clone())) {
+                self.mod_queued = None;
+            }
+            if self.mod_switch.as_ref().is_some_and(|s| s.id.as_deref() == Some(id.as_str())) {
+                self.mod_queued = Some(previous.clone());
+                razdor::diag!("holiday: the look is off while the Christmas mod loads; the game goes back to {} when it lands", previous.as_deref().unwrap_or("the base game"));
+                return;
+            }
+        }
         if let Some(target) = holiday::off_target(holiday::mod_running(), previous) {
             razdor::diag!("holiday: the look is off; the game goes back to {}", target.as_deref().unwrap_or("the base game"));
             self.choose_mod(target);
