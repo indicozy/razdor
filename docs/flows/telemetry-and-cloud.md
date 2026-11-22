@@ -154,12 +154,29 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   A run with no time in the map for 7 days is closed as Abandoned at its last time in the map (`sweep`, on the
   session start and on each flush). `fnv1a64_hex` is the map hash. `differing_settings` sends the names and
   keys only (a string goes out only in lower-case snake case).
+- `src/telemetry/battles.rs`: the battle records (pure: the time is passed in). `pack` turns one battle's
+  captured start and entries into the record (`rules::recording::file::cut_bytes`: the replay file's magic and
+  format, a header block, the battle's start block and an entries block, the stream's encoding) and the
+  `BattleUpload` header (schema, install id, game, map and its hash, rules, experiments, tags, outcome, times,
+  the record's SHA-256 and length), validated before it is returned. `submit` queues it at `paths::BATTLES` with
+  `Class::Consent` and `not_before` = the next UTC hour (`send_at`: 10:59:59 waits for 11:00:00). At most
+  `BATTLES_PER_HOUR` (60) records wait for one boundary: the next one is refused, counted in
+  `Hub::battles_dropped`, and never queued. `Hub::enqueue_frame_at` is the queueing with a `not_before`.
+- `src/rules/recording/hook.rs` `arm_battle_tap` / `take_battle_tap`: the capture for the battle records. It
+  is a copy beside the recorder (the replay session keeps its own; the hook has one recorder slot): armed only
+  for a campaign game with the consent yes (`arm_battles`, from `campaign_started` and `save_loaded`), it takes
+  the battle's start (`record_battle_start`) and every entry reported after it (`record_input`, `record_at`) and
+  nothing else. `recording()` is also true while armed, so the rules report the start and the entries; with
+  the tap off the rules do what they did before.
 - `src/ui/analytics.rs`: the UI's hooks, all no-ops without the hub. `session_start` (`main.rs`, after
   `App::new`) and `session_end` (`main.rs` `exit_now`, every exit); `frame` (`App::frame`: the screens and the
   dialogs as windows, the settings when the options close, and one poll a second: the time in the map, the
   progress, the map's end); `campaign_started` (`screens::start_game_with_rules`: the run starts at the next
   frame, when the app's settings are at hand); `save_loaded` (`App::load`); `battle_ended`
-  (`battle_view`, after each `resolve_battle`); `hint_opened` (`main_menu::help_button`, the «?» buttons).
+  (`battle_view`, after each `resolve_battle`: the play event, then `battle_record`, which takes the capture,
+  packs it with `ReplayHeader::of` and the install hash, and submits it; the battle's start second is the
+  frame the battle screen was first shown); `battle_autobattle` (`battle_view`'s `quick_battle`: the tag); the
+  reload flag (`save_loaded` while a capture is open); `hint_opened` (`main_menu::help_button`, the «?» buttons).
 - `src/ui/telemetry_view.rs`: the consent window (`«Помочь Раздору?»`, asked at the first start and once
   after an update), the crash question, and the three Settings panels (show id with copy, delete my data,
   new id). `src/ui/main_menu.rs` `Row::Telemetry*`: the four rows in the Other group.
@@ -187,10 +204,20 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   reports leave `profile` empty. The Android low-memory warnings have no callback yet (the count stays 0).
   The phone's model and the VRAM are None.
   A window's `peak_ram_mb` is the process peak so far (`VmHWM` is not reset per window).
-- Battle records (reusing `rules::recording`).
 - Native crashes (signals, the Windows access violation): no pending file is written, so they are not
   reported.
 - The phones' `razdorPost` is written but not compiled or run here.
+
+### Battle records: what is not verified
+
+The record is packed and read back in the tests (`file::read_cut`), and the
+capture is tested with synthetic starts (`hook::tap_tests`). Nothing ran a real battle through the verifier:
+whether the record replays with the real engine is the verifier's check (it needs an install). Open points:
+`mod_hash` is always none (the client keeps no hub mod hash); the reload tag is set when a save is loaded
+while a battle is open; whether the battle screen can load a save at all was not checked, so the tag may never be sent;
+the hour cap counts only the items queued for one boundary, so backlog from earlier hours that retries into
+the same hour can go past the server's 60; the consent is read when a campaign starts or a save loads, so
+a yes given during a game takes effect at the next one.
 
 ### Tests
 
@@ -204,7 +231,11 @@ cadence, the counters once a session, the older save, the settings diff, the map
 sender (2xx, refusal, throttle backoff, consent items never sent without consent, an unreachable host
 that does not block enqueueing and keeps the queue under 5 MB), the crash report (cleaned log, no
 question without a yes, the save only on «Отправить») and the sanitizer. `ui::main_menu::tests` covers
-the new rows' list.
+the new rows' list. `telemetry::battles::tests` covers the packing (deterministic, the header validates, the
+hash and length match the bytes, the record reads back), the send time (the next UTC hour), no record without
+consent, the shared boundary for one hour and the cap (60 queued, the 61st dropped and counted), and
+`ui::analytics::tests` the tags. `rules::recording::hook::tap_tests` covers the capture (after the start only,
+read-only sections skipped, the recorder untouched, a new start replacing an open capture).
 
 Off-screen: `RAZDOR_SCENE_CONSENT=1`, `RAZDOR_SCENE_CRASH=save|none`, `RAZDOR_SCENE_TELEMETRY=id|delete|newid`
 (with `RAZDOR_SNAPSHOT`), and `RAZDOR_SCENE=options:other` for the rows.
