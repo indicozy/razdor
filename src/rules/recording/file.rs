@@ -381,3 +381,46 @@ pub fn read(path: &Path) -> Result<ReplayFile, String> {
     let header = header.ok_or("a replay without its header")?;
     Ok(ReplayFile { header, segments, len: at as u64 })
 }
+
+/// A battle's cut: the magic, the format, then a header block, a battle block (the start) and an
+/// entries block (the battle's entries from its start to its end), in the replay file's own block
+/// layout. A cut has no segment, so it is not a replay file ([`read`] refuses it); it is rebuilt from
+/// its start, as a cut-out battle is. Read back by [`read_cut`].
+pub fn cut_bytes(header: &ReplayHeader, start: &BattleStart, entries: &[Entry]) -> Result<Vec<u8>, String> {
+    let mut out = MAGIC.to_vec();
+    out.extend_from_slice(&FILE_FORMAT.to_le_bytes());
+    put_block(&mut out, TAG_HEADER, &serde_json::to_vec(header).map_err(|e| e.to_string())?);
+    put_block(&mut out, TAG_BATTLE, &serde_json::to_vec(start).map_err(|e| e.to_string())?);
+    put_block(&mut out, TAG_ENTRIES, &stream::encode(entries));
+    Ok(out)
+}
+
+/// Reads a cut written by [`cut_bytes`]: its header, its battle's start and its entries.
+pub fn read_cut(bytes: &[u8]) -> Result<(ReplayHeader, BattleStart, Vec<Entry>), String> {
+    if bytes.len() < 8 || &bytes[0..4] != MAGIC {
+        return Err("not a replay file".into());
+    }
+    let format = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    if format != FILE_FORMAT {
+        return Err(format!("a replay of format {format}"));
+    }
+    let (mut header, mut start, mut entries) = (None, None, Vec::new());
+    let mut at = 8usize;
+    while at + 5 <= bytes.len() {
+        let tag = bytes[at];
+        let n = u32::from_le_bytes(bytes[at + 1..at + 5].try_into().unwrap()) as usize;
+        let from = at + 5;
+        let payload = bytes.get(from..from + n).ok_or("a block cut short")?;
+        match tag {
+            TAG_HEADER => header = Some(serde_json::from_slice(payload).map_err(|e| e.to_string())?),
+            TAG_BATTLE => start = Some(serde_json::from_slice(payload).map_err(|e| e.to_string())?),
+            TAG_ENTRIES => entries.extend(stream::decode(payload)?),
+            _ => return Err(format!("a block of tag {tag} in a cut")),
+        }
+        at = from + n;
+    }
+    if at != bytes.len() {
+        return Err("bytes after the last block".into());
+    }
+    Ok((header.ok_or("a cut without its header")?, start.ok_or("a cut without its battle")?, entries))
+}

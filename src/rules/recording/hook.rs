@@ -115,10 +115,27 @@ struct Hook {
     paused: u32,
     /// The `now` stamp and the keyframe flag when the first guard was taken, restored when the last one goes.
     saved: Option<(Stamp, bool)>,
+    /// Whether the battles are captured for the telemetry's battle record (`arm_battle_tap`).
+    tap_armed: bool,
+    /// The battle being captured: a copy of its start and of the entries reported since, beside the recorder.
+    tap: Option<Tap>,
+}
+
+/// A battle's capture (see [`arm_battle_tap`]).
+struct Tap {
+    start: BattleStart,
+    entries: Vec<Entry>,
+}
+
+/// A battle's capture as the telemetry takes it ([`take_battle_tap`]): its start, then every entry
+/// reported from the start to the battle's end.
+pub struct CapturedBattle {
+    pub start: BattleStart,
+    pub entries: Vec<Entry>,
 }
 
 local! {
-    static HOOK: std::cell::RefCell<Hook> = const { std::cell::RefCell::new(Hook { recorder: None, playback: None, now: Stamp { stretch: 0, ask: 0 }, actions: 0, engine: 0, keyframe: false, battle_starts: Vec::new(), paused: 0, saved: None }) };
+    static HOOK: std::cell::RefCell<Hook> = const { std::cell::RefCell::new(Hook { recorder: None, playback: None, now: Stamp { stretch: 0, ask: 0 }, actions: 0, engine: 0, keyframe: false, battle_starts: Vec::new(), paused: 0, saved: None, tap_armed: false, tap: None }) };
 }
 
 /// Attaches a recorder to this thread (replacing one).
@@ -131,9 +148,33 @@ pub fn take_recorder() -> Option<Box<dyn Recorder>> {
     HOOK.with_borrow_mut(|h| h.recorder.take())
 }
 
-/// Whether a recorder is attached to this thread and recording is not paused (see [`read_only`]).
+/// Whether something records this thread's game and recording is not paused (see [`read_only`]):
+/// a recorder is attached, or the battles are captured ([`arm_battle_tap`]).
 pub fn recording() -> bool {
-    HOOK.with_borrow(|h| h.paused == 0 && h.recorder.is_some())
+    HOOK.with_borrow(|h| h.paused == 0 && (h.recorder.is_some() || h.tap_armed))
+}
+
+/// Arms (or disarms) the capture of the battles for the telemetry's battle record. The capture is
+/// a copy taken beside the recorder: an attached recorder (the replay session) keeps its own entries,
+/// and nothing the rules do changes.
+pub fn arm_battle_tap(on: bool) {
+    HOOK.with_borrow_mut(|h| {
+        h.tap_armed = on;
+        if !on {
+            h.tap = None;
+        }
+    });
+}
+
+/// Whether a battle is being captured now (its start was reported and its end not yet taken).
+pub fn battle_tap_open() -> bool {
+    HOOK.with_borrow(|h| h.tap.is_some())
+}
+
+/// The battle being captured ends: its start and the entries reported since it began. None when no
+/// battle was being captured.
+pub fn take_battle_tap() -> Option<CapturedBattle> {
+    HOOK.with_borrow_mut(|h| h.tap.take().map(|t| CapturedBattle { start: t.start, entries: t.entries }))
 }
 
 /// A read-only section: while the guard lives, whatever the rules do on this thread is not
@@ -198,8 +239,15 @@ pub fn now() -> Stamp {
 pub(crate) fn record_input(at: Option<Stamp>, input: Input) {
     HOOK.with_borrow_mut(|h| {
         let at = at.unwrap_or(h.now);
-        if let Some(r) = h.recorder.as_mut().filter(|_| h.paused == 0) {
-            r.record(Entry { at, input });
+        if h.paused != 0 {
+            return;
+        }
+        let entry = Entry { at, input };
+        if let Some(t) = h.tap.as_mut() {
+            t.entries.push(entry.clone());
+        }
+        if let Some(r) = h.recorder.as_mut() {
+            r.record(entry);
         }
     });
 }
@@ -243,7 +291,12 @@ impl Drop for EngineScope {
 pub(crate) fn record_battle_start(start: BattleStart) {
     HOOK.with_borrow_mut(|h| {
         if h.paused == 0 {
-            h.battle_starts.push(start);
+            if h.tap_armed {
+                h.tap = Some(Tap { start: start.clone(), entries: Vec::new() });
+            }
+            if h.recorder.is_some() {
+                h.battle_starts.push(start);
+            }
         }
     });
 }
@@ -255,7 +308,7 @@ pub fn take_battle_starts() -> Vec<BattleStart> {
 
 /// Asks the recorder for a keyframe at its next pump (a battle started).
 pub(crate) fn request_keyframe() {
-    HOOK.with_borrow_mut(|h| h.keyframe |= h.paused == 0);
+    HOOK.with_borrow_mut(|h| h.keyframe |= h.paused == 0 && h.recorder.is_some());
 }
 
 /// Whether a keyframe was asked for since the last call (the recorder takes it).
@@ -272,8 +325,15 @@ pub(crate) fn record(input: EngineInput) {
 pub(crate) fn record_at(at: Option<Stamp>, input: EngineInput) {
     HOOK.with_borrow_mut(|h| {
         let at = at.unwrap_or(h.now);
-        if let Some(r) = h.recorder.as_mut().filter(|_| h.paused == 0) {
-            r.record(Entry { at, input: Input::Engine(input) });
+        if h.paused != 0 {
+            return;
+        }
+        let entry = Entry { at, input: Input::Engine(input) };
+        if let Some(t) = h.tap.as_mut() {
+            t.entries.push(entry.clone());
+        }
+        if let Some(r) = h.recorder.as_mut() {
+            r.record(entry);
         }
     });
 }
@@ -332,4 +392,88 @@ pub fn playback_music_due(at: Stamp) -> Option<usize> {
             _ => None,
         }
     })
+}
+
+#[cfg(test)]
+mod tap_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Counts what a recorder is handed.
+    struct Count(Rc<RefCell<usize>>);
+
+    impl Recorder for Count {
+        fn record(&mut self, _entry: Entry) {
+            *self.0.borrow_mut() += 1;
+        }
+    }
+
+    fn start(ordinal: u32) -> BattleStart {
+        serde_json::from_value(serde_json::json!({
+            "ordinal": ordinal,
+            "attacker": crate::rules::battle::Team::Player,
+            "player": [],
+            "enemy": [],
+            "bench": [],
+            "xp_correction": 0,
+            "improved_ai": false,
+            "max_ai": false,
+            "max_guard": false,
+            "god": false,
+            "bare_enemy": false,
+            "building_defence": [0, 0],
+            "patch": patch_globals(),
+        }))
+        .unwrap()
+    }
+
+    fn check(hash: u64) -> EngineInput {
+        EngineInput::Check { hash }
+    }
+
+    #[test]
+    fn the_tap_copies_one_battle_from_its_start_and_leaves_the_recorder_its_own() {
+        let seen = Rc::new(RefCell::new(0));
+        install_recorder(Box::new(Count(seen.clone())));
+        arm_battle_tap(true);
+        assert!(recording());
+        // Before a battle begins nothing is captured.
+        record(check(1));
+        assert!(!battle_tap_open());
+        record_battle_start(start(1));
+        assert!(battle_tap_open());
+        record(check(2));
+        record_input(None, Input::Engine(check(3)));
+        // A read-only section records nothing, in the tap or the recorder.
+        {
+            let _guard = read_only();
+            record(check(4));
+        }
+        let captured = take_battle_tap().expect("a battle was captured");
+        assert_eq!(captured.start, start(1));
+        assert_eq!(captured.entries.len(), 2);
+        assert!(!battle_tap_open(), "the capture is taken once");
+        // The recorder gets every entry (the one before the battle too); the battle start goes to its pump.
+        assert_eq!(*seen.borrow(), 3);
+        assert_eq!(take_battle_starts().len(), 1);
+        take_recorder();
+        arm_battle_tap(false);
+        assert!(!recording());
+    }
+
+    #[test]
+    fn nothing_is_captured_without_the_arm_and_a_new_start_replaces_an_open_capture() {
+        arm_battle_tap(false);
+        record_battle_start(start(1));
+        assert!(!battle_tap_open());
+        arm_battle_tap(true);
+        record_battle_start(start(2));
+        record(check(1));
+        record_battle_start(start(3));
+        let captured = take_battle_tap().unwrap();
+        assert_eq!(captured.start.ordinal, 3);
+        assert!(captured.entries.is_empty());
+        arm_battle_tap(false);
+    }
 }
