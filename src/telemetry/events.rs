@@ -83,6 +83,15 @@ pub fn differing_settings(current: &serde_json::Value, default: &serde_json::Val
     out
 }
 
+/// What a map run starts with: the map's file name and hash, and the settings it is played with.
+pub struct MapInfo<'a> {
+    pub map: &'a str,
+    pub map_hash: &'a str,
+    pub difficulty: &'a str,
+    pub ai_strength: &'a str,
+    pub experiments: &'a [String],
+}
+
 /// The tracker: the pending events, the open run, the session and the interface counters.
 pub struct Tracker {
     dir: PathBuf,
@@ -270,7 +279,7 @@ impl Tracker {
     }
 
     /// A map starts. An open run is closed first as abandoned (at its last time in the map).
-    pub fn map_start(&mut self, hub: &Hub, now: u64, map: &str, map_hash: &str, difficulty: &str, ai_strength: &str, experiments: &[String]) {
+    pub fn map_start(&mut self, hub: &Hub, now: u64, info: MapInfo<'_>) {
         if !self.gate(hub) {
             return;
         }
@@ -280,16 +289,16 @@ impl Tracker {
         self.push(
             now,
             EventKind::MapStart {
-                map: map.to_string(),
-                map_hash: map_hash.to_string(),
-                difficulty: difficulty.to_string(),
-                ai_strength: ai_strength.to_string(),
-                experiments: experiments.to_vec(),
+                map: info.map.to_string(),
+                map_hash: info.map_hash.to_string(),
+                difficulty: info.difficulty.to_string(),
+                ai_strength: info.ai_strength.to_string(),
+                experiments: info.experiments.to_vec(),
             },
         );
         self.run = Some(Run {
-            map: map.to_string(),
-            map_hash: map_hash.to_string(),
+            map: info.map.to_string(),
+            map_hash: info.map_hash.to_string(),
             started_at: now,
             last_active_at: now,
             last_day: 0,
@@ -437,7 +446,7 @@ mod tests {
         let (hub, dir) = hub("no-consent", Consent::No);
         let mut t = Tracker::new(&dir);
         t.session_start(&hub, T0, 1280, 720, "high");
-        t.map_start(&hub, T0 + 1, "Map", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0 + 1, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         t.count_window(&hub, "options");
         t.session_end(&hub, T0 + 100);
         assert!(queued_events(&hub).is_empty());
@@ -463,7 +472,7 @@ mod tests {
     fn a_run_is_abandoned_after_seven_days_and_not_before() {
         let (hub, dir) = hub("abandoned", Consent::Yes);
         let mut t = Tracker::new(&dir);
-        t.map_start(&hub, T0, "Map", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         t.progress(&hub, T0 + 10, 3, 2, 5);
         // The run's last time in the map is its start: only `tick` moves it.
         let last = T0;
@@ -492,7 +501,7 @@ mod tests {
         let (hub, dir) = hub("restart", Consent::Yes);
         {
             let mut t = Tracker::new(&dir);
-            t.map_start(&hub, T0, "Map", HASH, "100", "max", &["fast_ai".to_string()]);
+            t.map_start(&hub, T0, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "max", experiments: &["fast_ai".to_string()] });
             t.progress(&hub, T0 + 5, 7, 3, 9);
             t.battle_ended(&hub, T0 + 6, BattleOutcome { winner: Side::Player, turns: 4, player_losses: 1, foe_losses: 2 });
         }
@@ -511,7 +520,7 @@ mod tests {
     fn progress_is_recorded_on_the_first_call_and_every_five_days() {
         let (hub, dir) = hub("progress", Consent::Yes);
         let mut t = Tracker::new(&dir);
-        t.map_start(&hub, T0, "Map", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         for day in 0..=12 {
             t.progress(&hub, T0 + u64::from(day), day, 1, 4);
         }
@@ -548,7 +557,7 @@ mod tests {
     fn two_hundred_pending_events_flush_at_once() {
         let (hub, dir) = hub("full", Consent::Yes);
         let mut t = Tracker::new(&dir);
-        t.map_start(&hub, T0, "Map", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         for i in 0..FLUSH_EVENTS as u64 {
             t.settings_changed(&hub, T0 + i, vec![Setting { name: "music_volume".into(), value: "0.5".into() }]);
         }
@@ -607,9 +616,9 @@ mod tests {
     fn a_map_start_closes_the_open_run_as_abandoned() {
         let (hub, dir) = hub("replace", Consent::Yes);
         let mut t = Tracker::new(&dir);
-        t.map_start(&hub, T0, "First", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0, MapInfo { map: "First", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         t.progress(&hub, T0 + 20, 2, 1, 3);
-        t.map_start(&hub, T0 + 500, "Second", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0 + 500, MapInfo { map: "Second", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         t.flush(&hub, T0 + 600);
         let ends: Vec<Event> = queued_events(&hub).into_iter().filter(|e| matches!(e.kind, EventKind::MapEnd { .. })).collect();
         assert_eq!(ends.len(), 1);
@@ -622,7 +631,7 @@ mod tests {
     fn a_map_end_carries_the_run_and_clears_it() {
         let (hub, dir) = hub("end", Consent::Yes);
         let mut t = Tracker::new(&dir);
-        t.map_start(&hub, T0, "Map", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         t.set_screen("battle");
         t.map_end(&hub, T0 + 40, Outcome::Loss);
         assert!(t.run().is_none());
@@ -643,7 +652,7 @@ mod tests {
     fn the_time_in_map_counts_only_while_in_the_map() {
         let (hub, dir) = hub("time", Consent::Yes);
         let mut t = Tracker::new(&dir);
-        t.map_start(&hub, T0, "Map", HASH, "100", "original", &[]);
+        t.map_start(&hub, T0, MapInfo { map: "Map", map_hash: HASH, difficulty: "100", ai_strength: "original", experiments: &[] });
         for s in 1..=10 {
             t.tick(&hub, T0 + s, true);
         }
