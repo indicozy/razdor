@@ -57,7 +57,8 @@ import zipfile
 from pathlib import Path
 
 REPO = "indicozy/razdor"
-API_RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+API_RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=100&page={{page}}"
+API_MAX_PAGES = 50  # 5000 releases: far more than the repo has (a guard against a loop)
 UA = "razdor-update-check/1"
 UPDATE_WAIT = 180  # seconds for the program to put the new file in place
 START_SECONDS = 20  # seconds the updated program runs
@@ -154,11 +155,26 @@ def parse_sums(text):
     return out
 
 
-def load_published():
-    try:
-        data = json.loads(http_get(API_RELEASES))
-    except ValueError as e:
-        raise ToolError(f"the release list is not JSON: {e}") from e
+def release_list(get=None):
+    """Every release of the repo, all pages (the API gives 100 at a time; the repo has more than 30,
+    so one page would miss the old releases a `--from` names). `get(url)` gives the bytes of a page."""
+    get = get or http_get
+    data = []
+    for page in range(1, API_MAX_PAGES + 1):
+        try:
+            chunk = json.loads(get(API_RELEASES.format(page=page)))
+        except ValueError as e:
+            raise ToolError(f"the release list is not JSON: {e}") from e
+        if not isinstance(chunk, list):
+            raise ToolError("the release list is not a list")
+        data.extend(chunk)
+        if len(chunk) < 100:
+            return data
+    raise ToolError(f"the release list has more than {API_MAX_PAGES * 100} releases")
+
+
+def published_map(data):
+    """{version: release} of the published releases (drafts and pre-releases aside)."""
     pub = {}
     for r in data:
         if r.get("draft") or r.get("prerelease"):
@@ -166,6 +182,11 @@ def load_published():
         m = VERSION_RE.match(r.get("tag_name", ""))
         if m:
             pub[tuple(int(x) for x in m.groups())] = r
+    return pub
+
+
+def load_published(get=None):
+    pub = published_map(release_list(get))
     if not pub:
         raise ToolError("no published release found")
     return pub
