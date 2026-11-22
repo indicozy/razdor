@@ -363,6 +363,40 @@ async fn a_crash_and_its_save_are_kept_as_files() {
 }
 
 #[tokio::test]
+async fn crash_and_perf_reports_over_the_day_cap_are_429_without_a_ban() {
+    let limits = Limits { crash_per_day: 2, perf_per_day: 1, ..Limits::default() };
+    let h = harness("day-caps", limits);
+    let id = install(9);
+    let crash = json!({
+        "schema": 1, "install_id": id, "razdor": "1.5.4", "platform": "linux", "game": "dt", "screen": "map",
+        "at": NOW, "settings": {}, "panic_text": "panicked at src/x.rs:1:1:\nboom", "log": [], "has_save": false
+    });
+    for _ in 0..2 {
+        assert_eq!(post_json(&h, "/v1/crash", &crash).await.status, StatusCode::OK);
+    }
+    for _ in 0..3 {
+        assert_eq!(post_json(&h, "/v1/crash", &crash).await.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM crashes").await, 2);
+
+    let perf = json!({
+        "schema": 1, "install_id": id, "razdor": "1.5.4",
+        "device": { "os": "linux", "os_version": "6", "gpu": "g", "gpu_driver": "550", "cpu_cores": 8,
+                    "ram_mb": 32000, "screen_w": 1920, "screen_h": 1080, "scale_pct": 100 },
+        "quality": { "preset": "high" },
+        "screens": [ { "screen": "map", "median_ms": 16.0, "p99_ms": 25.0, "p999_ms": 40.0, "minutes": 2.0 } ],
+        "loads": [], "memory": { "low_memory_warnings": 0 }, "profile": []
+    });
+    assert_eq!(post_json(&h, "/v1/perf", &perf).await.status, StatusCode::OK);
+    assert_eq!(post_json(&h, "/v1/perf", &perf).await.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM perf").await, 1);
+
+    // Refusals by the cap are not strikes: no ban row, and the install still sends pings.
+    assert_eq!(count(&h, "SELECT COUNT(*) FROM bans").await, 0);
+    assert_eq!(post_json(&h, "/v1/ping", &ping_body(&id)).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn a_battle_is_stored_checked_and_judged() {
     let h = harness("battle", Limits::default());
     let id = install(10);

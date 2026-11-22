@@ -309,6 +309,22 @@ pub async fn events(
     Ok(json(&serde_json::json!({ "stored": stored_n, "skipped": skipped, "invalid": invalid })))
 }
 
+/// Rows `install` stored today in `table` (`crashes` or `perf`): the per-day caps count them.
+async fn stored_today(st: &AppState, table: &'static str, install: &str) -> Result<i64, ApiError> {
+    let install = install.to_string();
+    let day = civil::day_of(st.clock.now());
+    st.stats
+        .call(move |c| {
+            let n: i64 = c.query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE install_id = ?1 AND day = ?2"),
+                params![install, day],
+                |r| r.get(0),
+            )?;
+            Ok(n)
+        })
+        .await
+}
+
 /// `POST /v1/perf`: the device, the settings and the frames of one session.
 pub async fn perf(
     State(st): State<AppState>,
@@ -319,6 +335,10 @@ pub async fn perf(
     let adm = admit(&st, ip_of(&st, &headers, peer), &body, false, false).await?;
     let p: PerfReport = typed(&st, &adm.install, adm.value, 1).await?;
     release(&st, &adm.install, &p.razdor).await?;
+    // Over the day's cap: 429, no strike and no ban (the client keeps the report).
+    if stored_today(&st, "perf", &adm.install).await? >= i64::from(st.cfg.limits.perf_per_day) {
+        return Err(ApiError::Limited);
+    }
     let n = p.screens.len().max(1) as f32;
     let median = p.screens.iter().map(|s| s.median_ms).sum::<f32>() / n;
     let p99 = p.screens.iter().map(|s| s.p99_ms).sum::<f32>() / n;
@@ -367,6 +387,10 @@ pub async fn crash(
     let adm = admit(&st, ip_of(&st, &headers, peer), &body, false, false).await?;
     let c: CrashReport = typed(&st, &adm.install, adm.value, 1).await?;
     release(&st, &adm.install, &c.razdor).await?;
+    // Over the day's cap: 429, no strike and no ban.
+    if stored_today(&st, "crashes", &adm.install).await? >= i64::from(st.cfg.limits.crash_per_day) {
+        return Err(ApiError::Limited);
+    }
     let (loc, msg) = panic_key(&c.panic_text);
     let id = files::new_id()?;
     let report = serde_json::to_vec(&c).map_err(|e| ApiError::Internal(e.to_string()))?;
