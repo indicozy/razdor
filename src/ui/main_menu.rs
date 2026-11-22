@@ -2557,6 +2557,21 @@ fn labelled_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str) -> (bool
     labelled_row_help(c, geo, label, value, None)
 }
 
+local! {
+    /// While set (the General tab's language row): `labelled_row_help` draws its label as the original's
+    /// checkboxes do, in their face and ink at this size, instead of the Razdor rows' cream.
+    static CHECK_LABEL: Cell<Option<f32>> = Cell::new(None);
+}
+
+/// A settings row's label line at `(x, y)`: the Razdor rows' cream at `size`, or the checkbox style
+/// while [`CHECK_LABEL`] is set.
+fn row_label(line: &str, x: f32, y: f32, size: f32) {
+    match CHECK_LABEL.with(|s| s.get()) {
+        Some(check) => super::dt_font::with_face(super::dt_font::Face::Subtitle, || chrome::shadow_text(line, x, y, check, CHECK_INK)),
+        None => chrome::shadow_text(line, x, y, size, chrome::CREAM),
+    }
+}
+
 /// [`labelled_row`] with a «?» button after its value (backlog 1508) when `help` is given: the
 /// long hint that the row would otherwise show under it.
 fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: Option<&'static str>) -> (bool, Rect) {
@@ -2569,7 +2584,7 @@ fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, hel
     if beside.iter().any(|l| measure(l, geo.size).width > room) {
         let lines = wrap_label(label, c.w - help_w, geo.size);
         for (i, line) in lines.iter().enumerate() {
-            chrome::shadow_text(line, c.x, c.y + i as f32 * geo.lh + geo.size * 0.9, geo.size, chrome::CREAM);
+            row_label(line, c.x, c.y + i as f32 * geo.lh + geo.size * 0.9, geo.size);
         }
         let top = c.y + lines.len() as f32 * geo.lh + 4.0 * geo.k;
         let r = Rect::new(right - bw, top, bw, geo.row_h);
@@ -2583,7 +2598,7 @@ fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, hel
     let centre = c.y + h / 2.0;
     for (i, line) in beside.iter().enumerate() {
         let base = centre - (beside.len() as f32 - 1.0) * geo.lh / 2.0 + i as f32 * geo.lh + geo.size * 0.36;
-        chrome::shadow_text(line, c.x, base, geo.size, chrome::CREAM);
+        row_label(line, c.x, base, geo.size);
     }
     let r = Rect::new(right - bw, c.y + (h - geo.row_h) / 2.0, bw, geo.row_h);
     c.y += h + geo.gap;
@@ -2623,7 +2638,12 @@ fn value_text_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: 
 /// `general_phone`). The list: Russian, English and the translations found in the install.
 fn language_row(c: &mut RowCol, geo: &RowGeo) {
     let current = super::language::current_label();
+    // On the General tab the label reads like the original's checkboxes beside it: their face, ink and
+    // size (`option_check`), not the Razdor rows' cream (the owner's request, 2026-11-22).
+    let check_size = 15.0 * geo.k;
+    CHECK_LABEL.with(|s| s.set(Some(check_size)));
     let (clicked, lr) = labelled_row_help(c, geo, tr("Language"), &current, Row::Language.help_text());
+    CHECK_LABEL.with(|s| s.set(None));
     if clicked || super::snapshot::open_language_list() {
         super::language::open_list(lr, geo.k);
     }
