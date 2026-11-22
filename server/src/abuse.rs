@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 
 use razdor_wire::limits;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection};
 
 use crate::civil::DAY;
 use crate::http::ApiError;
@@ -102,9 +102,68 @@ pub struct Abuse {
     logins: HashMap<IpAddr, (i64, u32)>,
     creates: HashMap<IpAddr, (i64, u32)>,
     last_prune: i64,
+    /// The bans by kind, loaded from `bans` at start and kept in step with it: the request path
+    /// reads only this map.
+    bans: HashMap<&'static str, HashMap<String, Ban>>,
+}
+
+/// A ban as held in memory and persisted in `bans`.
+#[derive(Clone, Debug)]
+pub struct Ban {
+    pub strikes: i64,
+    pub until: i64,
+    pub reason: String,
+    pub created_at: i64,
+}
+
+/// The bans by kind (`"ip"` or `"install"`), read from the table at start.
+pub fn load_bans(c: &Connection) -> rusqlite::Result<HashMap<&'static str, HashMap<String, Ban>>> {
+    let mut map: HashMap<&'static str, HashMap<String, Ban>> = HashMap::new();
+    let mut stmt = c.prepare("SELECT kind, key, strikes, until, reason, created_at FROM bans")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            Ban { strikes: r.get(2)?, until: r.get(3)?, reason: r.get(4)?, created_at: r.get(5)? },
+        ))
+    })?;
+    for row in rows {
+        let (kind, key, ban) = row?;
+        let kind: &'static str = match kind.as_str() {
+            "ip" => "ip",
+            "install" => "install",
+            _ => continue,
+        };
+        map.entry(kind).or_default().insert(key, ban);
+    }
+    Ok(map)
 }
 
 impl Abuse {
+    /// The state at start: the windows empty, the bans as the table has them.
+    pub fn with_bans(bans: HashMap<&'static str, HashMap<String, Ban>>) -> Abuse {
+        Abuse { bans, ..Abuse::default() }
+    }
+
+    fn ban_of(&self, kind: &str, key: &str) -> Option<&Ban> {
+        self.bans.get(kind)?.get(key)
+    }
+
+    fn put_ban(&mut self, kind: &'static str, key: String, ban: Ban) {
+        self.bans.entry(kind).or_default().insert(key, ban);
+    }
+
+    fn ban_active(&self, kind: &str, key: &str, now: i64) -> bool {
+        self.ban_of(kind, key).is_some_and(|b| b.until > now)
+    }
+
+    /// Ends a ban now in memory (the strikes stay).
+    fn unban_now(&mut self, kind: &str, key: &str, now: i64) {
+        if let Some(b) = self.bans.get_mut(kind).and_then(|m| m.get_mut(key)) {
+            b.until = now;
+        }
+    }
+
     /// Drops the windows nobody has used for two hours and bounds every map. Called by the retention
     /// job, and by the request path at most once a minute ([`Abuse::maybe_prune`]).
     pub fn prune(&mut self, now: i64) {
@@ -136,25 +195,17 @@ pub fn ip_key(st: &AppState, ip: IpAddr) -> String {
     sha256_hex(&[st.ip_salt.as_bytes(), window_ip(ip).to_string().as_bytes()])
 }
 
-/// Whether a ban of `kind` on `key` is active now.
-pub async fn is_banned(st: &AppState, kind: &'static str, key: &str) -> Result<bool, ApiError> {
+/// Whether a ban of `kind` on `key` is active now. Memory only: the request path reads no database.
+pub fn is_banned(st: &AppState, kind: &'static str, key: &str) -> bool {
     let now = st.clock.now();
-    let key = key.to_string();
-    st.stats
-        .call(move |c| {
-            let until: Option<i64> = c
-                .query_row("SELECT until FROM bans WHERE kind = ?1 AND key = ?2", params![kind, key], |r| r.get(0))
-                .optional()?;
-            Ok(until.is_some_and(|u| u > now))
-        })
-        .await
+    st.abuse().ban_active(kind, key, now)
 }
 
 /// The request-level gate of an IP: a ban (silent), a flood (429, and a strike a minute).
 pub async fn ip_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let now = st.clock.now();
     let key = ip_key(st, ip);
-    if is_banned(st, "ip", &key).await? {
+    if is_banned(st, "ip", &key) {
         return Err(ApiError::Silent);
     }
     let limit = st.cfg.limits.ip_per_minute;
@@ -219,7 +270,7 @@ pub async fn junk(st: &AppState, ip: IpAddr, msg: &str) -> ApiError {
 /// The install's gate: a ban (silent, unless `allow_banned`: deleting one's data always works),
 /// then the per-minute rate (429, no ban).
 pub async fn install_gate(st: &AppState, install: &str, allow_banned: bool) -> Result<(), ApiError> {
-    if !allow_banned && is_banned(st, "install", install).await? {
+    if !allow_banned && is_banned(st, "install", install) {
         return Err(ApiError::Silent);
     }
     let now = st.clock.now();
@@ -383,67 +434,72 @@ pub fn ip_ban_secs(strikes: i64) -> i64 {
     (3600i64 << (strikes - 1).clamp(0, 5)).min(limits::IP_BAN_MAX_SECS as i64)
 }
 
-async fn ban_ip(st: &AppState, key: String, reason: &'static str, now: i64) -> Result<(), ApiError> {
+/// Writes a ban to `bans`; for an install, also quarantines its rows received since `since`. One
+/// transaction. Called after the ban is in memory.
+async fn persist_ban(
+    st: &AppState,
+    kind: &'static str,
+    key: String,
+    ban: Ban,
+    quarantine_since: Option<i64>,
+) -> Result<(), ApiError> {
     st.stats
         .call(move |c| {
             let tx = c.transaction()?;
-            let prev: Option<(i64, i64)> = tx
-                .query_row("SELECT strikes, created_at FROM bans WHERE kind = 'ip' AND key = ?1", params![key], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })
-                .optional()?;
-            let strikes = next_ip_strikes(prev, now);
-            let until = now + ip_ban_secs(strikes);
             tx.execute(
-                "INSERT INTO bans (kind, key, strikes, until, reason, created_at) VALUES ('ip', ?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO bans (kind, key, strikes, until, reason, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT (kind, key) DO UPDATE SET strikes = excluded.strikes, until = excluded.until,
                  reason = excluded.reason, created_at = excluded.created_at",
-                params![key, strikes, until, reason, now],
+                params![kind, key, ban.strikes, ban.until, ban.reason, ban.created_at],
             )?;
+            if let Some(since) = quarantine_since {
+                for table in ["pings", "events", "perf", "crashes", "battles"] {
+                    tx.execute(
+                        &format!("UPDATE {table} SET quarantined = 1 WHERE install_id = ?1 AND received_at >= ?2"),
+                        params![key, since],
+                    )?;
+                }
+            }
             tx.commit()?;
             Ok(())
         })
         .await
+}
+
+/// An IP's ban: the strikes come from memory (the persisted row, loaded at start), then it is written.
+async fn ban_ip(st: &AppState, key: String, reason: &'static str, now: i64) -> Result<(), ApiError> {
+    let ban = {
+        let mut a = st.abuse();
+        let prev = a.ban_of("ip", &key).map(|b| (b.strikes, b.created_at));
+        let strikes = next_ip_strikes(prev, now);
+        let ban = Ban { strikes, until: now + ip_ban_secs(strikes), reason: reason.to_string(), created_at: now };
+        a.put_ban("ip", key.clone(), ban.clone());
+        ban
+    };
+    persist_ban(st, "ip", key, ban, None).await
 }
 
 /// Bans an install and quarantines its raw rows received since `since`. The strike count decides
 /// the length (24 h, 7 days, for good).
 pub async fn ban_install(st: &AppState, install: &str, reason: &str, since: i64) -> Result<(), ApiError> {
     let now = st.clock.now();
-    let install = install.to_string();
-    let reason = reason.to_string();
-    st.stats
-        .call(move |c| {
-            let tx = c.transaction()?;
-            let prev: Option<i64> = tx
-                .query_row("SELECT strikes FROM bans WHERE kind = 'install' AND key = ?1", params![install], |r| {
-                    r.get(0)
-                })
-                .optional()?;
-            let strikes = prev.unwrap_or(0) + 1;
-            let until = install_ban_until(strikes, now);
-            tx.execute(
-                "INSERT INTO bans (kind, key, strikes, until, reason, created_at) VALUES ('install', ?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT (kind, key) DO UPDATE SET strikes = excluded.strikes, until = excluded.until,
-                 reason = excluded.reason, created_at = excluded.created_at",
-                params![install, strikes, until, reason, now],
-            )?;
-            for table in ["pings", "events", "perf", "crashes", "battles"] {
-                tx.execute(
-                    &format!("UPDATE {table} SET quarantined = 1 WHERE install_id = ?1 AND received_at >= ?2"),
-                    params![install, since],
-                )?;
-            }
-            tx.commit()?;
-            tracing::warn!("install banned ({reason}), strike {strikes}");
-            Ok(())
-        })
-        .await
+    let ban = {
+        let mut a = st.abuse();
+        let strikes = a.ban_of("install", install).map_or(0, |b| b.strikes) + 1;
+        let ban = Ban { strikes, until: install_ban_until(strikes, now), reason: reason.to_string(), created_at: now };
+        a.put_ban("install", install.to_string(), ban.clone());
+        ban
+    };
+    let strikes = ban.strikes;
+    persist_ban(st, "install", install.to_string(), ban, Some(since)).await?;
+    tracing::warn!("install banned ({reason}), strike {strikes}");
+    Ok(())
 }
 
 /// Lifts a ban now (the dashboard's unban). The strikes stay: the next offence is escalated.
 pub async fn unban(st: &AppState, kind: &'static str, key: String) -> Result<bool, ApiError> {
     let now = st.clock.now();
+    st.abuse().unban_now(kind, &key, now);
     st.stats
         .call(move |c| {
             let n = c.execute("UPDATE bans SET until = ?1 WHERE kind = ?2 AND key = ?3", params![now, kind, key])?;

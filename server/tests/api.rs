@@ -9,9 +9,12 @@ use std::sync::Arc;
 use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
+use razdor_server::civil::DAY;
 use razdor_server::clock::Clock;
 use razdor_server::cloud;
 use razdor_server::config::{Config, Limits};
+use razdor_server::http::ApiError;
+use razdor_server::abuse;
 use razdor_server::state::{sha256_hex, AppState};
 use razdor_server::{admin, retention, router, summary};
 use razdor_wire::{frame, paths};
@@ -41,8 +44,14 @@ fn harness(name: &str, limits: Limits) -> Harness {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{}-{n}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
+    let st = open_in(&dir, limits);
+    Harness { st, _dir: Dir(dir) }
+}
+
+/// Opens the service on `dir` (a restart, when the directory already holds a service's data).
+fn open_in(dir: &std::path::Path, limits: Limits) -> AppState {
     let cfg = Config {
-        data_dir: dir.clone(),
+        data_dir: dir.to_path_buf(),
         trust_proxy: true,
         secure_cookies: false,
         admin_token_sha256: Some(sha256_hex(&[TOKEN.as_bytes()])),
@@ -50,8 +59,7 @@ fn harness(name: &str, limits: Limits) -> Harness {
         limits,
         ..Config::default()
     };
-    let st = AppState::open(cfg, Clock::fixed(NOW)).expect("opens");
-    Harness { st, _dir: Dir(dir) }
+    AppState::open(cfg, Clock::fixed(NOW)).expect("opens")
 }
 
 struct Resp {
@@ -493,6 +501,38 @@ async fn the_ip_flood_limit_refuses_then_bans_silently() {
     let fourth = post_json(&h, "/v1/ping", &ping_body(&install(15))).await;
     assert_eq!(fourth.json(), json!({}));
     assert_eq!(count(&h, "SELECT COUNT(*) FROM bans WHERE kind = 'ip'").await, 1);
+}
+
+#[tokio::test]
+async fn bans_survive_a_restart_and_the_request_path_reads_no_database() {
+    let limits = Limits { ip_per_minute: 2, ip_flood_strikes: 1, ..Limits::default() };
+    let h = harness("restart", limits.clone());
+    for n in 0..3 {
+        post_json(&h, "/v1/ping", &ping_body(&install(20 + n))).await;
+    }
+    let banned_ip: std::net::IpAddr = "203.0.113.7".parse().expect("an address");
+    let Harness { st, _dir } = h;
+    assert!(abuse::is_banned(&st, "ip", &abuse::ip_key(&st, banned_ip)));
+    drop(st);
+
+    // A restart: the ban is read back from the table at start.
+    let st = open_in(&_dir.0, limits.clone());
+    let before = st.stats.queries();
+    assert!(matches!(abuse::ip_gate(&st, banned_ip).await, Err(ApiError::Silent)));
+    assert!(abuse::install_gate(&st, &install(21), false).await.is_ok());
+    assert_eq!(st.stats.queries(), before, "the request path reads no database");
+
+    // Install strikes persist too: the second ban of an id is the 7-day one.
+    abuse::ban_install(&st, &install(30), "test", NOW).await.expect("bans");
+    drop(st);
+    let st = open_in(&_dir.0, Limits::default());
+    abuse::ban_install(&st, &install(30), "test", NOW).await.expect("bans");
+    let until: i64 = st
+        .stats
+        .call(|c| Ok(c.query_row("SELECT until FROM bans WHERE kind = 'install' AND key = ?1", [install(30)], |r| r.get(0))?))
+        .await
+        .expect("a row");
+    assert_eq!(until, NOW + 7 * DAY);
 }
 
 // Cloud saves.

@@ -2,6 +2,7 @@
 //! the service writes; the mutex keeps one writer at a time (the VPS has two shared vCPUs).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
@@ -11,6 +12,8 @@ use crate::http::ApiError;
 #[derive(Clone)]
 pub struct Db {
     conn: Arc<Mutex<Connection>>,
+    /// Counts every query that goes through `call` or `setup` (the tests check the hot path with it).
+    queries: Arc<AtomicU64>,
 }
 
 impl Db {
@@ -20,7 +23,7 @@ impl Db {
             "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
         )?;
         conn.execute_batch(schema)?;
-        Ok(Db { conn: Arc::new(Mutex::new(conn)) })
+        Ok(Db { conn: Arc::new(Mutex::new(conn)), queries: Arc::new(AtomicU64::new(0)) })
     }
 
     /// Runs `f` on the blocking pool with the connection. An error of `f` is the request's answer.
@@ -29,6 +32,7 @@ impl Db {
         F: FnOnce(&mut Connection) -> Result<T, ApiError> + Send + 'static,
         T: Send + 'static,
     {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         let conn = self.conn.clone();
         tokio::task::spawn_blocking(move || {
             let mut guard = conn.lock().unwrap_or_else(|e| e.into_inner());
@@ -39,9 +43,15 @@ impl Db {
     }
 
     /// Runs a start-up step (a migration) on the connection, before the service takes requests.
-    pub fn setup(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<()>) -> rusqlite::Result<()> {
+    pub fn setup<T>(&self, f: impl FnOnce(&Connection) -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         let guard = self.conn.lock().unwrap_or_else(|e| e.into_inner());
         f(&guard)
+    }
+
+    /// The number of queries run so far (through `call` or `setup`).
+    pub fn queries(&self) -> u64 {
+        self.queries.load(Ordering::Relaxed)
     }
 
     /// Folds the WAL into the file (at shutdown, so a copy of the file alone is whole).

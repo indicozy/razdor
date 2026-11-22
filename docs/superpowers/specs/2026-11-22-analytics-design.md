@@ -65,6 +65,9 @@ Never sent: hero or save names, chat, typed text, anything outside the game.
 - A banned sender still gets 200 OK; its data is dropped silently. Cloud routes never do: a ban there is a 429 with
   Retry-After, and the client forgets its key only on `{"ok":true}` (cloud writes confirm with it; `{}` is silent).
 - Memory: every rate map is bounded (100k windows, oldest evicted) and pruned at most once a minute, on the request path.
+- Done (C1): the bans are held in memory (loaded from `bans` at start, expired rows too, so old strikes still
+  count). The request path checks memory only and reads no database; a ban, an unban and the quarantine are
+  written through to `bans` before the answer (bans are rare). A ban survives a restart.
 - Done (A1–A4, B): per-account row cap (160 saves). Per-install caps: 10 crash reports and 48 perf reports a UTC
   day, past them 429 with no strike. Storage budget: the stored files (battles, crash reports, saves) count against
   `max_data_bytes` (20 GiB), and the disk's free space must stay above `min_free_bytes` (2 GiB). Over either: saves and

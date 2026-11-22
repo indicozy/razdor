@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use sha2::{Digest, Sha256};
 
-use crate::abuse::Abuse;
+use crate::abuse::{self, Abuse};
 use crate::budget::{self, Budget, FreeFn};
 use crate::clock::Clock;
 use crate::config::Config;
@@ -58,6 +58,7 @@ impl AppState {
         let cloud = Db::open(&root.join("cloud.sqlite"), schema::CLOUD)?;
         let now = clock.now();
         cloud.setup(|c| schema::migrate_cloud(c, now))?;
+        let bans = stats.setup(abuse::load_bans)?;
         let ip_salt = load_or_create_salt(&root.join("ip_salt"))?;
         let used = budget::scan(&root);
         let budget = Budget::new(used, cfg.limits.max_data_bytes, cfg.limits.min_free_bytes, free);
@@ -68,7 +69,7 @@ impl AppState {
             root,
             clock,
             ip_salt,
-            abuse: Mutex::new(Abuse::default()),
+            abuse: Mutex::new(Abuse::with_bans(bans)),
             sessions: Mutex::new(HashMap::new()),
             budget,
         })))
