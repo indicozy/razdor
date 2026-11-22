@@ -98,6 +98,7 @@ pub fn step(hub: &Hub, transport: &dyn Transport, api: &[String], now: u64) -> S
     };
 
     let answer = transport.post(&url, &payload, SECONDS);
+    crate::server_status::note(crate::server_status::reach_of(answer.as_ref().ok().map(|r| r.status)));
     let mut queue = hub.queue();
     match answer {
         Ok(reply) if (200..300).contains(&reply.status) => {

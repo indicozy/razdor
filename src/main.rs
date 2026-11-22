@@ -281,6 +281,8 @@ async fn main() {
     // now that the install and the language are set.
     razdor::telemetry::install_loaded(assets.dt.is_some());
     ui::cloud_store::start_if_on();
+    // The server's status mark's one probe, if nothing has been answered yet (`server_status`).
+    razdor::server_status::start_probe(ui::cloud_store::has_account());
     let mut app = App::new(assets, content);
     // The play events' session (a no-op without the analytics): the window's size and the settings.
     ui::analytics::session_start(&app);

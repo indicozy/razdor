@@ -344,3 +344,21 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
 
 Not built (approximated or left for later): the phone's transport (Android and iOS are offline until `http.rs`
 gets one); a cloud session lands as an ordinary save, and the session slot is one per install.
+
+## Server status mark (main menu)
+
+`src/server_status.rs` (no macroquad) and `ui::main_menu::server_mark` draw the top-right mark: a dot and
+a short text, «Сервер: в сети» (green), «Сервер: нет связи» (grey) or «Сервер: выключено» (grey, when sending
+is off by the remote config and there is no cloud account). Nothing is drawn while enabled but not yet
+answered.
+
+- The state comes from answers the game already gets: each telemetry post (`worker::step` calls `note`),
+  and the cloud phase (`Idle`, `Full`, `Failed` = answered; `Offline` = silent; `Working` and `Off` tell
+  nothing). The cloud phase wins when it is decisive; else the launch's last post outcome.
+- An HTTP answer below 500 is «в сети», a 429 included. A 5xx or no answer is «нет связи».
+- The healthz rule: when nothing is enabled-and-answered yet, the analytics run, and the device is
+  not `RAZDOR_TELEMETRY=off`, one `GET {api}/healthz` goes out in the background after the install is
+  loaded (`start_probe`, called from `main.rs`). It runs once per launch, never in the snapshots.
+- Snapshots draw the mark only when `RAZDOR_SERVER_STATUS=online|offline|off|unknown` forces it, so the
+  UI regression shots keep their look.
+- Tests: `cargo test --profile fasttest --lib -- server_status::`.

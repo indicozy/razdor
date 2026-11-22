@@ -22,6 +22,7 @@ pub mod gdrive;
 pub mod mirror;
 pub mod remote_config;
 pub mod telemetry;
+pub mod server_status;
 pub mod cloud;
 pub mod archive;
 pub mod parts;

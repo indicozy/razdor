@@ -605,6 +605,49 @@ fn loader(k: f32, phone: Option<f32>) {
     super::dt_font::legacy_metrics_if(phone.is_some(), || chrome::shadow_text(text, x + 2.0 * r + size * 0.6, y, size, ink));
 }
 
+/// The server's status mark in the top-right corner (`razdor::server_status`): a coloured dot and a
+/// short text, right-aligned under the safe inset. The top corner holds nothing else of the menu on
+/// the desktop and the phones, and the bottom corners are taken by the loader, the version line, the
+/// links and the promo. It is not a touch target. Snapshots draw it only when `RAZDOR_SERVER_STATUS`
+/// forces a state, so the other shots stay as they are.
+fn server_mark(k: f32, phone: Option<f32>) {
+    use razdor::server_status::{self, Mark};
+    let mark = match server_status::forced() {
+        Some(m) => m,
+        None if super::clock::is_snapshot() => return,
+        None => {
+            let phase = super::cloud_store::shared().map(|s| s.phase).unwrap_or_default();
+            server_status::mark(razdor::remote_config::telemetry_allowed(), super::cloud_store::has_account(), phase)
+        }
+    };
+    let green = Color::new(0.42, 0.86, 0.45, 1.0);
+    let grey = Color::new(0.66, 0.66, 0.66, 1.0);
+    let ink = Color::new(0.92, 0.92, 0.92, 1.0);
+    let (text, dot) = match mark {
+        Mark::Online => (tr("Server: online"), green),
+        Mark::Offline => (tr("Server: no link"), grey),
+        Mark::Off => (tr("Server: off"), grey),
+        Mark::Unknown => return,
+    };
+    let (size, safe) = (
+        match phone {
+            Some(dp) => VERSION_PHONE_DP * dp,
+            None => 14.0 * k,
+        },
+        super::display::safe_area(),
+    );
+    let r = size * 0.3;
+    let top = safe.top + 16.0 * k;
+    super::dt_font::legacy_metrics_if(phone.is_some(), || {
+        let tw = measure(text, size).width;
+        let right = screen_width() - safe.right - 16.0 * k;
+        let x = right - tw - 2.0 * r - size * 0.6;
+        let y = top + size;
+        draw_circle(x + r, y - size * 0.35, r, dot);
+        chrome::shadow_text(text, x + 2.0 * r + size * 0.6, y, size, ink);
+    });
+}
+
 /// The menu's foot (4c7774): the version line (`[SpecialTexts] VerInfo`), small and white, on the
 /// bottom row at the left.
 fn foot_lines() {
@@ -949,6 +992,7 @@ pub fn frame(no_install: bool, mods: &[(String, razdor::hub::Text)], active: Opt
         });
     });
     frame_probe::time(frame_probe::Stage::MenuWidgets, || loader(k, phone));
+    frame_probe::time(frame_probe::Stage::MenuWidgets, || server_mark(k, phone));
     frame_probe::time(frame_probe::Stage::AdCapsule, || thorny_promo(k, version_y - vsize - 6.0 * k));
     // An update put in place says so (an "Always" update has no window of its own).
     frame_probe::time(frame_probe::Stage::MenuWidgets, super::update_view::title_line);

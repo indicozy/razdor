@@ -22,3 +22,7 @@ New id = Новый идентификатор
 New id? = Новый идентификатор?
 A new id is made. Data queued under the old id is not sent, and the old id's data stays on the server. = Будет создан новый идентификатор. Данные, ждущие отправки под старым, не уйдут, а уже отправленное остаётся на сервере.
 New… = Новый…
+
+Server: online = Сервер: в сети
+Server: no link = Сервер: нет связи
+Server: off = Сервер: выключено
