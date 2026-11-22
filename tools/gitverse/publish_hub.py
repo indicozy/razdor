@@ -4,6 +4,12 @@
   python3 -I tools/gitverse/publish_hub.py --catalog-dir DIR [--tag catalog-YYYY-MM-DD]
       [--no-pages] [--replace] [--keep 2] [--dry-run] [--wait SECONDS]
   python3 -I tools/gitverse/publish_hub.py --unpublish TAG
+  python3 -I tools/gitverse/publish_hub.py --catalog-dir DIR --layout pages [--host gitverse|github] [--dry-run]
+
+The pages layout (--layout pages, the owner's decision 2026-11-22): every hub file and the game archive are
+bare Pages files `files/<sha256>.dat` on the chosen host's site (`gitverse`: docs/ of main; `github`: the root of
+gh-pages), the pictures under previews/, and that host's index-v2.json names them by absolute address. No
+release is made or removed, so the release copies stay as the fallback. Its routing is in publish_pages().
 
 DIR holds index.json (tools/community-pack/build.py's output, the bare layout) and the flat files it names.
 
@@ -42,6 +48,7 @@ import copy
 import datetime
 import json
 import os
+import re
 import shutil
 import sys
 import urllib.parse
@@ -54,6 +61,17 @@ import gitverse as gv  # noqa: E402
 import pages  # noqa: E402
 
 GAME_URL = "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5"
+GAME_GITHUB_URL = "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip"
+# The pages layout (the owner's decision, 2026-11-22): every hub file and the game archive are Pages files,
+# served as they are (no zip) under files/<sha256>.dat, on both hosts; the release copies stay as they are.
+LAYOUTS = ("zipped", "pages")
+HOSTS = ("gitverse", "github")
+PAGES_FILES = "files/"
+PAGES_EXT = "dat"
+SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+REMOTE_GAME = "remote-game"  # the game archive, fetched here during publishing (checked, never in git)
+GITVERSE_BASE = pages.HOSTS["gitverse"]["base"].rstrip("/")
+GITHUB_BASE = pages.HOSTS["github"]["base"].rstrip("/")
 PREVIEWS = "previews/"
 STATE = "gitverse-state.json"
 STAGE = "gitverse"
@@ -359,9 +377,10 @@ def check_index(idx):
         raise HubError(f"the ad's picture is not under {PREVIEWS}")
 
 
-def write_stage(folder, idx, site):
-    """DIR/gitverse/ in the site's own layout: index-v2.json, the pictures in previews/. Returns the folder."""
-    stage = os.path.join(folder, STAGE)
+def write_stage(folder, idx, site, name=STAGE):
+    """DIR/<name> (default gitverse/) in the site's own layout: index-v2.json, the pictures in previews/ (and
+    the pages layout's files in files/). Returns the folder."""
+    stage = os.path.join(folder, name)
     if os.path.exists(stage):
         shutil.rmtree(stage)
     os.makedirs(stage)
@@ -387,6 +406,214 @@ def stage_files(stage):
     return out
 
 
+def file_shas(cat):
+    """{catalog file name: its SHA-256 (lower case)} for the files that are local (not addresses)."""
+    out = {}
+    for e in cat["entries"]:
+        for f in e.get("files") or []:
+            p = f.get("path")
+            if not isinstance(p, str) or p.startswith("https://"):
+                continue
+            digest = str(f.get("sha256", "")).lower()
+            if out.get(p, digest) != digest:
+                raise HubError(f"{p}: named twice with different SHA-256s")
+            out[p] = digest
+    return out
+
+
+def pages_site_path(sha):
+    """The Pages file of a hub file or the game, by its SHA-256: `files/<sha256>.dat`. The name is no `.zip`,
+    `.exe` or `.py` (Pages refuses those), and the bytes are the file itself, so an app that reads a bare
+    catalog entry downloads it as it is."""
+    digest = str(sha or "").lower()
+    if not SHA_RE.match(digest):
+        raise HubError(f"{sha!r}: not a SHA-256")
+    return PAGES_FILES + digest + "." + PAGES_EXT
+
+
+def pages_routing(cat):
+    """{'files': {catalog name: site path}, 'site': {site path: name in DIR}, 'problems': [(name, why)]}.
+    A hub file is a Pages file under files/<sha256>.dat (two names with the same bytes share one); a picture
+    is under previews/ as in the zipped layout."""
+    shas = file_shas(cat)
+    files, site, problems = {}, {}, []
+    for name, role in refs(cat):
+        if role == "file":
+            try:
+                where = pages_site_path(shas.get(name))
+            except HubError as e:
+                problems.append((name, str(e)))
+                continue
+            files[name] = where
+            site.setdefault(where, name)
+        else:
+            why = pages_problem(name)
+            if why:
+                problems.append((name, why))
+            else:
+                site[PREVIEWS + name] = name
+    return {"files": files, "site": site, "problems": problems}
+
+
+def fetch_checked(folder, local, url, size, sha):
+    """Downloads the https `url` to DIR/local unless a copy there already has the catalog's size and SHA-256;
+    a download is checked against them before it is kept. Returns the path."""
+    if not str(url).startswith("https://"):
+        raise HubError(f"{url}: not an https address")
+    dst = os.path.join(folder, local)
+    digest = str(sha).lower()
+    if os.path.isfile(dst) and os.path.getsize(dst) == size and gv.sha256_file(dst) == digest:
+        return dst
+    data = gv.fetch_bytes(url)
+    if len(data) != size:
+        raise HubError(f"{url}: {len(data)} bytes, the catalog says {size}")
+    if gv.sha256_bytes(data) != digest:
+        raise HubError(f"{url}: SHA-256 differs from the catalog's")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with open(dst + ".tmp", "wb") as f:
+        f.write(data)
+    os.replace(dst + ".tmp", dst)
+    print(f"fetched {url}: {size} bytes, SHA-256 as the catalog says")
+    return dst
+
+
+def fetch_game(folder, cat):
+    """The game archive (the catalog's `game`): (its Pages site path, its path under DIR)."""
+    g = cat.get("game")
+    if not isinstance(g, dict) or not isinstance(g.get("name"), str) or not gv.NAME_RE.match(g["name"]):
+        raise HubError("the catalog's game has no usable file name")
+    fetch_checked(folder, os.path.join(REMOTE_GAME, g["name"]), g.get("url"), g.get("size"), g.get("sha256"))
+    return pages_site_path(g.get("sha256")), REMOTE_GAME + "/" + g["name"]
+
+
+def pages_index(cat, base, game_mirrors):
+    """The Pages copy of the catalog for the host at `base`: a file's address is `base/files/<sha256>.dat` (its
+    own size and SHA-256; bare, no wrapping); pictures are relative under previews/; the game's address is its
+    Pages file, with `game_mirrors` after it."""
+    out = copy.deepcopy(cat)
+    for e in out["entries"]:
+        for f in e.get("files") or []:
+            if not f["path"].startswith("https://"):
+                f["path"] = base + "/" + pages_site_path(f["sha256"])
+        for key in ("preview", "picture"):
+            ref = e.get(key)
+            if isinstance(ref, dict):
+                ref["path"] = PREVIEWS + os.path.basename(ref["path"])
+    ad = out.get("ad")
+    if isinstance(ad, dict):
+        ad["image"] = PREVIEWS + os.path.basename(ad["image"])
+    game = out.get("game")
+    if isinstance(game, dict):
+        url = base + "/" + pages_site_path(game["sha256"])
+        mirrors = []
+        for m in game_mirrors:
+            if m != url and m not in mirrors:
+                mirrors.append(m)
+        game["url"] = url
+        game["mirrors"] = mirrors
+    check_index(out)
+    check_pages_index(out, base)
+    return out
+
+
+def check_pages_index(idx, base):
+    """Every hub file and the game is a bare Pages file under `base/files/`: no zip fields."""
+    want = base + "/" + PAGES_FILES
+    for e in idx["entries"]:
+        for f in e.get("files") or []:
+            p = str(f.get("path", ""))
+            if not p.startswith(want) or not p.endswith("." + PAGES_EXT):
+                raise HubError(f"entry {e.get('id')}: {f.get('name')}: not a Pages file under {want}")
+            if any(k in f for k in ("wrapped", "member", "archive_size", "archive_sha256")):
+                raise HubError(f"entry {e.get('id')}: {f.get('name')}: the pages layout has no zip fields")
+    game = idx.get("game")
+    if isinstance(game, dict) and not str(game.get("url", "")).startswith(want):
+        raise HubError("the game's address is not a Pages file")
+
+
+def check_pages_stage(stage, idx, base, site):
+    """Every Pages address the index names is a staged file, and every site file is staged."""
+    named = set()
+    for e in idx["entries"]:
+        for f in e.get("files") or []:
+            named.add(str(f["path"])[len(base) + 1:])
+    if isinstance(idx.get("game"), dict):
+        named.add(str(idx["game"]["url"])[len(base) + 1:])
+    missing = sorted(n for n in named if n not in site)
+    if missing:
+        raise HubError(f"the index names {', '.join(missing)}, which the site does not hold: nothing is pushed")
+    for rel in sorted(site):
+        if not os.path.isfile(os.path.join(stage, *rel.split("/"))):
+            raise HubError(f"{rel} is not in the staged site: nothing is pushed")
+
+
+def publish_pages(args, folder, cat, host):
+    """The pages layout: every hub file, the pictures and the game archive are Pages files of `host` (GitVerse's
+    site, or GitHub's gh-pages site), and that host's catalog copy names them. No release is made or removed:
+    the release copies stay as they are. A dry run checks the routing and the sizes, and writes the index."""
+    base = GITVERSE_BASE if host == "gitverse" else GITHUB_BASE
+    rt = pages_routing(cat)
+    if rt["problems"]:
+        for name, why in rt["problems"]:
+            print(f"refused: {name}: {why}")
+        print("STOP: these files have no place on the Pages site; nothing was fetched or pushed.")
+        return 2
+    site = dict(rt["site"])
+    game_where, game_local = fetch_game(folder, cat)
+    site[game_where] = game_local
+    site.update(fetch_remote_pictures(folder, cat, site))
+    names = {n for n in set(rt["files"]) | set(site.values()) if "/" not in n}
+    check_local(folder, cat, names, gv.sha256_file)
+    sizes = {where: os.path.getsize(os.path.join(folder, local)) for where, local in site.items()}
+    files_bytes = sum(s for w, s in sizes.items() if w.startswith(PAGES_FILES) and w != game_where)
+    game_bytes = sizes[game_where]
+    pics_bytes = sum(s for w, s in sizes.items() if w.startswith(PREVIEWS))
+    web = pages.web_files()
+    if host == "gitverse":
+        mirrors = [GAME_URL, GAME_GITHUB_URL]
+    else:
+        mirrors = [GITVERSE_BASE + "/" + game_where, GAME_URL]
+    idx = pages_index(cat, base, mirrors)
+    stage = write_stage(folder, idx, site, name="pages-" + host)
+    check_stage(stage, idx)
+    check_pages_stage(stage, idx, base, site)
+    index_size = os.path.getsize(os.path.join(stage, INDEX_V2))
+    site_bytes = sum(sizes.values()) + sum(len(d) for d in web.values()) + index_size
+    verdict = pages_size_verdict(site_bytes)
+    print(f"{host} (pages layout): {len(rt['files'])} hub files as Pages files under {PAGES_FILES} "
+          f"({files_bytes / MB:.1f} MB), {sum(1 for w in sizes if w.startswith(PREVIEWS))} pictures "
+          f"({pics_bytes / MB:.1f} MB), the game ({game_bytes / MB:.1f} MB); the site {site_bytes / MB:.1f} MB "
+          f"with the hub page and the index; {len(cat['entries'])} entries")
+    if verdict == "stop":
+        print(f"STOP: the Pages site would be {site_bytes / MB:.0f} MB (the limit is 500 MB)")
+        return 2
+    if verdict == "warn":
+        print(f"WARNING: the Pages site is {site_bytes / MB:.0f} MB (above 400 MB; the limit is 500 MB)")
+    if args.dry_run:
+        print(f"dry run: nothing sent; the {host} index is in {os.path.join(stage, INDEX_V2)}")
+        return 0
+    if args.no_pages:
+        print(f"Pages not pushed (--no-pages); the {host} site is staged in {stage}")
+        return 0
+    for name, data in web.items():
+        with open(os.path.join(stage, name), "wb") as f:
+            f.write(data)
+    with open(os.path.join(stage, INDEX_V2), "rb") as f:
+        index_bytes = f.read()
+    sample = min(site, key=lambda w: sizes[w])
+    with pages.Pages(gv.HUB_REPO, host=host) as pg:
+        pg.sync_site_dir(stage)
+        pushed = pg.commit_push(f"Hub catalog, pages layout ({datetime.date.today().isoformat()})")
+        print(f"{host} Pages: {'pushed ' + pushed if pushed else 'unchanged'}")
+        with open(os.path.join(stage, sample), "rb") as f:
+            sample_bytes = f.read()
+        expected = {pg._in_repo(INDEX_V2): index_bytes, pg._in_repo(sample): sample_bytes}
+        waited = pg.wait_served(expected, wait=args.wait)
+        print(f"{host} Pages serves the new index and a sample file (waited {waited:.0f} s)")
+    print(f"published the {host} pages layout: {base}/{INDEX_V2}")
+    return 0
+
+
 def load_state(folder):
     path = os.path.join(folder, STATE)
     if os.path.exists(path):
@@ -402,6 +629,12 @@ def save_state(folder, state):
 def publish(args):
     folder = os.path.abspath(args.catalog_dir)
     cat = load_catalog(folder)
+    layout = getattr(args, "layout", "zipped")   # the zipped layout's callers build their own args
+    host = getattr(args, "host", "gitverse")
+    if layout == "pages":
+        return publish_pages(args, folder, cat, host)
+    if host != "gitverse":
+        raise HubError("--host github is for the pages layout only (the zipped layout is GitVerse's release)")
     state = load_state(folder)
     tag = args.tag or state.get("tag") or "catalog-" + datetime.date.today().isoformat()
     pl = plan(cat)
@@ -569,6 +802,11 @@ def main(argv):
     ap.add_argument("--wait", type=int, default=pages.WAIT_DEFAULT, help="seconds to wait for Pages")
     ap.add_argument("--dry-run", action="store_true",
                     help="check, zip, route and write the GitVerse index; nothing sent (the https pictures are read)")
+    ap.add_argument("--layout", choices=LAYOUTS, default="zipped",
+                    help="zipped (default): the release catalog of the 2026-11-13 design; pages: every hub file and "
+                         "the game as Pages files under files/ (no release is made or removed)")
+    ap.add_argument("--host", choices=HOSTS, default="gitverse",
+                    help="pages layout only: the Pages site to write (gitverse: docs/ of main; github: gh-pages)")
     args = ap.parse_args(argv)
     try:
         if args.unpublish:

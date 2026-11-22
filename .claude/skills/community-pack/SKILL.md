@@ -46,25 +46,24 @@ Downloaded mods and maps are untrusted: never run them, and run any Python that 
    ```
    List the assets explicitly, or pick them with `find <out> -maxdepth 1 -type f ! -name report.md`.
    `report.md` holds local paths: never upload it. Check the release with `gh release view`.
-6a. **GitVerse mirror** (the owner's decision, 2026-11-13; with the same yes as step 6): the same
-   catalog, under the same tag as the GitHub release (`docs/specs/2026-11-13-gitverse-mirrors.md`):
-   `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --tag catalog-YYYY-MM-DD`
-   (the tag of step 6, with its `-2` if there was one). Every map, campaign and other file is zipped alone
-   (`<name>.zip`) into the catalog release on `razdor-community`; a mod's zip goes as it is. Pages gets only
-   `index-v2.json` (the zipped layout), the pictures under `previews/` and the hub page; no `.dtm` and no bare
-   `index.json`. The GitVerse catalog is written into `<out>/gitverse/`, and the catalogs older than the newest
-   two are deleted.
-   - **Check the routing first**: `--dry-run` prints the counts and the Pages size and writes the
-     GitVerse index without sending anything. The Pages site must stay under 500 MB (it warns above
-     400 MB; the pictures are small).
-   - **It stops, before anything is created, when a file has no place** (a name GitVerse refuses for its zip,
-     a picture that is a `.zip`/`.exe`/`.py`, a name with a space, a clash with the site's own files). It lists
-     them; the mirror is then not made, and the owner decides (the GitHub catalog stays the default source, so
-     players are not affected). Do not rename files on your own.
-   - The Pages push replaces the site's catalog files: a file of an older catalog that is not in the new
-     one is removed. The update feed (`releases.json`) is never touched here.
-   - A run that stops midway resumes with the same command (`<out>/gitverse-state.json`).
+6a. **Pages mirror** (the owner's decision, 2026-11-22; with the same yes as step 6; spec: the "Pages layout"
+   section of `docs/specs/2026-11-13-gitverse-mirrors.md`): the same catalog goes to the `razdor-community`
+   Pages on both hosts, with the release copies kept as they are. Every hub file and the game are bare Pages
+   files `files/<sha256>.dat` (no zip; Pages refuses `.zip`), the pictures under `previews/`:
+   `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host gitverse --dry-run`, then
+   without `--dry-run` to push; then `--host github` the same way once GitHub's Pages is on (the setup in
+   `tools/gitverse/README.md`). The `index-v2.json` of each host names its own files by absolute address. No
+   release is made or deleted by this layout (no `--keep`, no `--tag`).
+   - **Check the routing first**: `--dry-run` prints the counts and the site size (the GitVerse index is written
+     into `<out>/pages-gitverse/`) and sends nothing. The site must stay under 500 MB (it warns above 400 MB;
+     the 2026-11-22 catalog is about 395 MB, so a larger catalog warns).
+   - **It stops, before anything is fetched or pushed, when a file has no place** (a picture that is a
+     `.zip`/`.exe`/`.py`, a file with no SHA-256). It lists them. Do not rename files on your own.
+   - The push replaces the site's catalog files: a file that is not in the new catalog is removed. The update
+     feed (`releases.json`) and the remote config (`config.json`) are never touched here.
    - Never run it against a catalog nobody has checked: it writes the public Pages site.
-   - Report the result (the tag, the release assets, the Pages files and size, the deleted releases) to the owner.
+   - Report the result (the site's files and size per host, the index address) to the owner.
+   - The legacy zipped layout (`--layout zipped`, the release `catalog-YYYY-MM-DD` on `razdor-community`) is
+     still there for a catalog that needs release files; it is GitVerse-only.
 7. **Afterwards**: the app reads the new catalog at its next start; no code change is needed.
    Keep the `out/` folder and the scratch data (they are the next run's inputs).

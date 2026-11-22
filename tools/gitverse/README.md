@@ -7,10 +7,10 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 | Script | What it does |
 |---|---|
 | `gitverse.py` | The shared client: the token, the API calls (releases, assets), retries, anonymous ranged downloads with the size and SHA-256 check, the name rule, the registry of the releases these scripts made. Not run directly. |
-| `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the `docs/` folder changed, a commit as the owner, a push to `main`, and a wait until the anonymous URLs serve exactly the new bytes. Every push writes `docs/config.json` from `data/remote/config.json`. Not run directly. |
+| `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the site changed, a commit as the owner, a push, and a wait until the anonymous URLs serve exactly the new bytes. Host `gitverse` (default): the `docs/` folder of `main`. Host `github` (the pages layout only): the root of the `gh-pages` branch, the token from `gh auth token -u indicozy`. Every push writes `config.json` from `data/remote/config.json`. Not run directly. |
 | `publish_config.py` | The remote config only: checks `data/remote/config.json` as the app reads it, pushes `docs/config.json` to the `razdor-community` Pages, waits until it is served. `--dry-run` checks only. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
-| `publish_hub.py` | The hub catalog: zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. |
+| `publish_hub.py` | The hub catalog. Default `--layout zipped` (the 2026-11-13 design): zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. `--layout pages` (the owner's decision, 2026-11-22): every hub file and the game archive is a bare Pages file `files/<sha256>.dat` on `--host gitverse` (the `docs/` of `main`) or `--host github` (the root of `gh-pages`); no release is made or removed. See «Pages layout» below. |
 | `publish_site.py` | The website on GitVerse Pages (`https://indicozy.gitverse.site/razdor/`): builds the committed wiki (`npm ci && npm run build`, pinned to CPUs 8-19) and assembles it with the gh-pages site and `config.json` as pages.yml does, pushes the `site` branch of `razdor` (the folder `site/` and `.github/workflows/gitverse-pages.yaml` from `site-pages.yaml`; force, that branch only), waits for its workflow run and for the bytes, then checks the live pages and their assets. `--assemble-only`, `--check-only`. |
 | `site-pages.yaml` | The workflow file pushed with the site (`actions/upload-pages-artifact@v1.0.0` on `site/`, `actions/deploy-pages@v1.0.0`, `ubuntu-latest`). |
 | `testkit.py` | The hermetic base every test class uses, and its guards (see Tests). |
@@ -41,7 +41,53 @@ python3 -I tools/gitverse/publish_site.py --check-only    # check the live site 
 python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --tag catalog-2026-11-20
 python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --no-pages     # upload only
 python3 -I tools/gitverse/publish_hub.py --unpublish catalog-2026-11-20
+
+# the pages layout (every hub file and the game as Pages files; NOT YET PUBLISHED, see below)
+python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host gitverse --dry-run
+python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host gitverse   # push, wait, check
+python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host github --dry-run
+python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --layout pages --host github     # after the GitHub setup
 ```
+
+## Pages layout (2026-11-22)
+
+The owner's decision: the Hub files and the game archive are served from the `razdor-community` Pages on
+both hosts (`https://indicozy.gitverse.site/razdor-community/` and `https://indicozy.github.io/razdor-community/`).
+The release copies stay where they are, as the catalog's fallback.
+
+- **Files**: each hub file (a map, a campaign, a mod's zip, any file) is `files/<sha256>.dat`, the bytes as they are
+  (bare, no zip). The name is by the SHA-256 (two entries with the same bytes share one file), the extension is
+  `.dat` because Pages refuses `.zip`, `.exe` and `.py` (and a mod's zip is a `.zip`). The app reads a bare
+  entry as it is (`size` and `sha256` of the file itself), and the archive flag (a mod) still unpacks it.
+- **Pictures** stay under `previews/`; the game archive is `files/<its sha256>.dat`, with its release addresses
+  (the GitVerse attachment, the GitHub release file) as `mirrors`.
+- **Index**: each host's `index-v2.json` names its own host's files (absolute `https` addresses). The GitHub copy
+  is read only once GitHub Pages is in the remote config's `hub` list (`data/remote/config.json`); no shipped
+  version reads it yet.
+- **Size**: the dry run measures it (`site ... MB`): about 395 MB for the 2026-11-22 catalog (343.8 MB of files,
+  7.9 MB of pictures, 42.6 MB of game). Above 400 MB the run warns; at 500 MB it stops. The git history of
+  `razdor-community` keeps every file once (git stores identical blobs once), so the first push is the big one.
+- **Routing check**: a picture or a file with no place (a `.zip`/`.exe`/`.py` picture, a file with no SHA-256) stops
+  the run before anything is fetched or pushed.
+- **No release is created or deleted** by the pages layout; `--keep` does not apply.
+- **GitHub host**: `pages.Pages(host="github")` clones `indicozy/razdor-community` branch `gh-pages` with the
+  personal account's token (`gh auth token -u indicozy`) and writes the site at its root. Before the first push
+  the branch must exist and GitHub Pages must serve it: see the setup below. Not run yet.
+
+GitHub setup (NOT RUN; the owner's go is needed, it creates a public site):
+
+```sh
+# 1. an orphan gh-pages branch with an empty first commit (a fresh clone, pushed once)
+# 2. enable Pages from that branch (today the repo's Pages answers 404: it is off)
+GH_TOKEN=$(gh auth token -u indicozy) gh api -X POST repos/indicozy/razdor-community/pages \
+    -f 'source[branch]=gh-pages' -f 'source[path]=/'
+# 3. check: anonymous GET of https://indicozy.github.io/razdor-community/ answers the site
+```
+
+Which app versions read what (checked against the tags): see «Pages layout» in
+`docs/specs/2026-11-13-gitverse-mirrors.md`.
+
+Tests for the layout: `tools/gitverse/test_pages_layout.py` (hermetic, in the same `unittest discover` run).
 
 `publish_release.py` takes the files as the GitHub pipeline names them. Versioned names are required
 (`Razdor-X.Y.Z.exe`, `razdor-X.Y.Z-linux`, `razdor-X.Y.Z-macos`, `razdor-X.Y.Z.apk`); the unversioned

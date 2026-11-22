@@ -37,6 +37,29 @@ META_FILES_BASE = re.compile(r"<meta\s+name=[\"']razdor-files-base[\"'][^>]*>", 
 COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
+HOSTS = {
+    # gitverse: the repo's main, the site in docs/ (the update feed, the config and the hub's pages)
+    "gitverse": {"plain": PLAIN_URL, "branch": "main", "site_dir": "docs",
+                 "base": "https://indicozy.gitverse.site/" + gv.HUB_REPO + "/"},
+    # github: the repo's gh-pages branch, the site at its root (the Pages source of the github.io site)
+    "github": {"plain": "https://github.com/" + gv.OWNER + "/{repo}.git", "branch": "gh-pages", "site_dir": "",
+               "base": "https://" + gv.OWNER + ".github.io/" + gv.HUB_REPO + "/"},
+}
+
+
+def github_token():
+    """The personal GitHub account's token (`gh auth token -u indicozy`): never the work account's."""
+    r = subprocess.run(["gh", "auth", "token", "-u", gv.OWNER], capture_output=True, text=True)
+    token = r.stdout.strip()
+    if r.returncode != 0 or not token:
+        raise PagesError("no GitHub token for the indicozy account (gh auth token -u indicozy)")
+    return token
+
+
+def _load_token_for(host):
+    return github_token() if host == "github" else gv.load_token()
+
+
 class PagesError(gv.GitVerseError):
     pass
 
@@ -73,17 +96,29 @@ def _git(args, cwd, token=None):
 
 
 class Pages:
-    """A fresh clone of a GitVerse repo whose `docs/` is the site. Use as a context manager or call
-    `commit_push` yourself; nothing is pushed until commit_push."""
+    """A fresh clone of a repo whose site is served by Pages. Use as a context manager or call
+    `commit_push` yourself; nothing is pushed until commit_push.
 
-    def __init__(self, repo=gv.HUB_REPO, token=None, remote=None, scratch=None):
-        """`remote` (tests only) replaces the GitVerse address with a local repository, and the token
+    host "gitverse" (the default): the site is `docs/` of the GitVerse repo's `main`, served at
+    `indicozy.gitverse.site/<repo>/`. host "github": the site is the root of the GitHub repo's
+    `gh-pages` branch (the Pages source of `indicozy.github.io/<repo>/`); the branch must exist
+    before the first push (see the publish notes in tools/gitverse/README.md)."""
+
+    def __init__(self, repo=gv.HUB_REPO, token=None, remote=None, scratch=None, host="gitverse"):
+        """`remote` (tests only) replaces the host's address with a local repository, and the token
         is then not needed."""
+        if host not in HOSTS:
+            raise PagesError(f"unknown Pages host {host!r}")
         self.repo = repo
+        self.host = host
         self.remote = remote
-        self.token = None if remote else (token or gv.load_token())
+        self.branch = HOSTS[host]["branch"]
+        self.site_dir = HOSTS[host]["site_dir"]
+        self.base = HOSTS[host]["base"]
+        self.plain_url = HOSTS[host]["plain"].format(repo=repo)
+        self.token = None if remote else (token or _load_token_for(host))
         self.scratch = scratch or SCRATCH
-        self.dir = os.path.join(self.scratch, repo)
+        self.dir = os.path.join(self.scratch, repo if host == "gitverse" else f"{repo}-{host}")
         self._clone()
 
     def __enter__(self):
@@ -95,7 +130,7 @@ class Pages:
     def _url(self):
         if self.remote:
             return self.remote
-        return f"https://{AUTHOR[0]}:{self.token}@" + PLAIN_URL.format(repo=self.repo)[len("https://"):]
+        return f"https://{AUTHOR[0]}:{self.token}@" + self.plain_url[len("https://"):]
 
     def _clone(self):
         if os.path.exists(self.dir):
@@ -103,9 +138,9 @@ class Pages:
                 raise PagesError(f"refusing to delete {self.dir}")
             shutil.rmtree(self.dir)
         os.makedirs(self.scratch, exist_ok=True)
-        _git(["-c", "credential.helper=", "clone", "--quiet", "--branch", "main", self._url(), self.dir],
+        _git(["-c", "credential.helper=", "clone", "--quiet", "--branch", self.branch, self._url(), self.dir],
              cwd=self.scratch, token=self.token)
-        _git(["remote", "set-url", "origin", self.remote or PLAIN_URL.format(repo=self.repo)], cwd=self.dir)
+        _git(["remote", "set-url", "origin", self.remote or self.plain_url], cwd=self.dir)
         _git(["config", "user.name", AUTHOR[0]], cwd=self.dir)
         _git(["config", "user.email", AUTHOR[1]], cwd=self.dir)
 
@@ -127,48 +162,84 @@ class Pages:
         if os.path.isdir(path):
             shutil.rmtree(path)
 
+    def _site_root(self):
+        """The folder of the clone that is the site (docs/ on GitVerse, the clone's root on GitHub)."""
+        return os.path.join(self.dir, self.site_dir) if self.site_dir else self.dir
+
+    def _site_files(self):
+        """The site's files as site-relative paths (the clone's .git folder is never part of the site)."""
+        root = self._site_root()
+        out = []
+        if not os.path.isdir(root):
+            return out
+        for dirpath, dirnames, names in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not (dirpath == self.dir and d == ".git")]
+            for n in names:
+                out.append(os.path.relpath(os.path.join(dirpath, n), root).replace(os.sep, "/"))
+        return out
+
+    def _in_repo(self, site_rel):
+        """A site-relative path as the clone's repo path."""
+        return f"{self.site_dir}/{site_rel}" if self.site_dir else site_rel
+
     def sync_site(self, files):
-        """Makes docs/ hold exactly `files` ({docs-relative path: bytes}): files of an older catalog that
-        are not in it are removed. The update feed (releases.json) and .nojekyll are kept."""
-        docs = os.path.join(self.dir, "docs")
-        if os.path.isdir(docs):
-            for root, _, names in os.walk(docs):
-                for n in names:
-                    rel = os.path.relpath(os.path.join(root, n), docs).replace(os.sep, "/")
-                    if rel not in files and rel not in KEEP_IN_DOCS:
-                        os.remove(os.path.join(root, n))
+        """Makes the site hold exactly `files` ({site-relative path: bytes}): files of an older catalog that
+        are not in it are removed. The update feed (releases.json), the remote config and .nojekyll are kept."""
+        for rel in self._site_files():
+            if rel not in files and rel not in KEEP_IN_DOCS:
+                os.remove(os.path.join(self._site_root(), *rel.split("/")))
         for rel, data in files.items():
-            self.write("docs/" + rel, data)
+            self.write(self._in_repo(rel), data)
+
+    def sync_site_dir(self, src):
+        """`sync_site` with the new site as a folder `src` (copied file by file, not read into memory: the
+        pages layout's site is hundreds of MB). The same keeps and removals."""
+        wanted = set()
+        for dirpath, _, names in os.walk(src):
+            for n in names:
+                wanted.add(os.path.relpath(os.path.join(dirpath, n), src).replace(os.sep, "/"))
+        root = self._site_root()
+        for rel in self._site_files():
+            if rel not in wanted and rel not in KEEP_IN_DOCS:
+                os.remove(os.path.join(root, *rel.split("/")))
+        for rel in sorted(wanted):
+            dst = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(os.path.join(src, *rel.split("/")), dst)
 
     def ensure_nojekyll(self):
-        path = os.path.join(self.dir, "docs", ".nojekyll")
+        path = os.path.join(self._site_root(), ".nojekyll")
         if not os.path.exists(path):
-            self.write("docs/.nojekyll", b"")
+            self.write(self._in_repo(".nojekyll"), b"")
 
     def commit_push(self, message):
-        """Commits what changed (nothing: no commit, no push) and pushes to main. Returns the new
-        short id, or None when nothing changed. Every push writes docs/config.json from
-        data/remote/config.json first (`config_bytes`)."""
-        self.write("docs/config.json", config_bytes())
+        """Commits what changed (nothing: no commit, no push) and pushes to the host's branch (main on
+        GitVerse). Returns the new short id, or None when nothing changed. Every push writes config.json
+        from data/remote/config.json first (`config_bytes`)."""
+        self.write(self._in_repo("config.json"), config_bytes())
         self.ensure_nojekyll()
         _git(["add", "-A"], cwd=self.dir)
         if not _git(["status", "--porcelain"], cwd=self.dir).strip():
             return None
         _git(["commit", "--quiet", "-m", message], cwd=self.dir)
         head = _git(["rev-parse", "--short=8", "HEAD"], cwd=self.dir).strip()
-        _git(["push", "--quiet", self._url(), "HEAD:refs/heads/main"], cwd=self.dir, token=self.token)
+        _git(["push", "--quiet", self._url(), f"HEAD:refs/heads/{self.branch}"], cwd=self.dir, token=self.token)
         return head
 
     def wait_served(self, expected, wait=WAIT_DEFAULT, interval=20, sleep=time.sleep):
-        """Polls the anonymous URLs of `expected` ({site-relative path: bytes}) until each serves exactly
-        those bytes. Returns the seconds waited; raises PagesError at the deadline."""
+        """Polls the anonymous URLs of `expected` ({repo path or site path: bytes}) until each serves exactly
+        those bytes. A key starting with the site folder's name ("docs/") is taken as a site-relative path.
+        Returns the seconds waited; raises PagesError at the deadline."""
         started = time.time()
-        pending = dict(expected)  # repo path -> bytes; docs/ is the site root
+        pending = dict(expected)
+        base = getattr(self, "base", None) or PAGES_BASE
+        site_dir = getattr(self, "site_dir", "docs")
         while True:
             for rel in list(pending):
-                site = rel[len("docs/"):] if rel.startswith("docs/") else rel
+                prefix = site_dir + "/" if site_dir else None
+                site = rel[len(prefix):] if prefix and rel.startswith(prefix) else rel
                 try:
-                    got = gv.fetch_bytes(PAGES_BASE + site, tries=2)
+                    got = gv.fetch_bytes(base + site, tries=2)
                 except gv.GitVerseError:
                     got = None  # not served yet (or an error): poll again
                 if got == pending[rel]:

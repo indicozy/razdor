@@ -168,8 +168,63 @@ no macroquad):
 - The website (site + wiki) on the `razdor` Pages: pushed from this machine by the `wiki` /
   `release` skills (no GitVerse token on GitHub, unless the owner asks for it).
 
+## Pages layout (the owner's decision, 2026-11-22)
+
+GitVerse answers HTTP 429 to anonymous release downloads (about 2 minutes); its Pages did not. So the Hub files
+and the game archive move from the release attachments to the `razdor-community` Pages, on both hosts
+(`indicozy.gitverse.site/razdor-community/` and `indicozy.github.io/razdor-community/`). The release files
+stay: they are the fallback copies. This replaces the 2026-11-13 rule for the hub and the game («the hub and
+the game stay on releases»).
+
+- **Files**: every hub file is `files/<sha256>.dat`, bare (the bytes of the file, no zip). Pages refuses `.zip`,
+  `.exe` and `.py`; a mod's zip is served under `.dat` too, and its catalog flag `archive` still unpacks it.
+  Identical bytes share one file. The game archive is `files/<its sha256>.dat`.
+- **Pictures** stay under `previews/` (relative, as before). `releases.json` and `config.json` are unchanged.
+- **Index**: `index-v2.json` on each host names that host's files by absolute `https` address. Fields per file:
+  `path` (the Pages address), `name`, `size`, `sha256` (the file's own), `archive`, as the catalog has them. No
+  `wrapped`/`member`/`archive_*` fields. The game: `url` = its Pages address, `mirrors` = the GitVerse
+  attachment and the GitHub release file (on the GitHub index: the GitVerse Pages address and the attachment).
+- **Catalog releases**: the pages layout creates no release and deletes none. The existing `catalog-…`
+  release and the GitHub catalog (`releases/latest/download/index.json`, bare, release-hosted) are unchanged.
+- **Size**: the site is the files, the pictures, the game, the hub page and the index: about 395 MB for the
+  2026-11-22 catalog (343.8 MB files, 7.9 MB pictures, 42.6 MB game); the limit is 500 MB (warns above 400 MB).
+  GitHub Pages: 1 GB a site, 100 MB a file (largest file 42.6 MB).
+- **Routing check**: a file or picture with no place stops the run before anything is fetched or pushed.
+
+### Which app versions read what
+
+Checked in the tags (`git show <tag>:src/hub.rs`, `src/mirror.rs`, `src/gdrive.rs`, `src/ui/game_import.rs`):
+
+| Version | Catalog it reads | Files | Game |
+|---|---|---|---|
+| 1.4.1, 1.5.0, 1.5.1 | GitHub only: `releases/latest/download/index.json` (bare). No GitVerse, no `index-v2.json`. | the release files (unchanged) | GitHub release (unchanged) |
+| 1.5.2, 1.5.3, 1.5.4 | `mirror::HUB`: GitVerse Pages `index-v2.json`, then its `index.json` (not written any more: a miss), then GitHub's `index-v2.json` (none), then GitHub's `index.json`. | Pages files at the absolute address (bare: read as they are); a mod's zip unpacks by its flag | the catalog's `game` (url, then `mirrors`) is offered by `game_import` (1.5.4: `ui/game_import.rs`); the download itself is the remote config's `game.links` (1.5.4), unchanged here |
+
+- Every version reads an absolute `https` address as it is (`hub::resolve`), so the Pages address works.
+- No shipped version has a per-file `mirrors` field (`FileRef` has none, in any tag): a hub file that fails on
+  Pages has no fallback to its release copy from inside the app. The fallback is at the catalog level: when
+  the GitVerse catalog cannot be read, the GitHub catalog (release files) is used. Adding a per-file mirror
+  is an app change (`src/hub.rs`, `FileRef`, `serde(default)`; old readers ignore unknown fields: none of the
+  tags denies them).
+- The remote config's `game.links` (`data/remote/config.json`) is what 1.5.4 downloads the game from. It is
+  still the attachment and the GitHub release until the config is changed (a separate publish: `publish_config.py`).
+
+### Test plan (before the owner's publish)
+
+1. The candidate index is built locally (`--dry-run`); the app's file rules are checked by the hermetic tests.
+2. An old binary (v1.5.2, v1.5.3, v1.5.4) with the candidate catalog as a folder: `RAZDOR_HUB=<folder>` (a
+   `Source::Dir`, read as `index-v2.json` with the paths resolved in the folder). The candidate for the test is
+   a copy whose `files/<sha>.dat` paths are relative, not `https`, because no old binary has an `https` override
+   for a local server. One map, one campaign and one mod are downloaded and played; the game is checked with
+   `game_import` by hand.
+3. After the publish: the same binary against the live GitVerse Pages (the real addresses), with a clean
+   hub folder, and the GitHub catalog path (`RAZDOR_HUB=https://github.com/…/releases/latest/download`).
+
 ## Open
 
-- GitVerse Pages are live (the owner, 2026-11-13). The sites are pushed by the scripts to `docs/` of `main`
+- GitVerse Pages are live (the owner, 2026-11-13). The sites were pushed by the scripts to `docs/` of `main`
   (with `.nojekyll`), not by a workflow; the workflow route above is kept for the record only.
 - Pages speed per connection: not measured yet.
+- Not measured on GitVerse Pages: a `.dat` file and a 40 MB+ file (the first pages-layout push is the check).
+  The 2026-11-13 refusal list (`.zip`, `.exe`, `.py`) is all that is known.
+- The GitHub Pages site (`indicozy.github.io/razdor-community`) is off (the owner's go needed to enable it).
