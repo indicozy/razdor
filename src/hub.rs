@@ -1088,17 +1088,40 @@ pub fn plan_install(catalog: &Catalog, installed: &Installed, id: &str) -> Resul
     Ok(out)
 }
 
-/// Whether an installed mod must be downloaded again (pure): the catalog's files for `lang` are not the
-/// ones the mod was installed from. `installed` is the manifest's sources (the catalog files it came from),
-/// None when the mod has no manifest: its files are then unknown, so it is downloaded again. The version
-/// string is not compared: the files' SHA-256s decide, as the holiday files' check does.
-pub fn mod_needs_update(entry: &Entry, lang: &str, installed: Option<&[FileRef]>) -> bool {
+/// Whether an installed entry (a mod, a map or a campaign) must be downloaded again (pure): the catalog's
+/// files for `lang` are not the ones it was installed from. `installed` is what it was installed from (a
+/// mod's manifest sources, a map's recorded sources), None when that is unknown: it is then downloaded
+/// again. Same files (by SHA-256, whatever the version says) mean nothing to download; any file that
+/// differs, is added or is removed means download.
+pub fn entry_needs_update(entry: &Entry, lang: &str, installed: Option<&[FileRef]>) -> bool {
     let Some(installed) = installed else { return true };
     let mut want: Vec<String> = entry.files_for(lang).iter().map(|f| f.sha256.to_lowercase()).collect();
     let mut have: Vec<String> = installed.iter().map(|f| f.sha256.to_lowercase()).collect();
     want.sort();
     have.sort();
     want != have
+}
+
+/// What installed entry `id` was installed from: a mod's manifest sources, a map's or campaign's recorded
+/// sources. None when that is not known (no manifest, or a map installed before its sources were recorded).
+pub fn installed_sources(local: &Path, installed: &Installed, id: &str) -> Option<Vec<FileRef>> {
+    let record = installed.entries.get(id)?;
+    if record.kind == Kind::Mod {
+        mods::read_manifest(local, id).map(|m| m.sources)
+    } else if record.sources.is_empty() {
+        None
+    } else {
+        Some(record.sources.clone())
+    }
+}
+
+/// Whether installed entry `id` must be downloaded again for the catalog's files (see [`entry_needs_update`]),
+/// in the language it was installed in (`InstalledEntry::lang`), else `lang`. False when it is not installed
+/// or the catalog does not list it (a removed entry has nothing to update to).
+pub fn update_available(local: &Path, catalog: &Catalog, installed: &Installed, id: &str, lang: &str) -> bool {
+    let (Some(entry), Some(record)) = (catalog.entry(id), installed.entries.get(id)) else { return false };
+    let code = if record.lang.is_empty() { lang } else { record.lang.as_str() };
+    entry_needs_update(entry, code, installed_sources(local, installed, id).as_deref())
 }
 
 /// The installed entries that need `id`.
@@ -1511,6 +1534,11 @@ impl Hub {
             }
             Source::Dir(_) | Source::Mock => read_index(&mut |rel| self.fetch(rel)),
         }
+    }
+
+    /// When the cache was written (its file's modification time), for the log.
+    pub fn cache_time(&self) -> Option<std::time::SystemTime> {
+        fs::metadata(self.local.join(CACHE_DIR).join(INDEX)).ok()?.modified().ok()
     }
 
     /// The catalog the cache holds for this hub's address (see [`read_cache`]); None for a
@@ -2233,16 +2261,52 @@ mod tests {
     }
 
     #[test]
-    fn a_mod_is_downloaded_again_only_when_its_files_differ_from_the_catalog() {
+    fn an_entry_is_downloaded_again_only_when_its_files_differ_from_the_catalog() {
         let (a, b) = ("aa".repeat(32), "bb".repeat(32));
         let file = |sum: &str| FileRef { path: "p.zip".into(), name: "m.zip".into(), lang: None, size: 1, sha256: sum.into(), archive: true, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: Vec::new() };
         let json = format!(r#"{{"format":1,"entries":[{{"id":"m","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"2","files":[{{"path":"p.zip","name":"m.zip","size":1,"sha256":"{a}","archive":true}}]}}]}}"#);
         let c = Catalog::parse(json.as_bytes()).unwrap();
         let entry = c.entry("m").unwrap();
-        assert!(!mod_needs_update(entry, "ru", Some(&[file(&a)])), "the same file: nothing to download, whatever the version says");
-        assert!(mod_needs_update(entry, "ru", Some(&[file(&b)])), "the installed file differs: download");
-        assert!(mod_needs_update(entry, "ru", Some(&[])), "no file recorded against the catalog's one");
-        assert!(mod_needs_update(entry, "ru", None), "no manifest: the files are unknown, so download");
+        assert!(!entry_needs_update(entry, "ru", Some(&[file(&a)])), "the same file: nothing to download, whatever the version says");
+        assert!(entry_needs_update(entry, "ru", Some(&[file(&b)])), "the installed file differs: download");
+        assert!(entry_needs_update(entry, "ru", Some(&[])), "no file recorded against the catalog's one");
+        assert!(entry_needs_update(entry, "ru", None), "no manifest: the files are unknown, so download");
+    }
+
+    #[test]
+    fn an_installed_entry_of_any_kind_is_updated_only_when_its_files_differ() {
+        let (a, b) = ("aa".repeat(32), "bb".repeat(32));
+        let file = |name: &str, sum: &str| format!(r#"{{"path":"{name}","name":"{name}","size":1,"sha256":"{sum}"}}"#);
+        let json = format!(
+            r#"{{"format":1,"entries":[{{"id":"map","kind":"map","title":{{"ru":"x"}},"author":"a","version":"2","files":[{}]}},{{"id":"mod","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"2","files":[{}]}}]}}"#,
+            file("m.DTm", &a),
+            file("p.zip", &a)
+        );
+        let c = Catalog::parse(json.as_bytes()).unwrap();
+        let local = std::env::temp_dir().join(format!("razdor-hub-update-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&local);
+        std::fs::create_dir_all(&local).unwrap();
+        let installed = |body: String| -> Installed { serde_json::from_str(&format!(r#"{{"entries":{{{body}}}}}"#)).unwrap() };
+        let map_with = |sources: String| format!(r#""map":{{"version":"1","kind":"map","lang":"","title":{{"ru":"x"}},"requires":[],"files":[],"sources":[{sources}]}}"#);
+        let mod_record = r#""mod":{"version":"1","kind":"mod","lang":"","title":{"ru":"x"},"requires":[],"files":[]}"#;
+        let same = installed(map_with(file("m.DTm", &a)) + "," + mod_record);
+        assert!(!update_available(&local, &c, &same, "map", "ru"), "the same map file: nothing to download");
+        let differs = installed(map_with(file("m.DTm", &b)) + "," + mod_record);
+        assert!(update_available(&local, &c, &differs, "map", "ru"), "the installed map file differs");
+        let added = installed(map_with(format!("{},{}", file("m.DTm", &a), file("x.DTm", &b))) + "," + mod_record);
+        assert!(update_available(&local, &c, &added, "map", "ru"), "a file the catalog does not have");
+        let fewer = installed(map_with(String::new()) + "," + mod_record);
+        assert!(update_available(&local, &c, &fewer, "map", "ru"), "a file of the catalog is missing");
+        let unknown = installed(r#""map":{"version":"1","kind":"map","lang":"","title":{"ru":"x"},"requires":[],"files":[]}"#.to_string() + "," + mod_record);
+        assert!(update_available(&local, &c, &unknown, "map", "ru"), "no sources recorded: download");
+        let mod_ok = installed(map_with(file("m.DTm", &a)) + "," + mod_record);
+        let manifest = |sum: &str| mods::Manifest { files: Vec::new(), sources: vec![serde_json::from_str::<FileRef>(&file("p.zip", sum)).unwrap()] };
+        mods::write_manifest(&local, "mod", &manifest(&a)).unwrap();
+        assert!(!update_available(&local, &c, &mod_ok, "mod", "ru"), "the mod's manifest has the catalog's file");
+        mods::write_manifest(&local, "mod", &manifest(&b)).unwrap();
+        assert!(update_available(&local, &c, &mod_ok, "mod", "ru"), "the mod's manifest has another file");
+        assert!(!update_available(&local, &c, &mod_ok, "nothing", "ru"), "not in the catalog: nothing to update to");
+        let _ = std::fs::remove_dir_all(&local);
     }
 
     /// A catalog with one mod whose file (and, with `preview`, its picture) has the SHA-256 `sum`.
