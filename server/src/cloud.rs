@@ -353,8 +353,12 @@ pub async fn put_save(
     if sha256_hex(&[bytes]) != meta.sha256 {
         return Err(ApiError::BadRequest("save sha256 differs from its header".into()));
     }
+    if meta.size == 0 {
+        return Err(ApiError::BadRequest("an empty save is refused".into()));
+    }
     let save_id = files::new_id()?;
     let bytes = bytes.to_vec();
+    let rows_cap = st.cfg.limits.saves_per_account as i64;
     let limit = per_map_limit(meta.kind) as i64;
     let kind = kind_name(meta.kind);
     let quota = limits::CLOUD_BYTES_PER_ACCOUNT as i64;
@@ -376,6 +380,11 @@ pub async fn put_save(
                 return Err(ApiError::Conflict(format!(
                     "На этой карте уже максимум сохранений этого вида ({limit}). Удалите старое."
                 )));
+            }
+            // The account's row cap: the same refusal as a full cloud, so the client shows it alike.
+            let rows: i64 = tx.query_row("SELECT COUNT(*) FROM saves WHERE account_id = ?1", params![account], |r| r.get(0))?;
+            if rows >= rows_cap {
+                return Err(ApiError::TooLarge("Облако заполнено, удалите старые сохранения".into()));
             }
             let used: i64 = tx.query_row(
                 "SELECT COALESCE(SUM(size), 0) FROM saves WHERE account_id = ?1",

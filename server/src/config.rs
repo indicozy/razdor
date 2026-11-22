@@ -66,12 +66,12 @@ impl Default for Limits {
             battles_per_hour: limits::BATTLES_PER_HOUR,
             invalid_percent: limits::INVALID_PERCENT,
             bad_in_a_row: limits::BAD_REQUESTS_IN_A_ROW,
-            saves_per_account: 400,
+            saves_per_account: 160,
             crash_per_day: 10,
             perf_per_day: 48,
             max_data_bytes: 20 << 30,
             min_free_bytes: 2 << 30,
-            account_expiry_days: 365,
+            account_expiry_days: 90,
         }
     }
 }

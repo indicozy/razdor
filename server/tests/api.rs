@@ -740,3 +740,29 @@ async fn a_redeemed_or_expired_link_row_is_gone() {
     assert_eq!(cloud::sweep_links(&h.st).await.expect("sweeps"), 1);
     assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM links").await, 0);
 }
+
+#[tokio::test]
+async fn saves_per_account_zero_size_and_map_names_are_checked() {
+    let limits = Limits { saves_per_account: 2, ..Limits::default() };
+    let h = harness("save-caps", limits);
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    let headers = key_header(&key);
+    let put = |game: &str, map: &str, bytes: &[u8]| {
+        let body = save_frame(game, map, "manual", bytes);
+        let headers = headers.clone();
+        let app = app.clone();
+        async move { call(&app, "PUT", "/v1/saves", &headers, body).await }
+    };
+    // An empty save and an over-long or control-character map name are 400s.
+    assert_eq!(put("dt", "Карта", b"").await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(put("dt", &"а".repeat(201), b"x").await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(put("dt", "Карта\nдве", b"x").await.status, StatusCode::BAD_REQUEST);
+    // The row cap: two saves stored, the third is the cloud-full refusal (413), nothing deleted.
+    assert_eq!(put("dt", "Карта1", b"one").await.status, StatusCode::OK);
+    assert_eq!(put("dt", "Карта2", b"two").await.status, StatusCode::OK);
+    let third = put("dt", "Карта3", b"three").await;
+    assert_eq!(third.status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(third.json()["error"].as_str().unwrap_or("").contains("Облако заполнено"));
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 2);
+}
