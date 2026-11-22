@@ -1173,8 +1173,7 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
         }
     });
     // The selected unit's «выбран» over its portrait (the same tag as the line view's).
-    let focus_rect = rect_of(focus);
-    if w.pos.contains_key(&focus) && on_canvas(focus_rect) {
+    if let Some(focus_rect) = focus_tag_rect(w, focus, rect_of).filter(|r| on_canvas(*r)) {
         selected_tag(a, focus_rect);
     }
     // The zoom buttons: fixed on the canvas, not zoomed.
@@ -1188,6 +1187,14 @@ fn web_view(c: &Content, model: &Model, assets: &Assets, a: Rect, focus: u32, re
         });
     }
     picked
+}
+
+/// Where the web's «выбран» tag goes: the focus's portrait, `None` when the focus is not in the web. A class
+/// with no promotions is not placed (`radial` places classes with next steps and their own): a squad member
+/// of the hero's classes (Рыцарь, Архимаг, Следопыт on «РК1») opens «Всё дерево» without its tag, as its
+/// portrait and path are skipped above; reading its place first panicked (`w.pos[&id]`).
+fn focus_tag_rect(w: &Radial, focus: u32, rect_of: impl Fn(u32) -> Rect) -> Option<Rect> {
+    w.pos.contains_key(&focus).then(|| rect_of(focus))
 }
 
 /// A name's card in the line view: its class, its «+N», its place, its size and where its name goes.
@@ -1553,6 +1560,23 @@ pub fn overlay(game: &Game, assets: &Assets, win: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_whole_tree_of_a_class_outside_it_opens_without_the_selected_tag() {
+        // A class with no promotions (the hero's classes on a squad member) is not in the web: «Всё дерево» drew
+        // its «выбран» tag by its place and panicked (`no entry found for key`).
+        fn rect_of(w: &Radial) -> impl Fn(u32) -> Rect + '_ {
+            move |id| {
+                let p = w.pos[&id];
+                Rect::new(p.x, p.y, 1.0, 1.0)
+            }
+        }
+        let mut w = Radial::default();
+        assert_eq!(focus_tag_rect(&w, 7, rect_of(&w)), None);
+        // A placed focus keeps its tag.
+        w.pos.insert(7, Vec2::new(2.0, 3.0));
+        assert_eq!(focus_tag_rect(&w, 7, rect_of(&w)), Some(Rect::new(2.0, 3.0, 1.0, 1.0)));
+    }
 
     fn lv_of(g: &Graph) -> HashMap<u32, u32> {
         leaves(g)
