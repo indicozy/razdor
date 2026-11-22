@@ -1456,7 +1456,7 @@ impl App {
             // The hub's promo ad is kept in the app folder once the launch's catalog has come (`ui::ads::sync_tick`).
             ads::sync_tick();
             // The holiday look's files (the music, the bell, the sleigh) are kept the same way (`holiday_start::files_tick`).
-            holiday_start::files_tick(holiday::start_due(&self.audio.settings, holiday::today()));
+            holiday_start::files_tick(holiday::start_due(&self.audio.settings, holiday::today()), holiday_start::game_ready(self.assets.dt.is_some(), game_import::busy()));
             self.poll_mod_switch();
             self.poll_lacking();
             self.poll_map_repair();

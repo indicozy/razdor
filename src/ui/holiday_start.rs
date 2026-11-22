@@ -36,6 +36,10 @@ pub fn loading_label(season_start: bool, files: bool, catalog: bool) -> Option<&
 /// The loader's text this frame (`loading_label` of the live jobs). In a snapshot the catalog and the
 /// holiday jobs never run, so `RAZDOR_LOADER=holiday|catalog` shows one of them for the screenshots.
 pub fn loader_label() -> Option<&'static str> {
+    // The switch waits for the game (`game_ready`): while the game downloads, the loader says so.
+    if !super::clock::is_snapshot() && holiday::setting() && super::game_import::busy() {
+        return Some("Loading the game");
+    }
     if super::clock::is_snapshot() {
         return match std::env::var("RAZDOR_LOADER").ok().as_deref() {
             Some("holiday") => loading_label(true, false, false),
@@ -59,10 +63,25 @@ pub fn take_landed() -> bool {
 
 use super::{finished, holiday, holiday_windows, launch, App};
 
-/// The switch's result: the mod's id and whether it was on the disk before (`false`: it was downloaded).
+/// The switch's result: the mod's id, whether it was downloaded (not on the disk before), and whether an
+/// installed copy was downloaded again because its files differ from the catalog's (`hub::mod_needs_update`).
 pub struct Start {
     pub id: String,
-    pub was_installed: bool,
+    pub downloaded: bool,
+    pub updated: bool,
+}
+
+/// Whether the worker runs this launch (pure): the holiday switch is pending (a turn-on or a launch that left
+/// it pending), or a mod is played, which may be the Christmas mod whose files a new catalog changed.
+pub fn check_due(pending: bool, mod_played: bool) -> bool {
+    pending || mod_played
+}
+
+/// Whether the holiday steps (the catalog, the mod, the files, the switch) may run this frame (pure). The
+/// game comes first (the owner's rule, 2026-11-22): the install is loaded and no game download or import
+/// runs. A failed download leaves no loaded install, so the steps wait for the next successful load.
+pub fn game_ready(game_loaded: bool, game_busy: bool) -> bool {
+    game_loaded && !game_busy
 }
 
 /// The holiday files are written by one thread at a time: the switch's worker and the launch's files check can
@@ -77,27 +96,51 @@ fn install_files(hub: &Hub, h: &HolidayRef) -> Result<usize, String> {
 }
 
 /// The worker: the hub's catalog (fresh from the address, else the cached one when offline), the mod it
-/// names, and its download and install when it is not on the disk. The whole catalog is read, so the
-/// listing's `visible_from` does not hide the mod from the switch. Runs on a thread.
-fn run(local: PathBuf) -> Result<Start, String> {
+/// names, and its download and install when it is not on the disk (only while the switch is pending). An
+/// installed copy whose files differ from the catalog's (`hub::mod_needs_update`, by SHA-256) is downloaded
+/// again through the Hub's install, when the switch is pending or the mod is the one played (`played`). The
+/// whole catalog is read, so the listing's `visible_from` does not hide the mod from the switch. Runs on a thread.
+fn run(local: PathBuf, pending: bool, played: Option<String>) -> Result<Start, String> {
     let hub = Hub { source: Source::from_env(), local };
     let (catalog, fresh) = match hub.fetch_catalog() {
         Ok(c) => (c, true),
         Err(why) => (hub.cached_catalog().ok_or(why)?, false),
     };
     let id = catalog.holiday.as_ref().and_then(|h| h.mod_id.clone()).ok_or_else(|| "the hub names no Christmas mod".to_string())?;
-    let was_installed = hub.installed().has(&id);
-    if !was_installed {
+    let installed = hub.installed().has(&id);
+    if !installed && !pending {
+        return Ok(Start { id, downloaded: false, updated: false });
+    }
+    if !installed {
         hub.install(&catalog, &id, lang())?;
+    }
+    let mut updated = false;
+    if installed && fresh && (pending || played.as_deref() == Some(id.as_str())) {
+        if let Some(entry) = catalog.entry(&id) {
+            let code = match lang() {
+                razdor::i18n::Lang::En => "en",
+                razdor::i18n::Lang::Ru => "ru",
+            };
+            let sources = razdor::hub::read_manifest(&hub.local, &id).map(|m| m.sources);
+            if razdor::hub::mod_needs_update(entry, code, sources.as_deref()) {
+                match hub.install(&catalog, &id, lang()) {
+                    Ok(_) => {
+                        updated = true;
+                        razdor::diag!("holiday: the Christmas mod {id} differs from the catalog; it is downloaded again");
+                    }
+                    Err(why) => razdor::diag!("holiday: the Christmas mod {id} could not be updated ({why}); the installed copy stays"),
+                }
+            }
+        }
     }
     // The bell, the music and the sleigh come with the switch. A failure is not fatal: the look's copy
     // (`files_tick`) tries them again on the next launch. Offline (the cached catalog) they wait.
-    if let (true, Some(h)) = (fresh, &catalog.holiday) {
+    if let (true, true, Some(h)) = (fresh, pending, &catalog.holiday) {
         if let Err(why) = install_files(&hub, h) {
             razdor::diag!("holiday: the files are not all there ({why}); they are tried again on the next launch");
         }
     }
-    Ok(Start { id, was_installed })
+    Ok(Start { id, downloaded: !installed, updated })
 }
 
 /// The holiday files' copy for this launch (see [`files_tick`]).
@@ -117,11 +160,11 @@ local! {
 /// Each frame: while the holiday look is on and the season start is not due, the launch's catalog's
 /// holiday files (the music, the bell, the sleigh) are kept in the hub folder, on a thread. Files that
 /// are already the catalog's are not downloaded again. A failure is logged and tried on the next launch.
-pub fn files_tick(start_due: bool) {
+pub fn files_tick(start_due: bool, game_ready: bool) {
     let state = FILES.with(|s| std::mem::replace(&mut *s.borrow_mut(), Files::Done));
     let next = match state {
         Files::Done => Files::Done,
-        Files::Waiting if !holiday::setting() || start_due => Files::Waiting,
+        Files::Waiting if !game_ready || !holiday::setting() || start_due => Files::Waiting,
         Files::Waiting => match launch::catalog() {
             None => Files::Waiting,
             Some(Err(why)) => {
@@ -229,7 +272,12 @@ impl App {
         }
         self.holiday_seen = setting;
         let pending = self.audio.settings.holiday_pending || holiday::env_forced();
-        if !setting || !pending || self.holiday_tried {
+        let played = self.active_mod.clone();
+        if !setting || !check_due(pending, played.is_some()) || self.holiday_tried {
+            return;
+        }
+        // The game first: the steps wait for the install to be loaded (a first launch's download, `game_import`).
+        if !game_ready(self.assets.dt.is_some(), super::game_import::busy()) {
             return;
         }
         if self.mod_switch.is_some() || super::saves_move::busy() || super::game_import::busy() {
@@ -239,7 +287,7 @@ impl App {
         self.holiday_tried = true;
         let (tx, rx) = channel();
         let spawned = std::thread::Builder::new().name("holiday-switch".into()).spawn(move || {
-            let _ = tx.send(run(local));
+            let _ = tx.send(run(local, pending, played));
         });
         if spawned.is_ok() {
             START_RUNNING.store(true, Ordering::Relaxed);
@@ -252,16 +300,24 @@ impl App {
     /// season start. A switch turned off while the worker ran switches nothing.
     fn holiday_started(&mut self, start: Start) {
         self.refresh_mods();
-        if !start.was_installed {
+        if start.downloaded {
             razdor::diag!("holiday: the Christmas mod {} is downloaded", start.id);
         }
         let wanted = holiday::wanted(self.audio.settings.map_holiday);
         let pending = self.audio.settings.holiday_pending || holiday::env_forced();
+        let christmas_played = self.active_mod.as_deref() == Some(start.id.as_str());
+        // The played mod was downloaded again: its game folder is built from the new files and the install
+        // adopted (`apply_mod`), so the new menu pictures show without a restart.
+        if start.updated && wanted && christmas_played {
+            razdor::diag!("holiday: the game plays the updated Christmas mod {}; it is loaded again", start.id);
+            self.choose_mod(Some(start.id.clone()));
+        }
         if !wanted || !pending {
-            razdor::diag!("holiday: the switch is off since the download; the game stays as it is");
+            if pending {
+                razdor::diag!("holiday: the switch is off since the download; the game stays as it is");
+            }
             return;
         }
-        let christmas_played = self.active_mod.as_deref() == Some(start.id.as_str());
         let steps = holiday::on_steps(true, christmas_played);
         if steps.switch {
             // The switch stays pending until the game plays the mod (`holiday_switch_check`); a choice made
@@ -342,6 +398,20 @@ mod tests {
         assert_eq!(loading_label(true, false, false), Some("New Year's files…"), "the season start alone");
         assert_eq!(loading_label(false, false, true), Some("Loading…"), "the catalog alone");
         assert_eq!(loading_label(false, false, false), None, "nothing runs: no loader");
+    }
+
+    #[test]
+    fn the_worker_runs_while_pending_or_while_a_mod_is_played() {
+        assert!(check_due(true, false), "a pending switch");
+        assert!(check_due(false, true), "a mod played: its files may have changed in the catalog");
+        assert!(!check_due(false, false), "nothing pending and the base game played: no catalog fetch");
+    }
+
+    #[test]
+    fn the_holiday_steps_wait_for_the_game() {
+        assert!(!game_ready(false, false), "no game install (a first launch, or a failed download): wait");
+        assert!(!game_ready(true, true), "the game download or import still runs: wait");
+        assert!(game_ready(true, false), "the game install is loaded and nothing downloads: proceed");
     }
 
     #[test]

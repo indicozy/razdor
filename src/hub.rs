@@ -1088,6 +1088,19 @@ pub fn plan_install(catalog: &Catalog, installed: &Installed, id: &str) -> Resul
     Ok(out)
 }
 
+/// Whether an installed mod must be downloaded again (pure): the catalog's files for `lang` are not the
+/// ones the mod was installed from. `installed` is the manifest's sources (the catalog files it came from),
+/// None when the mod has no manifest: its files are then unknown, so it is downloaded again. The version
+/// string is not compared: the files' SHA-256s decide, as the holiday files' check does.
+pub fn mod_needs_update(entry: &Entry, lang: &str, installed: Option<&[FileRef]>) -> bool {
+    let Some(installed) = installed else { return true };
+    let mut want: Vec<String> = entry.files_for(lang).iter().map(|f| f.sha256.to_lowercase()).collect();
+    let mut have: Vec<String> = installed.iter().map(|f| f.sha256.to_lowercase()).collect();
+    want.sort();
+    have.sort();
+    want != have
+}
+
 /// The installed entries that need `id`.
 pub fn needed_by(catalog: &Catalog, installed: &Installed, id: &str) -> Vec<String> {
     installed
@@ -2217,6 +2230,19 @@ mod tests {
         assert!(Catalog::parse(bad_id).is_err());
         let bad_need = br#"{"format":1,"entries":[{"id":"x","kind":"map","title":{"ru":"x"},"author":"a","version":"1","requires":["a/b"],"files":[]}]}"#;
         assert!(Catalog::parse(bad_need).is_err());
+    }
+
+    #[test]
+    fn a_mod_is_downloaded_again_only_when_its_files_differ_from_the_catalog() {
+        let (a, b) = ("aa".repeat(32), "bb".repeat(32));
+        let file = |sum: &str| FileRef { path: "p.zip".into(), name: "m.zip".into(), lang: None, size: 1, sha256: sum.into(), archive: true, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: Vec::new() };
+        let json = format!(r#"{{"format":1,"entries":[{{"id":"m","kind":"mod","title":{{"ru":"x"}},"author":"a","version":"2","files":[{{"path":"p.zip","name":"m.zip","size":1,"sha256":"{a}","archive":true}}]}}]}}"#);
+        let c = Catalog::parse(json.as_bytes()).unwrap();
+        let entry = c.entry("m").unwrap();
+        assert!(!mod_needs_update(entry, "ru", Some(&[file(&a)])), "the same file: nothing to download, whatever the version says");
+        assert!(mod_needs_update(entry, "ru", Some(&[file(&b)])), "the installed file differs: download");
+        assert!(mod_needs_update(entry, "ru", Some(&[])), "no file recorded against the catalog's one");
+        assert!(mod_needs_update(entry, "ru", None), "no manifest: the files are unknown, so download");
     }
 
     /// A catalog with one mod whose file (and, with `preview`, its picture) has the SHA-256 `sum`.
