@@ -3,6 +3,9 @@
 # while the service runs) and the battle, crash and save folders (rsync; unchanged files are hard
 # links to the previous day). Keeps 14 days. Run it from a systemd timer or cron as the service's
 # user or root. Backups hold account key hashes and saves: the folder is private (mode 0700).
+# The API runs in a container (razdor-api.container) whose data folder is the host folder
+# /var/lib/razdor-api (a bind mount), so this script reads the live files on the host. It needs the
+# host's sqlite3 and rsync packages.
 #
 #   RAZDOR_DATA_DIR      the service's data folder (default /var/lib/razdor-api)
 #   RAZDOR_BACKUP_DIR    where the copies go (default /var/backups/razdor-api)

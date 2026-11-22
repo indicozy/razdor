@@ -1,0 +1,46 @@
+# Quadlet for the Razdor API (podman under systemd). Rootful: copy to /etc/containers/systemd/, then
+# `systemctl daemon-reload && systemctl enable --now razdor-api`. The generated unit is razdor-api.service.
+# Steps, secrets and the update routine: server/deploy/README.md.
+
+[Unit]
+Description=Razdor API (analytics, crash reports, cloud saves)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+# Built on this machine by server/deploy/build.sh and copied to the host with `podman save | ssh ... podman load`.
+# Pin the version here: `podman load` gives the tag it was built with.
+Image=localhost/razdor-api:0.1.0
+ContainerName=razdor-api
+
+# The process runs as the image's fixed UID/GID (10001). The data folder on the host must be owned by it.
+User=10001:10001
+
+# The data folder: SQLite files, battle records, crash reports and saves. :Z relabels it for SELinux
+# (Fedora, RHEL); other distributions ignore it.
+Volume=/var/lib/razdor-api:/var/lib/razdor:Z
+
+# Listens on the host's loopback only. nginx (on the host) is the one client; nothing else can reach it.
+PublishPort=127.0.0.1:8080:8080
+
+# The admin password hash and token hash (not in git): see the README, file mode 0600, root.
+EnvironmentFile=/etc/razdor-api/env
+
+# Hardening: read-only root filesystem, no new privileges, no Linux capabilities at all. The server
+# writes only its data folder.
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+
+# Shared VPS: a hard memory cap (no swap) and half a CPU at most. The server's idle RSS is a few MB.
+PodmanArgs=--memory=160m --memory-swap=160m --cpus=0.5 --pids-limit=256
+
+# No AutoUpdate: updates are deliberate (see the README).
+
+[Service]
+Restart=always
+RestartSec=3
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

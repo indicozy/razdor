@@ -9,8 +9,8 @@ crate (`crates/wire`): every body, path and limit is there, and both sides call 
 
 The API is `server/` (package `razdor-server`): one binary, axum and tokio, SQLite (`stats.sqlite`,
 `cloud.sqlite`, WAL) and zstd files (`battles/`, `crashes/`, and the cloud's `saves/<account>/`).
-It runs behind nginx on `https://razdor.indicozy.dev/api` (one domain, a path; nginx strips `/api`, so the
-routes are `/v1/...` on the service) and listens on 127.0.0.1. Deploy and operation:
+It runs in a Podman container behind nginx on `https://razdor.indicozy.dev/api` (one domain, a path; nginx
+strips `/api`, so the routes are `/v1/...` on the service) and listens on 127.0.0.1. Deploy and operation:
 `server/deploy/README.md`.
 
 ### Endpoints

@@ -1,0 +1,23 @@
+# Razdor API image. Built by server/deploy/build.sh, which puts the static musl binary next to this file.
+# The image is the binary and nothing else: no shell, no libc, no CA store. The server makes no outbound
+# connections (it only answers nginx on the same host), so it needs no certificates.
+FROM scratch
+
+COPY --chmod=0755 razdor-server /usr/local/bin/razdor-server
+
+# The data folder (SQLite files, battle records, crash reports, saves). The quadlet mounts a host folder here.
+VOLUME ["/var/lib/razdor"]
+
+# Settings come from the environment: the quadlet sets these, the admin hashes come from an env file that is
+# not in git. Behind nginx: trust X-Real-IP and mark cookies Secure. Bind on all interfaces inside the
+# container's network namespace; the host publishes the port on 127.0.0.1 only.
+ENV RAZDOR_DATA_DIR=/var/lib/razdor \
+    RAZDOR_BIND=0.0.0.0:8080 \
+    RAZDOR_TRUST_PROXY=1 \
+    RAZDOR_SECURE_COOKIES=1
+
+# A fixed non-root UID/GID. The image has no passwd file: numeric IDs are enough.
+USER 10001:10001
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/razdor-server"]

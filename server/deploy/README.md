@@ -1,100 +1,192 @@
-# Razdor API: deploy
+# Razdor API: deploy (Podman, quadlet, host nginx)
 
-The API (`razdor-server`) serves analytics (`docs/superpowers/specs/2026-11-22-analytics-design.md`)
-and cloud saves (`…-cloud-saves-design.md`) from one binary, behind nginx on `api.<domain>`. This
-folder holds the service unit, the nginx snippet and the backup script. Nothing here holds a real
-domain, address or secret: put those in the server's own files, never in git.
+The API (`razdor-server`) serves analytics and cloud saves from one binary. On the VPS it runs as a
+rootful Podman container managed by systemd through a quadlet. nginx runs on the host, shared with the
+owner's other sites, and proxies one domain:
 
-## Build
+    https://razdor.indicozy.dev/          the website (static, later)
+    https://razdor.indicozy.dev/hub/      the download mirror (static, later)
+    https://razdor.indicozy.dev/api/...   the API; nginx strips /api, so the service sees /v1/..., /admin
+    https://razdor.indicozy.dev/api/admin the admin dashboard
 
-On a machine with Rust 1.91 or newer (the server needs no game libraries):
+The container publishes port 8080 on 127.0.0.1 only. Nothing else reaches it.
 
-    cargo build --release -p razdor-server
+Files in this folder:
 
-The binary is `target/release/razdor-server`. The build compiles SQLite (`rusqlite`, bundled), so a C
-compiler is needed. On the VPS, build on a faster machine and copy the binary, or build there once.
+| File | What it is |
+|---|---|
+| `build.sh` | Builds the static musl binary and the image (works without musl tools on the workstation) |
+| `Containerfile` | The image: `FROM scratch`, the binary, UID/GID 10001, about 7 MB |
+| `razdor-api.container` | The quadlet: the container, its data folder, port, env file, limits, restart |
+| `nginx.conf` | The host's nginx site for the domain (TLS, `/api`, rate limits, the dashboard rewrite) |
+| `backup.sh` | Daily copy of the SQLite files and the battle, crash and save folders (14 days) |
 
-## Install
+Nothing here holds a real address or secret. The admin hashes live in `/etc/razdor-api/env` on the
+VPS, never in git.
 
-1. Users and folders:
+## 1. Build the image (on the workstation)
 
-       sudo useradd --system --home /var/lib/razdor-api --shell /usr/sbin/nologin razdor-api
-       sudo install -m 0755 target/release/razdor-server /usr/local/bin/razdor-server
-       sudo install -d -m 0750 -o razdor-api -g razdor-api /var/lib/razdor-api
-       sudo install -d -m 0750 -o root -g razdor-api /etc/razdor-api
+    server/deploy/build.sh                  # tags localhost/razdor-api:<version>
+    nice -n 19 taskset -c 8-19 server/deploy/build.sh   # on a shared machine
 
-2. The config (`/etc/razdor-api/config.toml`, mode 0640, group `razdor-api`). Start from this; the
-   values in angle brackets are the owner's:
+The script builds `x86_64-unknown-linux-musl` with the first of: `musl-gcc`, `cargo zigbuild`, or a
+podman builder container (`docker.io/library/rust:1.91-alpine`). The builder path needs no extra tools.
+The result is a static binary (about 7 MB stripped) in an image of about 7 MB.
 
-       data_dir = "/var/lib/razdor-api"
-       bind = "127.0.0.1:8080"
-       trust_proxy = true          # nginx sets X-Real-IP; the service listens on localhost only
-       secure_cookies = true       # the dashboard is HTTPS only
-       allowed_versions = []       # empty: any X.Y.Z release; or list the exact versions
-       admin_password_hash = "<from hash-password>"
-       admin_token_sha256 = "<from token-hash>"
+## 2. Requirements on the VPS
 
-   Only the service's own limits are in the file (`[limits]`); every number has a default that
-   matches the spec. Override one with `[limits]` and its name, for example `pings_per_day = 5`.
+- Podman 4.4 or newer, with the quadlet generator (`/usr/libexec/podman/quadlet`). Rootful: the units
+  live in `/etc/containers/systemd/` and run as root; the container itself runs as UID 10001.
+- nginx (the host's), certbot (Let's Encrypt, webroot mode), `sqlite3` and `rsync` (for the backups).
+- cgroup v2 (the default on current distributions), for the memory and CPU caps.
 
-3. The admin password and token (both are hashes; the secrets themselves are never stored):
+## 3. Ship the image
 
-       read -r -s PW && printf '%s\n' "$PW" | /usr/local/bin/razdor-server hash-password
-       read -r -s TOKEN && printf '%s\n' "$TOKEN" | /usr/local/bin/razdor-server token-hash
+    podman save localhost/razdor-api:0.1.0 | ssh root@<vps> podman load
 
-   Put the first line in `admin_password_hash` and the second in `admin_token_sha256`. The
-   verifier and the weekly digest send the token itself in the `x-razdor-admin` header.
+Or build on the VPS with the same script (it needs podman and about 2 GB of disk for the builder image).
+The quadlet's `Image=` line must name the tag you loaded.
 
-4. The service:
+## 4. Folders, secrets, the service
 
-       sudo install -m 0644 server/deploy/razdor-api.service /etc/systemd/system/
-       sudo systemctl daemon-reload
-       sudo systemctl enable --now razdor-api
-       journalctl -u razdor-api -f
+1. Data and config folders. The container runs as UID 10001, so the data folder must belong to it:
 
-   The unit caps memory at 256 MB, runs at low priority and restarts on failure. `curl -s
-   127.0.0.1:8080/healthz` prints `ok`.
+       install -d -m 0750 -o 10001 -g 10001 /var/lib/razdor-api
+       install -d -m 0700 -o root -g root /etc/razdor-api
 
-5. nginx: copy the server blocks of `server/deploy/nginx.conf` into the owner's nginx (replace
-   `<domain>`; the certificate is Let's Encrypt, as for the other sites), then `nginx -t` and reload.
+2. The admin password and token, as hashes (the secrets are never stored). Run the image's own helpers:
 
-6. Backups: `server/deploy/backup.sh` (needs `sqlite3` and `rsync`). Run it daily from a timer, for
-   example `OnCalendar=*-*-* 04:10` in a unit that runs `/usr/local/bin/backup.sh` as root with
-   `RAZDOR_DATA_DIR` and `RAZDOR_BACKUP_DIR` set. It keeps 14 days.
+       read -r -s PW;    printf '%s\n' "$PW"    | podman run --rm -i localhost/razdor-api:0.1.0 hash-password
+       read -r -s TOKEN; printf '%s\n' "$TOKEN" | podman run --rm -i localhost/razdor-api:0.1.0 token-hash
 
-## Rotate
+   Write `/etc/razdor-api/env` (mode 0600, owner root) with the two lines:
 
-- The admin password: run `hash-password` again, replace `admin_password_hash`, restart. Open
-  sessions stay valid until they expire (12 hours); restart the service to end them at once.
-- The admin token: run `token-hash` with the new token, replace `admin_token_sha256`, restart, and
-  update the verifier's and the digest's copy.
-- Account keys are never rotated by the server; a player who loses one deletes the account from the
-  game, or links the device again from a working one.
+       RAZDOR_ADMIN_PASSWORD_HASH=<the hash-password line>
+       RAZDOR_ADMIN_TOKEN_SHA256=<the token-hash line>
 
-## Delete an install's data or an account
+   Optional: `RAZDOR_ALLOWED_VERSIONS=1.5.4,1.5.5` (empty means any X.Y.Z release).
+   The verifier and the weekly digest send the token itself in the `x-razdor-admin` header.
 
-Players do this themselves («Удалить мои данные» in the game). An owner's request follows the same
-path: the API's `POST /v1/install/delete` with the install id, or `DELETE /v1/account` with the key.
-Both remove the rows and the files. A ban record of the install id stays, so deleting the data does
-not reset its strikes.
+3. The quadlet and the service:
 
-## Lifting a ban
+       install -m 0644 server/deploy/razdor-api.container /etc/containers/systemd/
+       systemctl daemon-reload
+       systemctl enable --now razdor-api
+       systemctl status razdor-api --no-pager
+       curl -s 127.0.0.1:8080/healthz          # prints: ok
 
-On the dashboard (`/admin`), the bans table has an Unban button per active ban. The strikes stay: the
-next offence is the next step (24 h, 7 days, for good).
+   If port 8080 is taken on the VPS, change `PublishPort=` in the quadlet and the upstream in
+   `nginx.conf` (the service inside the container always listens on 8080).
 
-## Load test
+## 5. nginx and the certificate
 
-Start a local server with `trust_proxy = true` and a temporary data folder, then:
+The site file needs its certificate before nginx can load it. Order:
 
-    cargo run --release -p razdor-server --example load -- 127.0.0.1:8080 2000 8 64 <server-pid>
+1. Create the web roots and a minimal port-80 server that answers the challenge:
 
-The tool prints requests per second, the latency and the server's peak RAM (VmHWM of the pid). It
-spreads its fake installs over fake client addresses through `X-Real-IP`, so the per-IP limits do
-not trip on the loopback address; that needs `trust_proxy`.
+       install -d /var/www/letsencrypt /var/www/razdor-site /var/www/razdor-hub
+       # a server block on port 80 for razdor.indicozy.dev with
+       #   location ^~ /.well-known/acme-challenge/ { root /var/www/letsencrypt; }
+       # nginx -t && systemctl reload nginx
+
+2. Get the certificate:
+
+       certbot certonly --webroot -w /var/www/letsencrypt -d razdor.indicozy.dev
+
+3. Install the site (it is at http{} level, so `conf.d` is the place on Fedora; on Debian/Ubuntu copy it
+   to `/etc/nginx/conf.d/razdor.conf` too, since it contains `limit_req_zone`):
+
+       install -m 0644 server/deploy/nginx.conf /etc/nginx/conf.d/razdor.conf
+       nginx -t && systemctl reload nginx
+
+   Renewal needs nginx to reload: add `--deploy-hook "systemctl reload nginx"` to the renewal (in
+   `/etc/letsencrypt/renewal/razdor.indicozy.dev.conf` as `renew_hook`, or `certbot renew --dry-run` to
+   test). The site's access log is off (the service keeps no addresses either); errors go to nginx's
+   error log.
+
+Rate limits: `/api` allows 40 requests a second per address with a burst of 120 (`limit_req`). That is
+gentle on purpose: many players share one address behind carrier NAT. The service has its own per-address
+limits (1200 a minute, `ip_per_minute`), counted on the address nginx sets.
+
+## 6. Backups
+
+`backup.sh` needs the host's `sqlite3` and `rsync`. The data folder is the host folder
+`/var/lib/razdor-api` (bind mount), so the script reads the live files: `.backup` is safe while the
+service runs. Run it daily from cron (`/etc/cron.d/razdor-backup`):
+
+    10 4 * * * root RAZDOR_DATA_DIR=/var/lib/razdor-api RAZDOR_BACKUP_DIR=/var/backups/razdor-api /usr/local/bin/backup.sh
+
+Install it with `install -m 0750 server/deploy/backup.sh /usr/local/bin/backup.sh`. It keeps 14 days.
+Backups hold the account key hashes and the saves: the backup folder is mode 0700.
+
+## 7. Operate
+
+- Logs: `journalctl -u razdor-api -f` (the container's stderr goes to the journal through the unit).
+  `podman logs razdor-api` shows the same.
+- Status: `systemctl status razdor-api`; the container: `podman ps`, `podman stats --no-stream razdor-api`.
+- Update: build the new version (step 1), ship it (step 3), change `Image=` in
+  `/etc/containers/systemd/razdor-api.container` to the new tag, `systemctl daemon-reload`,
+  `systemctl restart razdor-api`. Roll back by putting the old tag back. Keep the previous image until the
+  new one has run a day.
+- The dashboard: `https://razdor.indicozy.dev/api/admin`. The API's JSON summary:
+  `https://razdor.indicozy.dev/api/admin/api/summary.json` with the `x-razdor-admin` header.
+
+### The dashboard's rewrite
+
+The service serves its dashboard at `/admin` (its cookie is `Path=/admin` and its forms post to
+`/admin/...`). nginx serves it at `/api/admin` and rewrites the cookie path, the login redirect and the
+form links with `proxy_cookie_path`, `proxy_redirect` and `sub_filter`. After a change to the dashboard's
+HTML, check the login and the Unban button once.
+
+### Rotate
+
+- The admin password: run `hash-password` again, replace the line in `/etc/razdor-api/env`, restart. Open
+  sessions stay valid for 12 hours; restart the service to end them at once.
+- The admin token: run `token-hash` with the new token, replace `RAZDOR_ADMIN_TOKEN_SHA256`, restart,
+  and update the verifier's and the digest's copy.
+- Account keys are never rotated by the server. A player who loses one deletes the account in the game,
+  or links the device again from a working one.
+
+### Delete an install's data or an account
+
+Players do this themselves («Удалить мои данные» in the game). An owner's request uses the API's
+`POST /v1/install/delete` with the install id, or `DELETE /v1/account` with the key. Both remove the
+rows and the files. A ban record of the install id stays, so deleting the data does not reset its
+strikes.
+
+### Lifting a ban
+
+On the dashboard, the bans table has an Unban button per active ban. The strikes stay: the next offence
+is the next step (24 h, 7 days, for good).
+
+## 8. Resources and measurements
+
+The quadlet caps the container at 160 MB of memory (no swap), half a CPU and 256 processes, and runs it
+with a read-only root filesystem, no capabilities, and `no-new-privileges`.
+
+Measured on the workstation, rootless Podman 5.8, Fedora 44, through the host's nginx (TLS), with
+`server/tools/load.rs` (4000 installs, 8 event batches each, 64 connections; 40 000 requests, all 200).
+The load tool sends every install from one loopback address, so the test raised `ip_per_minute` for that
+phase only (a test-only TOML; every other limit keeps its default):
+
+| Setup | Requests/s | p50 | p99 | Container CPU | Memory |
+|---|---|---|---|---|---|
+| Container, `--cpus 0.5` (the quadlet's cap), bridge network | 246 | 218 ms | 774 ms | about 0.3 of a core | 10 MB (peak RSS of the server 11.5 MB) |
+| Container, `--cpus 0.5`, host network | 232 | 289 ms | 593 ms | 0.49 (at the cap) | 10 MB |
+| Container, `--cpus 1.0`, host network | 371 | 142 ms | 681 ms | 0.77 | 11 MB |
+| Static binary on the host, no container, no nginx | 614 | 78 ms | 288 ms | not measured | 12.7 MB peak |
+
+Idle, the container uses about 1 MB. The quadlet's half-CPU cap is the limit of the first two rows: the
+service is CPU-bound at the cap. The host and bridge networks make no difference. A VPS that can spare a
+full core roughly doubles the throughput. Each request costs about 2 ms of CPU in this run. The cap's
+200-odd requests a second is far above what the players send (a few requests a day each); raise `--cpus`
+only if the logs or `podman stats` show the service held back.
+
+Data growth: the stats database grew to about 145 MB for 640 000 events (about 220 bytes an event), with
+the events and pings kept at their retention (see the analytics spec).
 
 ## Logs and privacy
 
 The service logs its own events (startup, bans with their reason, retention counts) and no client
-addresses. The IP address is used in memory for the rate limits and hashed (with a salt kept in
-`ip_salt` in the data folder) for the IP bans. nginx's access log is off for the API host.
+addresses. The IP address is used in memory for the rate limits and hashed (with a salt kept in `ip_salt`
+in the data folder) for the IP bans. nginx's access log is off for the host, so nothing keeps addresses.
