@@ -941,7 +941,10 @@ it every frame from `display::follow_settings`; `RAZDOR_LIVE_WATER=1` turns it o
   (`water::redraw_due`, the picture's age in frames), and every frame the two last drawings are blended in time over
   the cached ground (`water::picture_mix`: the frame shows the water one interval ago, moving on smoothly, 0 at a
   redraw, 1 one interval later). The target is cleared to alpha 0 and the discarded pixels stay transparent; the
-  composite is alpha-blended (`make_blended_material`: the default pipeline blends nothing). A new view, map, size or camera
+  composite is blended with premultiplied alpha (`make_blended_material`, `WATER_COMPOSITE_FACTORS`: One,
+  OneMinusSourceAlpha; the default pipeline blends nothing). The plain alpha blend darkened the water's edge where a
+  smaller picture's linear filter mixes a water texel with a cleared one: thin dark lines along the cells round the
+  water at «Качество воды» «Низкое» (a player's report, 2026-11-21). A new view, map, size or camera
   (`ground_key`, the tilt included) redraws at once and drops the older picture. The fill runs under the same 3D camera
   as the ground's cache (`render_cache::fill` around `in_view`), so the 2.5D and first-person views have the picture too. The env `RAZDOR_WATER_EVERY=1|2|3`
   overrides the setting in the snapshots.
