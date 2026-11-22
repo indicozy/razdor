@@ -348,12 +348,14 @@ The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not t
   «?» help with the 20 MB rule), «Место в облаке», «Синхронизировать сейчас», «Привязать устройство»
   (the code, 10 minutes), «Ввести код», «Фраза восстановления» (shows the phrase; restores from a typed one),
   «Удалить аккаунт» (confirmed). Windows: `cloud_view::Panel`.
-- Load list: a cloud, an hourglass (waiting to upload) or a floppy (local only), drawn with shapes at the
+- Load list: a cloud (in the cloud) or an hourglass (waiting to upload, during a push), drawn with shapes at the
   row's left edge (the selected row's, left of its pin); a cloud copy from another device names its
   device in the scenario line («Начало пути — телефон, 21:46»), not the name line (the name is cut on phones).
-- «Нужна новая версия»: the worker's `newer` saves (`cloud_store::newer_saves`) are listed in their tab
-  (a «Продолжить» slot in the autosaves) as rows with the cloud mark and the label in the scenario line.
-  `saves::newer_row` marks them `locked`: no load sign, no pin, no delete sign, never deleted from the list.
+- «Облако» tab (load window, after the two tabs; shown while the cloud is on and an account exists): opening
+  it requests `Job::Refresh`; its lines are `cloud_view::cloud_lines` (the other devices' saves grouped by
+  device id, a header each; a newer Razdor's save is locked, «Нужна новая версия»). «Загрузить» (or a second
+  press) requests `Job::Download(id)`; the row shows «Скачивается…»; when `Shared::landed` names it, «Личные»
+  opens with the save selected. Empty, offline and loading states are texts in place of the rows.
 - Hub offer (`cloud_view`): the worker's installed Hub list (`cloud_store::HUB_OFFER`) is checked once per
   set (`check_offer`, each frame). The items this device lacks (`missing_items`, by `installed.json`) make
   the window «Установить то же самое?» (`should_ask`: not when the set's fingerprint is already in

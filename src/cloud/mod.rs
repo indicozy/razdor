@@ -3,7 +3,7 @@
 //!
 //! - [`account`]: the account key (0600 in the cloud folder) and the recovery phrase.
 //! - [`select`]: which local saves this device mirrors (pinned, then «Продолжить», then newest; the
-//!   device's cap and the quota) and each save's state (☁, ⏳, 💾).
+//!   device's cap and the quota) and each save's state (☁, ⏳).
 //! - [`merge`]: marks (union), settings (newest change per key), newer-Razdor detection.
 //! - [`sync`]: the device's mirror (push deletes its own stale rows, uploads the chosen ones), the list
 //!   of other devices' saves (metadata only), and the download on demand, over a [`sync::Local`].
@@ -113,6 +113,16 @@ pub struct Shared {
     /// The last round's per-save errors.
     pub errors: Vec<String>,
     pub last_error: Option<CloudError>,
+    /// A list is being read (the «Облако» tab's refresh job runs).
+    pub refreshing: bool,
+    /// The remote id of the save whose download job runs.
+    pub downloading: Option<String>,
+    /// The last download that landed: (the remote id, the local save's id).
+    pub landed: Option<(String, String)>,
+    /// The remote id of the last download that failed (cleared by the next one that lands).
+    pub download_failed: Option<String>,
+    /// How many lists have been read: the «Облако» tab knows its list is new when this moves.
+    pub listed: u64,
 }
 
 /// The handle the UI keeps. Cheap to call: requests are queued, state is read from a copy.
@@ -183,6 +193,13 @@ impl Cloud {
         lock(&self.shared).states.get(id).copied().unwrap_or(SaveState::LocalOnly)
     }
 
+    /// The load list's state of one local save as the round left it (`None` before a round saw it,
+    /// and for a save the mirror does not hold), with the worker's phase.
+    pub fn mark_of(&self, id: &str) -> (Option<SaveState>, Phase) {
+        let sh = lock(&self.shared);
+        (sh.states.get(id).copied(), sh.phase)
+    }
+
     /// Whether this device has an account.
     pub fn linked(&self) -> bool {
         lock(&self.shared).linked
@@ -237,17 +254,32 @@ impl Worker {
     }
 
     fn execute(&mut self, job: Job) {
-        lock(&self.shared).phase = Phase::Working;
+        let download = match &job {
+            Job::Download(id) => Some(id.clone()),
+            _ => None,
+        };
+        {
+            let mut sh = lock(&self.shared);
+            sh.phase = Phase::Working;
+            sh.refreshing = matches!(job, Job::Refresh);
+            sh.downloading = download.clone();
+        }
         let retryable = matches!(job, Job::Sync | Job::Pull | Job::Push | Job::Refresh);
         match self.run_job(&job) {
             Ok(()) => {
                 let mut sh = lock(&self.shared);
                 sh.phase = if sh.linked { Phase::Idle } else { Phase::Off };
                 sh.last_error = None;
+                if download.is_some() {
+                    sh.download_failed = None;
+                }
                 self.backoff_secs = 0;
             }
             Err(e) => {
                 let mut sh = lock(&self.shared);
+                if download.is_some() {
+                    sh.download_failed = download.clone();
+                }
                 sh.phase = match e {
                     CloudError::Offline(_) => Phase::Offline,
                     CloudError::Full => Phase::Full,
@@ -262,6 +294,9 @@ impl Worker {
                 }
             }
         }
+        let mut sh = lock(&self.shared);
+        sh.refreshing = false;
+        sh.downloading = None;
     }
 
     fn api(&self) -> Option<Api> {
@@ -297,7 +332,8 @@ impl Worker {
             }
             Job::Download(id) => {
                 let api = self.api().ok_or(CloudError::Unauthorized)?;
-                sync::download(&api, self.local.as_mut(), id)?;
+                let local_id = sync::download(&api, self.local.as_mut(), id)?;
+                lock(&self.shared).landed = Some((id.clone(), local_id));
                 // The list changed: the downloaded save is no longer «on another device».
                 let report = sync::refresh(&api, self.local.as_ref())?;
                 self.show_list(report);
@@ -342,6 +378,7 @@ impl Worker {
         sh.others = report.others;
         sh.newer = report.newer;
         sh.used_bytes = report.used_bytes;
+        sh.listed += 1;
     }
 
     /// Stores the account's key on this device and marks it linked.

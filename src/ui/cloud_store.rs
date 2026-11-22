@@ -2,10 +2,11 @@
 //!
 //! [`Store`] is the `cloud::sync::Local` over this device: the saves of the install played
 //! (`save::games_dir`), `marks.json`, the synced settings (a few keys of `audio.json`), the
-//! installed Hub items. A pulled save becomes its own file beside the local ones (`cloud-<hash>.rzsave`)
-//! and keeps its origin in a `.cloud` sidecar (device and the title a session got); nothing is
-//! overwritten. The worker is started only once an account exists (or when the player turns the
-//! cloud on); with no account nothing is sent. Nothing here runs in the snapshots or tests.
+//! installed Hub items. A save downloaded from another device («Облако» tab) becomes its own file beside
+//! the local ones (`cloud-<hash>.rzsave`) and keeps its origin in a `.cloud` sidecar (device and the
+//! title a session got); nothing local is overwritten. The worker is started only once an account
+//! exists (or when the player turns the cloud on); with no account nothing is sent. The snapshots'
+//! made-up cloud states are in `cloud_view` and here (`RAZDOR_SCENE_CLOUD`); no test runs the worker.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -18,7 +19,7 @@ use razdor::cloud::{Cloud, Job};
 use razdor::rules::marks::{Level, Record, RunMark, Records};
 use razdor::rules::save::{self, ScenarioRef, SaveMeta};
 use razdor_wire::cloud::{
-    BenchReport, HubItem, HubKind, HubList, MarkLevel, MarkRecord, Marks, SaveEntry, SaveKind, SettingValue, SyncedSettings,
+    BenchReport, HubItem, HubKind, HubList, MarkLevel, MarkRecord, Marks, SaveKind, SettingValue, SyncedSettings,
 };
 use razdor_wire::SCHEMA;
 use serde::{Deserialize, Serialize};
@@ -71,50 +72,31 @@ pub fn shared() -> Option<razdor::cloud::Shared> {
     CLOUD.get().map(|c| c.snapshot())
 }
 
-/// The account's saves made by a newer Razdor: listed in the load list, never loaded or deleted
-/// there. The snapshot's `saves` scene shows one made-up save.
-pub fn newer_saves() -> Vec<SaveEntry> {
-    if std::env::var_os("RAZDOR_SNAPSHOT").is_some() {
-        return if std::env::var("RAZDOR_SCENE_CLOUD").is_ok_and(|s| s == "saves") {
-            vec![SaveEntry {
-                id: "newer-save".to_string(),
-                meta: razdor_wire::cloud::SaveMeta {
-                    schema: SCHEMA,
-                    game: "demo".to_string(),
-                    map: "demo".to_string(),
-                    kind: SaveKind::Manual,
-                    device_id: String::new(),
-                    device: device_name().to_string(),
-                    name: "Newer save".to_string(),
-                    saved_at: 1_700_000_000,
-                    razdor: String::new(),
-                    size: 0,
-                    sha256: String::new(),
-                    raw_sha256: String::new(),
-                    pinned: false,
-                },
-            }]
-        } else {
-            Vec::new()
-        };
-    }
-    shared().map(|s| s.newer).unwrap_or_default()
+/// How many account lists the worker has read (the «Облако» tab knows its list is new when it moves).
+pub fn listed() -> u64 {
+    shared().map_or(0, |s| s.listed)
 }
 
-/// The load list's state of a local save (`LocalOnly` without a worker).
-pub fn state_of(id: &str) -> razdor::cloud::SaveState {
-    // The snapshots' made-up marks (`RAZDOR_SCENE_CLOUD=saves`): by the file's name.
+/// The load list's mark of a local save: its state in the mirror (`None` before a round has seen it,
+/// or for a save the mirror does not hold) and the worker's phase. Without a worker, nothing.
+/// The snapshots' made-up marks (`RAZDOR_SCENE_CLOUD=saves`): by the file's name (`cloud…`, `wait…`,
+/// `local…`), while the phase is a push.
+pub fn mark_of(id: &str) -> (Option<razdor::cloud::SaveState>, razdor::cloud::Phase) {
+    use razdor::cloud::{Phase, SaveState};
     if std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var("RAZDOR_SCENE_CLOUD").is_ok_and(|s| s == "saves") {
         let name = Path::new(id).file_name().and_then(|n| n.to_str()).unwrap_or("");
-        return if name.starts_with("cloud") {
-            razdor::cloud::SaveState::InCloud
+        let state = if name.starts_with("cloud") {
+            Some(SaveState::InCloud)
         } else if name.starts_with("wait") {
-            razdor::cloud::SaveState::WaitingUpload
+            Some(SaveState::WaitingUpload)
+        } else if name.starts_with("local") {
+            Some(SaveState::LocalOnly)
         } else {
-            razdor::cloud::SaveState::LocalOnly
+            None
         };
+        return (state, Phase::Working);
     }
-    CLOUD.get().map_or(razdor::cloud::SaveState::LocalOnly, |c| c.state_of(id))
+    CLOUD.get().map_or((None, Phase::Off), |c| c.mark_of(id))
 }
 
 /// Queues a request. Nothing is sent without an account: only `CreateAccount` starts the worker

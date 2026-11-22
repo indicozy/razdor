@@ -18,7 +18,7 @@ pub struct Candidate {
     pub size: u64,
 }
 
-/// One save's state for the load list: ☁ in the cloud, ⏳ waiting to upload, 💾 on this device only.
+/// One save's state for the load list: ☁ in the cloud, ⏳ waiting to upload (drawn only during a push), nothing for a local save.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SaveState {
     InCloud,

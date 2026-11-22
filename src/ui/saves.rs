@@ -13,7 +13,6 @@ use razdor::i18n::{n_, tr};
 use razdor::rules::content::Content;
 use razdor::rules::game::{Foe, Game};
 use razdor::rules::save::{self, ListedSave, MetaState, SaveKind};
-use razdor_wire::cloud::SaveEntry;
 
 use super::assets::Assets;
 use super::battle_view::BattleView;
@@ -92,6 +91,14 @@ pub struct LoadView {
     folder_error: Option<String>,
     /// The message box of an Android transfer (Razdor's own: «Перенос…», `ui::transfer`).
     transfer_message: Option<String>,
+    /// The «Облако» tab is open (its lines are the account's saves of other devices, `cloud_view`).
+    pub cloud: bool,
+    /// The worker's list count when the «Облако» tab was opened (`cloud_view::cloud_tab`).
+    listed_seen: u64,
+    /// The remote id of the save asked for («Скачивается…»), until it lands or fails.
+    waiting: Option<String>,
+    /// A message box of a failed cloud download (Razdor's own).
+    cloud_message: Option<String>,
 }
 
 local! {
@@ -106,12 +113,15 @@ const MANUAL_TAB_POSITION: (f32, f32) = (11.117_645, 408.0);
 const MANUAL_TAB_TEXTURES: (u8, u8) = (0, 0);
 const AUTO_TAB_POSITION: (f32, f32) = (166.852_94, 408.0);
 const AUTO_TAB_TEXTURES: (u8, u8) = (1, 1);
+/// Razdor's own «Облако» tab, after the autosaves' at the same pitch (the original has two tabs' artwork).
+const CLOUD_TAB_POSITION: (f32, f32) = (322.58, 408.0);
+const CLOUD_TAB_TEXTURES: (u8, u8) = (1, 1);
 
 impl LoadView {
     pub fn new(back: Back) -> LoadView {
         let first = LAST_TAB.with(|t| t.get());
         let other = if first == SaveKind::Auto { SaveKind::Manual } else { SaveKind::Auto };
-        let mut v = LoadView { confirm_clear: false, confirm_delete: None, tab: first, entries: Vec::new(), asked: None, settled: false, selected: 0, scroll: 0, back, folder_error: None, transfer_message: None };
+        let mut v = LoadView { confirm_clear: false, confirm_delete: None, tab: first, entries: Vec::new(), asked: None, settled: false, selected: 0, scroll: 0, back, folder_error: None, transfer_message: None, cloud: false, listed_seen: 0, waiting: None, cloud_message: None };
         v.refresh();
         if v.entries.is_empty() {
             v.tab = other;
@@ -392,36 +402,52 @@ fn time_line(secs: u64) -> String {
     razdor::trf!("Time: {date}", date = saved_label(secs))
 }
 
-/// The row of a save of a newer Razdor the account holds (`cloud_store::newer_saves`): its label
-/// in the scenario's place, its device and time, the cloud mark; nothing to load or delete.
-fn newer_row(e: &SaveEntry) -> Row {
-    let label = tr("Needs a newer version");
-    let name = if e.meta.kind == razdor_wire::cloud::SaveKind::Session {
-        tr(save::SESSION).to_string()
+/// The «Облако» tab's rows, one per line (`cloud_view::cloud_lines`): a device's header, then its
+/// saves. A save of a newer Razdor is locked («Нужна новая версия»); one being downloaded is dimmed.
+fn cloud_rows(tab: &super::cloud_view::CloudTab, waiting: Option<&str>) -> Vec<Row> {
+    use super::cloud_view::CloudLine;
+    tab.lines
+        .iter()
+        .map(|line| match line {
+            CloudLine::Device(name) => Row { name: name.clone(), scenario: String::new(), time: String::new(), pinned: false, waiting: false, mark: None, placeholder: false, caret: None, cloud: None, locked: true },
+            CloudLine::Save { id, name, place, saved_at, locked } => {
+                let downloading = !locked && (waiting == Some(id.as_str()) || tab.downloading.as_deref() == Some(id.as_str()));
+                let time = if *locked {
+                    tr("Needs a newer version").to_string()
+                } else if downloading {
+                    tr("Downloading the save…").to_string()
+                } else {
+                    time_line(*saved_at)
+                };
+                Row { name: name.clone(), scenario: place.clone(), time, pinned: false, waiting: downloading, mark: None, placeholder: false, caret: None, cloud: Some(razdor::cloud::SaveState::InCloud), locked: *locked }
+            }
+        })
+        .collect()
+}
+
+/// Asks the worker for a save of another device; its row shows «Скачивается…» until it lands or fails.
+fn start_download(view: &mut LoadView, id: String) {
+    super::cloud_store::request(razdor::cloud::Job::Download(id.clone()));
+    view.waiting = Some(id);
+}
+
+/// What the «Облако» tab says while it has no saves to list: reading, no link, or none to list.
+fn cloud_empty_text(tab: &super::cloud_view::CloudTab) -> String {
+    if tab.loading {
+        tr("Reading the list…").to_string()
+    } else if tab.offline {
+        tr("No link to the cloud").to_string()
     } else {
-        e.meta.name.clone()
-    };
-    // The label alone: with the device's name in front it was cut on a phone («ПК — Нужна новая ве…»).
-    Row {
-        name,
-        scenario: label.to_string(),
-        time: time_line(e.meta.saved_at),
-        pinned: false,
-        waiting: false,
-        mark: None,
-        placeholder: false,
-        caret: None,
-        cloud: Some(razdor::cloud::SaveState::InCloud),
-        locked: true,
+        tr("No saves on other devices that are not here").to_string()
     }
 }
 
-/// The load tab a cloud save of `kind` is listed under: a «Продолжить» slot is an autosave, the
-/// rest are the player's own saves.
-fn tab_of_cloud(kind: razdor_wire::cloud::SaveKind) -> SaveKind {
-    match kind {
-        razdor_wire::cloud::SaveKind::Session => SaveKind::Auto,
-        _ => SaveKind::Manual,
+/// The remote id of the cloud row at `k`, when it is a save this device may download (not a header,
+/// not a save of a newer Razdor).
+fn downloadable_at(tab: &super::cloud_view::CloudTab, k: usize) -> Option<String> {
+    match tab.lines.get(k)? {
+        super::cloud_view::CloudLine::Save { id, locked: false, .. } => Some(id.clone()),
+        _ => None,
     }
 }
 
@@ -438,8 +464,14 @@ fn row_of(e: &ListedSave) -> Row {
     if let Some(device) = super::cloud_store::origin_of(&e.path).filter(|_| cloud_shown) {
         scenario = format!("{scenario} — {device}, {}", super::cloud_view::hhmm(m.saved_at));
     }
-    let cloud = cloud_shown.then(|| super::cloud_store::state_of(&e.path.to_string_lossy()));
-    Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud, locked: false }
+    // The cloud mark, the hourglass or the «не в облаке» note (`cloud_view::save_mark`); nothing while the cloud is off.
+    let (state, phase) = super::cloud_store::mark_of(&e.path.to_string_lossy());
+    let (cloud, past_cap) = if cloud_shown { super::cloud_view::save_mark(state, phase) } else { (None, false) };
+    let mut time = time_line(m.saved_at);
+    if past_cap {
+        time = format!("{time} · {}", tr("not in the cloud"));
+    }
+    Row { name, scenario, time, pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud, locked: false }
 }
 
 /// The save lists' fonts (0x4b61bc, 0x4b6338): the save's name in ae24a0 (Benguiat less
@@ -459,8 +491,8 @@ fn row_ink(c: [u8; 3], picked: bool) -> Color {
     Color::from_rgba(c[0].saturating_add(add[0]), c[1].saturating_add(add[1]), c[2].saturating_add(add[2]), 255)
 }
 
-/// The cloud mark of a save, drawn with shapes (the font has no ☁ ⏳ 💾): a cloud when it is in the
-/// cloud, an hourglass while it waits to upload, a floppy disk when it is only on this device.
+/// The cloud mark of a save, drawn with shapes (the font has no ☁ ⏳): a cloud when it is in the
+/// cloud, an hourglass while it waits to upload during a push. No mark otherwise (`cloud_view::save_mark`).
 fn draw_cloud_mark(r: Rect, state: razdor::cloud::SaveState) {
     use razdor::cloud::SaveState;
     let (x, y, w, h) = (r.x, r.y, r.w, r.h);
@@ -479,12 +511,7 @@ fn draw_cloud_mark(r: Rect, state: razdor::cloud::SaveState) {
             draw_triangle(vec2(x + w * 0.25, y + h * 0.18), vec2(x + w * 0.75, y + h * 0.18), vec2(x + w * 0.5, y + h * 0.5), c);
             draw_triangle(vec2(x + w * 0.5, y + h * 0.5), vec2(x + w * 0.25, y + h * 0.82), vec2(x + w * 0.75, y + h * 0.82), c);
         }
-        SaveState::LocalOnly => {
-            let c = Color::new(0.75, 0.75, 0.75, 0.9);
-            draw_rectangle(x + w * 0.12, y + h * 0.12, w * 0.76, h * 0.76, c);
-            draw_rectangle(x + w * 0.28, y + h * 0.12, w * 0.44, h * 0.3, Color::new(0.2, 0.2, 0.2, 0.9));
-            draw_rectangle(x + w * 0.25, y + h * 0.6, w * 0.5, h * 0.28, Color::new(0.2, 0.2, 0.2, 0.9));
-        }
+        SaveState::LocalOnly => {}
     }
 }
 
@@ -1384,17 +1411,47 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     let (book, closed) = Book::at(&own("LoadGame", "Title", n_("Load a saved game")), over_map, false, true);
     book.page(&own("LoadGame", "GameName", n_("Name of the saved game")), &own("LoadGame", "ScenarioName", n_("Name of the scenario")));
     fill_metas(&mut view.entries, &mut view.asked, &mut view.settled, view.scroll, Some(&mut view.selected));
-    let mut rows: Vec<Row> = view.entries.iter().map(row_of).collect();
-    // The account's saves of a newer Razdor follow this tab's own saves (listed only).
-    rows.extend(super::cloud_store::newer_saves().iter().filter(|e| tab_of_cloud(e.meta.kind) == view.tab).map(newer_row));
+    // The «Облако» tab exists only while the cloud is on and an account exists (`cloud_view::cloud_tab_shown`).
+    let tab_now = super::cloud_view::cloud_tab_shown().then(|| super::cloud_view::cloud_tab(view.listed_seen));
+    if tab_now.is_none() {
+        view.cloud = false;
+    }
+    // A download that landed is this device's save now: «Личные» opens with it selected. A failed one says so.
+    if let Some(tab) = &tab_now {
+        if let (Some(id), Some((remote, local))) = (view.waiting.clone(), tab.landed.clone()) {
+            if id == remote {
+                view.waiting = None;
+                view.cloud = false;
+                view.tab = SaveKind::Manual;
+                view.refresh();
+                if let Some(k) = view.entries.iter().position(|e| e.path == std::path::Path::new(&local)) {
+                    view.selected = k;
+                    view.scroll = k.saturating_sub(book.shown() - 1);
+                }
+            }
+        }
+        if view.waiting.is_some() && tab.failed == view.waiting {
+            view.waiting = None;
+            view.cloud_message = Some(tr("The save did not download. Try again later.").to_string());
+        }
+    }
+    let cloud = if view.cloud { tab_now.clone() } else { None };
+    let rows: Vec<Row> = match &cloud {
+        Some(tab) => cloud_rows(tab, view.waiting.as_deref()),
+        None => view.entries.iter().map(row_of).collect(),
+    };
     if rows.is_empty() {
         let p = book.p(297.0, 230.0 + (book.page - 350.0) / 2.0);
         let size = book.upright.map_or(16.0 * book.k, |u| u.sp(14.0));
-        super::dt_font::legacy_metrics_if(book.upright.is_some(), || super::chrome::shadow_centered(tr("No saves here yet."), p.x, p.y, size, super::chrome::CREAM));
+        let text = match &cloud {
+            None => tr("No saves here yet.").to_string(),
+            Some(tab) => cloud_empty_text(tab),
+        };
+        super::dt_font::legacy_metrics_if(book.upright.is_some(), || super::chrome::shadow_centered(&text, p.x, p.y, size, super::chrome::CREAM));
     }
     let (picked, delete, pin) = book.rows(&rows, Some(view.selected), &mut view.scroll, true);
     // Razdor's pin: the icon, or P for the selected save.
-    let pin = pin.or_else(|| key(KeyCode::P).then_some(view.selected));
+    let pin = if cloud.is_some() { None } else { pin.or_else(|| key(KeyCode::P).then_some(view.selected)) };
     if let Some(e) = pin.filter(|_| !asking).and_then(|k| view.entries.get(k)) {
         let (path, on) = (e.path.clone(), !e.pinned);
         if let Err(err) = save::set_pinned(&path, on) {
@@ -1410,11 +1467,18 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     }
     if let Some(k) = picked.filter(|_| !asking) {
         if k == view.selected {
-            *pending = view.entries.get(k).map(|e| e.path.clone());
+            match &cloud {
+                None => *pending = view.entries.get(k).map(|e| e.path.clone()),
+                Some(tab) => {
+                    if let Some(id) = downloadable_at(tab, k).filter(|_| view.waiting.is_none()) {
+                        start_download(view, id);
+                    }
+                }
+            }
         }
         view.selected = k;
     }
-    if let Some(e) = delete.filter(|_| !asking).and_then(|k| view.entries.get(k)) {
+    if let Some(e) = delete.filter(|_| !asking && cloud.is_none()).and_then(|k| view.entries.get(k)) {
         let name = e.meta.as_ref().map(|_| row_of(e).name)
             .unwrap_or_else(|| e.path.file_stem().unwrap_or_default().to_string_lossy().into_owned());
         view.confirm_delete = Some((e.path.clone(), name));
@@ -1422,27 +1486,48 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
     book.tab_line();
     // The tabs hang from the line: a phone's line is lower with its taller page (the desktop's is 426).
     let tab_drop = book.line - DESKTOP_LINE;
-    let tabs = [
-        (MANUAL_TAB_POSITION.0, MANUAL_TAB_POSITION.1 + tab_drop, SaveKind::Manual, own("LoadGame", "PrivateSave", n_("Private")), MANUAL_TAB_TEXTURES),
-        (AUTO_TAB_POSITION.0, AUTO_TAB_POSITION.1 + tab_drop, SaveKind::Auto, own("LoadGame", "AutoSave", n_("Autosaves")), AUTO_TAB_TEXTURES),
+    // The tab's kind: `Some` for «Личные» and «Авто-сохр.», `None` for «Облако» (shown with the cloud).
+    let mut tabs = vec![
+        (MANUAL_TAB_POSITION.0, MANUAL_TAB_POSITION.1 + tab_drop, Some(SaveKind::Manual), own("LoadGame", "PrivateSave", n_("Private")), MANUAL_TAB_TEXTURES),
+        (AUTO_TAB_POSITION.0, AUTO_TAB_POSITION.1 + tab_drop, Some(SaveKind::Auto), own("LoadGame", "AutoSave", n_("Autosaves")), AUTO_TAB_TEXTURES),
     ];
+    if tab_now.is_some() {
+        tabs.push((CLOUD_TAB_POSITION.0, CLOUD_TAB_POSITION.1 + tab_drop, None, tr("Cloud").to_string(), CLOUD_TAB_TEXTURES));
+    }
+    let is_open = |which: Option<SaveKind>| match which {
+        Some(tab) => cloud.is_none() && view.tab == tab,
+        None => cloud.is_some(),
+    };
     // Paint the inactive spine first and the selected spine last, above the window edge.
-    let mut switched = None;
+    let mut switched: Option<Option<SaveKind>> = None;
     for open in [false, true] {
-        for (x, y, tab, label, textures) in &tabs {
-            if (view.tab == *tab) != open { continue; }
-            if book.tab(*x, *y, label, open, *textures) && !asking { switched = Some(*tab); }
+        for (x, y, which, label, textures) in &tabs {
+            if is_open(*which) != open { continue; }
+            if book.tab(*x, *y, label, open, *textures) && !asking { switched = Some(*which); }
         }
     }
-    if let Some(tab) = switched {
+    if let Some(which) = switched {
         super::audio::cue(super::audio::Cue::CastSpell);
-        view.tab = tab;
-        LAST_TAB.with(|t| t.set(tab));
+        match which {
+            Some(tab) => {
+                view.cloud = false;
+                view.tab = tab;
+                LAST_TAB.with(|t| t.set(tab));
+            }
+            None => {
+                // The list is read again on opening (`Job::Refresh`); its count tells when it has come.
+                view.cloud = true;
+                view.listed_seen = super::cloud_store::listed();
+                view.selected = 0;
+                view.scroll = 0;
+                super::cloud_store::request(razdor::cloud::Job::Refresh);
+            }
+        }
         view.refresh();
     }
-    let clearable = view.entries.iter().any(|e| !e.pinned);
+    let clearable = cloud.is_none() && view.entries.iter().any(|e| !e.pinned);
     // «Запись» (Razdor's own): the chosen save's replay, when its file is there (`replay_file`).
-    let record_file = view.entries.get(view.selected).and_then(replay_file);
+    let record_file = if cloud.is_some() { None } else { view.entries.get(view.selected).and_then(replay_file) };
     // Razdor's own: the buttons grow with the text (`button_grow`): «Очистить всё» keeps its left end,
     // «Загрузить» and «Отмена» their right ends (587 and 7 units apart, as at Normal). A phone's row
     // is one row across the page (`phone_row`). «Папка» (Razdor's own, a player's request)
@@ -1490,9 +1575,19 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
             }
         }
     }
-    let chosen = view.entries.get(view.selected);
-    if (book.button(load_x, load_w, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {
-        *pending = chosen.map(|e| e.path.clone());
+    if let Some(tab) = &cloud {
+        // «Загрузить» on a cloud row downloads it; the save then opens in «Личные», selected.
+        let can = downloadable_at(tab, view.selected).is_some_and(|_| view.waiting.is_none());
+        if (book.button(load_x, load_w, &own("LoadGame", "Load", n_("Load")), can) || key(KeyCode::Enter)) && !asking && can {
+            if let Some(id) = downloadable_at(tab, view.selected) {
+                start_download(view, id);
+            }
+        }
+    } else {
+        let chosen = view.entries.get(view.selected);
+        if (book.button(load_x, load_w, &own("LoadGame", "Load", n_("Load")), chosen.is_some()) || key(KeyCode::Enter)) && !asking && chosen.is_some() {
+            *pending = chosen.map(|e| e.path.clone());
+        }
     }
     if (book.button(cancel_x, cancel_w, &own("Buttons", "Cancel", n_("Cancel")), true) || closed) && !asking {
         return Some(view.back.screen());
@@ -1507,6 +1602,10 @@ pub fn load_screen(game: Option<&Game>, assets: &Assets, view: &mut LoadView, pe
         } else if load_failed_box(&own("LoadGame", "Title", n_("Load a saved game")), &lacking.message.clone().unwrap_or_else(|| message.to_string()), lacking) {
             *error = None;
         }
+        return None;
+    }
+    if let Some(message) = view.cloud_message.clone() {
+        if load_failed_box(tr("Cloud"), &message, &mut LackingBox::default()) { view.cloud_message = None; }
         return None;
     }
     if let Some(message) = view.folder_error.clone() {
@@ -2592,43 +2691,24 @@ mod tests {
         }
     }
 
-    fn cloud_save(kind: razdor_wire::cloud::SaveKind, device: &str) -> SaveEntry {
-        SaveEntry {
-            id: "newer".to_string(),
-            meta: razdor_wire::cloud::SaveMeta {
-                schema: razdor_wire::SCHEMA,
-                game: "demo".to_string(),
-                map: "demo".to_string(),
-                kind,
-                device_id: String::new(),
-                device: device.to_string(),
-                name: "Game".to_string(),
-                saved_at: 1_700_000_000,
-                razdor: "9.9.9".to_string(),
-                size: 0,
-                sha256: String::new(),
-                raw_sha256: String::new(),
-                pinned: false,
-            },
-        }
-    }
-
     #[test]
-    fn a_newer_save_is_listed_with_its_label_and_nothing_to_load_or_delete() {
-        let row = newer_row(&cloud_save(razdor_wire::cloud::SaveKind::Manual, "ПК"));
-        assert!(row.locked, "a newer save is never loaded or deleted here");
-        assert_eq!(row.scenario, tr("Needs a newer version"));
-        assert_eq!(row.name, "Game");
-        assert_eq!(row.cloud, Some(razdor::cloud::SaveState::InCloud));
-        assert!(!row.pinned);
-        let own = newer_row(&cloud_save(razdor_wire::cloud::SaveKind::Quick, ""));
-        assert_eq!(own.scenario, tr("Needs a newer version"));
-    }
-
-    #[test]
-    fn a_newer_continue_slot_goes_to_the_autosave_tab_and_the_rest_to_private() {
-        assert_eq!(tab_of_cloud(razdor_wire::cloud::SaveKind::Session), SaveKind::Auto);
-        assert_eq!(tab_of_cloud(razdor_wire::cloud::SaveKind::Manual), SaveKind::Manual);
-        assert_eq!(tab_of_cloud(razdor_wire::cloud::SaveKind::Quick), SaveKind::Manual);
+    fn the_cloud_tab_rows_lock_a_newer_save_and_dim_the_one_downloading() {
+        use super::super::cloud_view::{CloudLine, CloudTab};
+        let tab = CloudTab {
+            lines: vec![
+                CloudLine::Device("Телефон".into()),
+                CloudLine::Save { id: "a".into(), name: "Game".into(), place: "Map".into(), saved_at: 1_700_000_000, locked: false },
+                CloudLine::Save { id: "b".into(), name: "New".into(), place: "Map".into(), saved_at: 1, locked: true },
+            ],
+            downloading: Some("a".into()),
+            ..CloudTab::default()
+        };
+        let rows = cloud_rows(&tab, None);
+        assert!(rows[0].locked && rows[0].time.is_empty(), "a device's header is not a row to load");
+        assert!(rows[1].waiting && rows[1].time == tr("Downloading the save…"));
+        assert!(rows[2].locked && rows[2].time == tr("Needs a newer version"));
+        assert_eq!(downloadable_at(&tab, 1).as_deref(), Some("a"));
+        assert_eq!(downloadable_at(&tab, 0), None);
+        assert_eq!(downloadable_at(&tab, 2), None, "a newer Razdor's save is never downloaded");
     }
 }

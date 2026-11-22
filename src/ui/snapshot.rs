@@ -738,9 +738,14 @@ fn try_stage(app: &mut App, scene: &str) -> Result<(), String> {
         "load" => {
             let mut view = LoadView::new(Back::Title);
             // `load:auto`: the autosaves' tab; `load:<tab>:<row>`: scrolled to that row.
-            if parts.next() == Some("auto") {
-                view.tab = razdor::rules::save::SaveKind::Auto;
-                view.refresh();
+            match parts.next() {
+                Some("auto") => {
+                    view.tab = razdor::rules::save::SaveKind::Auto;
+                    view.refresh();
+                }
+                // `load:cloud`: the «Облако» tab, its list made up by `RAZDOR_SCENE_CLOUD` (`cloud_view::cloud_tab`).
+                Some("cloud") => view.cloud = true,
+                _ => {}
             }
             if let Some(n) = parts.next().and_then(|n| n.parse().ok()) {
                 view.scroll = n;

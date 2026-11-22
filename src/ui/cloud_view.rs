@@ -16,7 +16,8 @@ use razdor::cloud::{account, Job, Phase};
 use razdor::hub::Installed;
 use razdor::i18n::tr;
 use razdor::telemetry;
-use razdor_wire::cloud::HubList;
+use razdor::cloud::SaveState;
+use razdor_wire::cloud::{HubList, SaveEntry, SaveKind, SaveMeta};
 
 use super::cloud_store;
 use super::map_import;
@@ -421,6 +422,151 @@ fn phrase_lines(phrase: &str) -> Vec<String> {
 fn close() {
     *PANEL.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
+/// The load window's «Облако» tab: shown while the remote config's cloud switch is on and an account
+/// exists on this device (the snapshots always show it).
+pub fn cloud_tab_shown() -> bool {
+    canned().is_some() || (rows_visible(razdor::remote_config::cloud_allowed()) && cloud_store::has_account())
+}
+
+/// One line of the «Облако» tab: a device's header, or a save of another device. `locked`: a save of
+/// a newer Razdor («Нужна новая версия»), never downloaded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CloudLine {
+    Device(String),
+    Save { id: String, name: String, place: String, saved_at: u64, locked: bool },
+}
+
+/// The tab's lines: the other devices' saves and the newer Razdor's, grouped by device id (two phones
+/// both named «телефон» stay apart), the device with the newest save first, the newest save first in
+/// each group.
+pub fn cloud_lines(others: &[SaveEntry], newer: &[SaveEntry]) -> Vec<CloudLine> {
+    let mut all: Vec<(&SaveEntry, bool)> = others.iter().map(|e| (e, false)).chain(newer.iter().map(|e| (e, true))).collect();
+    all.sort_by(|a, b| b.0.meta.saved_at.cmp(&a.0.meta.saved_at).then_with(|| a.0.id.cmp(&b.0.id)));
+    let mut devices: Vec<&str> = Vec::new();
+    for (e, _) in &all {
+        if !devices.contains(&e.meta.device_id.as_str()) {
+            devices.push(e.meta.device_id.as_str());
+        }
+    }
+    let mut lines = Vec::new();
+    for device in devices {
+        let group: Vec<(&SaveEntry, bool)> = all.iter().filter(|(e, _)| e.meta.device_id == device).copied().collect();
+        lines.push(CloudLine::Device(device_title(&group[0].0.meta.device)));
+        for (e, locked) in group {
+            let name = if e.meta.name.is_empty() { kind_label(e.meta.kind) } else { e.meta.name.clone() };
+            let place = format!("{} · {}", e.meta.map, kind_label(e.meta.kind));
+            lines.push(CloudLine::Save { id: e.id.clone(), name, place, saved_at: e.meta.saved_at, locked });
+        }
+    }
+    lines
+}
+
+/// A device's header: its name with a capital letter, «Другое устройство» for a device without one.
+fn device_title(name: &str) -> String {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => tr("Another device").to_string(),
+    }
+}
+
+/// A save's kind as the cloud tab names it.
+fn kind_label(kind: SaveKind) -> String {
+    match kind {
+        SaveKind::Manual => tr("Private save").to_string(),
+        SaveKind::Quick => tr("Quick save").to_string(),
+        SaveKind::Session => tr("Continue").to_string(),
+    }
+}
+
+/// The mark of a local save in the load list: the cloud mark, the hourglass while a push runs, or
+/// the «не в облаке» note for a save past the device's cap. Nothing else.
+pub fn save_mark(state: Option<SaveState>, phase: Phase) -> (Option<SaveState>, bool) {
+    match state {
+        Some(SaveState::InCloud) => (Some(SaveState::InCloud), false),
+        Some(SaveState::WaitingUpload) if phase == Phase::Working => (Some(SaveState::WaitingUpload), false),
+        Some(SaveState::LocalOnly) => (None, true),
+        _ => (None, false),
+    }
+}
+
+/// What the «Облако» tab shows now: the lines and the state of the list and of a download.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CloudTab {
+    pub lines: Vec<CloudLine>,
+    /// The list is being read (it has not come yet).
+    pub loading: bool,
+    /// No answer from the server for the list.
+    pub offline: bool,
+    /// The save whose download runs.
+    pub downloading: Option<String>,
+    /// The last download that landed: (the remote id, the local save's id).
+    pub landed: Option<(String, String)>,
+    /// The download that failed (its remote id).
+    pub failed: Option<String>,
+}
+
+/// The tab's state. `seen` is the worker's list count when the tab was opened: until it moves, the
+/// list is loading (unless the server did not answer).
+pub fn cloud_tab(seen: u64) -> CloudTab {
+    if let Some(scene) = canned() {
+        return canned_tab(&scene);
+    }
+    let Some(sh) = cloud_store::shared() else { return CloudTab { loading: true, ..CloudTab::default() } };
+    let offline = sh.phase == Phase::Offline;
+    CloudTab {
+        lines: cloud_lines(&sh.others, &sh.newer),
+        loading: sh.listed == seen && !offline && sh.phase != Phase::Failed,
+        offline: offline && sh.listed == seen,
+        downloading: sh.downloading.clone(),
+        landed: sh.landed.clone(),
+        failed: sh.download_failed.clone(),
+    }
+}
+
+/// A made-up save of the snapshots' «Облако» tab.
+fn canned_entry(id: &str, device: (&str, &str), name: &str, map: &str, kind: SaveKind, saved_at: u64, razdor: &str) -> SaveEntry {
+    SaveEntry {
+        id: id.to_string(),
+        meta: SaveMeta {
+            schema: razdor_wire::SCHEMA,
+            game: "dt".to_string(),
+            map: map.to_string(),
+            kind,
+            device_id: device.0.to_string(),
+            device: device.1.to_string(),
+            name: name.to_string(),
+            saved_at,
+            razdor: razdor.to_string(),
+            size: 0,
+            sha256: String::new(),
+            raw_sha256: String::new(),
+            pinned: false,
+        },
+    }
+}
+
+/// The snapshots' «Облако» tab (`RAZDOR_SCENE_CLOUD=cloud|cloud-empty|cloud-offline|cloud-loading|
+/// cloud-downloading`): two other devices and a locked save of a newer Razdor.
+fn canned_tab(scene: &str) -> CloudTab {
+    let phone = canned_entry("phone-1", ("b2c4", "телефон"), "Перед осадой", "Пепельная Марка", SaveKind::Manual, 1_700_003_600, "1.5.2");
+    let phone_old = canned_entry("phone-2", ("b2c4", "телефон"), "", "Тихая долина", SaveKind::Session, 1_699_900_000, "1.5.2");
+    let pc = canned_entry("pc-1", ("9f01", "ПК"), "Поход на север", "Дорога в Сарн", SaveKind::Manual, 1_699_800_000, "1.5.2");
+    let newer = canned_entry("newer-1", ("9f01", "ПК"), "Из будущего", "Пепельная Марка", SaveKind::Manual, 1_700_100_000, "99.0.0");
+    let mut tab = CloudTab::default();
+    match scene {
+        "cloud-empty" => {}
+        "cloud-offline" => tab.offline = true,
+        "cloud-loading" => tab.loading = true,
+        "cloud-downloading" => {
+            tab.lines = cloud_lines(&[phone, phone_old, pc], &[newer]);
+            tab.downloading = Some("phone-1".to_string());
+        }
+        _ => tab.lines = cloud_lines(&[phone, phone_old, pc], &[newer]),
+    }
+    tab
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -490,5 +636,60 @@ mod tests {
         assert!(!should_ask(&missing, "b 1", Some("b 1\n")), "the answered set is not asked again");
         assert!(should_ask(&missing, "b 2", Some("b 1")), "a changed set is asked anew");
         assert!(!should_ask(&[], "b 1", None), "nothing missing, nothing asked");
+    }
+}
+
+#[cfg(test)]
+mod cloud_tab_tests {
+    use super::*;
+
+    fn entry(id: &str, device_id: &str, device: &str, saved_at: u64, razdor: &str) -> SaveEntry {
+        canned_entry(id, (device_id, device), "", "Map", SaveKind::Manual, saved_at, razdor)
+    }
+
+    #[test]
+    fn the_tab_groups_by_device_id_newest_device_first_and_locks_the_newer() {
+        let others = [entry("a1", "p1", "телефон", 100, "1.5.2"), entry("b1", "pc", "ПК", 300, "1.5.2"), entry("a2", "p1", "телефон", 200, "1.5.2")];
+        let other_phone = entry("c1", "p2", "телефон", 250, "1.5.2");
+        let newer = [entry("n1", "pc", "ПК", 400, "99.0.0")];
+        let mut all = others.to_vec();
+        all.push(other_phone);
+        let lines = cloud_lines(&all, &newer);
+        let ids: Vec<String> = lines
+            .iter()
+            .map(|l| match l {
+                CloudLine::Device(name) => format!("[{name}]"),
+                CloudLine::Save { id, locked, .. } => format!("{id}{}", if *locked { "!" } else { "" }),
+            })
+            .collect();
+        // The PC has the newest save (400, locked); the two phones stay apart by id, newest first.
+        assert_eq!(ids, ["[ПК]", "n1!", "b1", "[Телефон]", "c1", "[Телефон]", "a2", "a1"]);
+    }
+
+    #[test]
+    fn a_save_without_a_name_is_named_by_its_kind_and_a_device_without_one_by_its_place() {
+        let lines = cloud_lines(&[entry("a1", "", "", 1, "1.5.2")], &[]);
+        assert_eq!(lines[0], CloudLine::Device(tr("Another device").to_string()));
+        assert!(matches!(&lines[1], CloudLine::Save { name, locked: false, .. } if name == tr("Private save")));
+    }
+
+    #[test]
+    fn the_marks_are_the_cloud_the_hourglass_during_a_push_and_the_cap_note() {
+        assert_eq!(save_mark(Some(SaveState::InCloud), Phase::Idle), (Some(SaveState::InCloud), false));
+        assert_eq!(save_mark(Some(SaveState::WaitingUpload), Phase::Working), (Some(SaveState::WaitingUpload), false));
+        assert_eq!(save_mark(Some(SaveState::WaitingUpload), Phase::Idle), (None, false), "no hourglass while nothing uploads");
+        assert_eq!(save_mark(Some(SaveState::LocalOnly), Phase::Idle), (None, true), "past the cap: the note");
+        assert_eq!(save_mark(None, Phase::Working), (None, false), "a save the mirror does not hold shows nothing");
+    }
+
+    #[test]
+    fn the_canned_scenes_list_two_devices_and_a_locked_newer_save() {
+        let tab = canned_tab("cloud");
+        let locked = tab.lines.iter().filter(|l| matches!(l, CloudLine::Save { locked: true, .. })).count();
+        assert_eq!(locked, 1);
+        assert_eq!(tab.lines.iter().filter(|l| matches!(l, CloudLine::Device(_))).count(), 2);
+        assert!(canned_tab("cloud-empty").lines.is_empty());
+        assert!(canned_tab("cloud-offline").offline);
+        assert_eq!(canned_tab("cloud-downloading").downloading.as_deref(), Some("phone-1"));
     }
 }
