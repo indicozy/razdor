@@ -75,10 +75,20 @@ struct Chrome {
 
 local! {
     static CHROME: RefCell<Option<Chrome>> = const { RefCell::new(None) };
+    /// Counts the installs given to [`set_install`]: a cache of the install's art checks it
+    /// ([`install_generation`]).
+    static INSTALL_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// How many installs were given to [`set_install`] so far: a cache of the install's art keeps the
+/// value it was made with, and drops its pictures when this one changes.
+pub fn install_generation() -> u64 {
+    INSTALL_GENERATION.with(|g| g.get())
 }
 
 /// Use the art of the install in `dir` from now on.
 pub fn set_install(dir: PathBuf) {
+    INSTALL_GENERATION.with(|g| g.set(g.get() + 1));
     let ahead: Vec<(PathBuf, &'static str)> =
         WINDOWS_AHEAD.iter().filter_map(|n| Some((find_file(&dir, &format!("Graphics/{n}")).ok()?, *n))).collect();
     // The decode store decodes them in order, in the background; the lit ones are uploaded

@@ -1,6 +1,6 @@
-//! The main menu's background, `Windows/Castle.lit` (512 × 512), enlarged to the screen as the owner
-//! chose (2026-11-22): what ImageMagick 7 (Q16) does with `-filter Lanczos -resize WxH! -unsharp
-//! 0x1.4+0.7+0.02`, Razdor-Art's «Lanczos + sharpness». A Lanczos-3 enlargement one axis at a time,
+//! The main menu's background, `Windows/Castle.lit` (512 × 512), enlarged to the screen with Lanczos-3 and
+//! sharpened: what ImageMagick 7 (Q16) does with `-filter Lanczos -resize WxH! -unsharp
+//! 0x1.4+0.7+0.02`. The contributor's change, merged with the owner's yes 2026-11-22. A Lanczos-3 enlargement one axis at a time,
 //! then an unsharp mask. Worked out on the CPU once per screen size and frame (a worker thread; the
 //! snapshots wait for it) and kept as a texture in memory: nothing is written to disk. Until it is
 //! ready the menu draws the picture as before.
@@ -223,6 +223,9 @@ type Key = ((usize, usize, usize, usize), (usize, usize));
 
 #[derive(Default)]
 struct State {
+    /// The install (`chrome::install_generation`) the picture was made from: another install has
+    /// its own `Castle.lit` (the Christmas mod ships one).
+    install: u64,
     /// The last background made and what for (`None`: it could not be made).
     done: Option<(Key, Option<Texture2D>)>,
     /// The worker under way, and what for. One at a time: a new size waits for it.
@@ -230,6 +233,15 @@ struct State {
 }
 
 impl State {
+    /// Forgets the picture and the worker when the install changed, so the next one is made from
+    /// the new install's picture.
+    fn for_install(&mut self, install: u64) {
+        if self.install != install {
+            *self = State { install, ..State::default() };
+        }
+    }
+
+
     /// Takes the worker's background when it is ready.
     fn collect(&mut self) {
         if let Some((k, rx)) = self.job.take() {
@@ -266,6 +278,7 @@ pub fn show(crop: Rect, screen: Rect) -> bool {
     let key = (crop, size);
     let texture = STATE.with(|s| {
         let mut s = s.borrow_mut();
+        s.for_install(chrome::install_generation());
         s.collect();
         if s.job.is_none() && s.done.as_ref().is_none_or(|(k, _)| *k != key) {
             s.job = start(key);
@@ -303,6 +316,23 @@ fn start(key: Key) -> Option<(Key, Receiver<Option<Vec<u8>>>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A new install (the Christmas mod's own `Castle.lit`) drops the enlarged picture made from the
+    /// old one, and a job still under way; the same install keeps them.
+    #[test]
+    fn a_new_install_forgets_the_enlarged_picture_and_its_job() {
+        let key: Key = ((0, 0, 512, 512), (1920, 1080));
+        let (_tx, rx) = mpsc::channel();
+        let mut s = State::default();
+        s.for_install(1);
+        s.done = Some((key, None));
+        s.job = Some((key, rx));
+        s.for_install(1);
+        assert!(s.done.is_some() && s.job.is_some(), "the same install keeps its picture");
+        s.for_install(2);
+        assert!(s.done.is_none() && s.job.is_none(), "a new install makes its own picture");
+        assert_eq!(s.install, 2);
+    }
 
     /// A small test picture, `w` × `h` RGBA (the same formula made ImageMagick's references below).
     fn synth(w: usize, h: usize) -> Vec<u8> {
