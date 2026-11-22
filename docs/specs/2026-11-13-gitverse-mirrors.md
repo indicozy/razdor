@@ -135,6 +135,18 @@ no macroquad):
   addresses go last in their list, and a request waits for its host's pause (`mirror::wait_host`). Every
   failed HTTP request is logged with its host, status and `Retry-After` (`mirror::note_failure`). Hub files
   come 400 ms apart from an address; a throttled Hub request is tried again up to twice (`mirror::retrying`).
+- **Per-file mirrors** (2026-11-22, the pages layout): a catalog file may carry `mirrors` (see «Pages layout»);
+  when its `path` fails (any error, a 429 included), its mirrors are tried in order by `mirror::first_ok`
+  (`hub::Hub::fetch_checked`, `download_checked`), with the same size and SHA-256 checks at every address.
+  A file without mirrors is fetched exactly as before.
+- **Conditional fetches** (2026-11-22): the catalog (`index-v2.json`, `index.json` of the default source) and the
+  update feed (`releases.json`) are fetched with the copy's `ETag` and `Last-Modified` (`If-None-Match`,
+  `If-Modified-Since`). A 304 gives the kept copy back (`update::fetch_cached`); a new body is kept with its
+  validators only when it reads (a catalog, a feed that parses), so a 304 never serves a body that does not
+  read. No copy, no validators or any doubt is a normal fetch. Desktop: `curl -D -` (the header blocks are parsed
+  by `update::parse_conditional`); Android: `razdorFetchConditional` in `MainActivityInject.java`; iOS: no headers,
+  always a fresh fetch. The copies: `cache/copy-index-v2.json`, `cache/copy-index.json` (the hub folder) and
+  `update-feed.json` (the cache folder).
 - **The updater**: the host a new version's file was downloaded from becomes the primary (`mirror::learn_from`,
   after the file checks out).
 - **Saved** in the cache folder as `mirror-pref.json` (`{"host": "gitverse" | "github", "since": <unix s>}`);
@@ -213,9 +225,9 @@ Checked in the tags (`git show <tag>:src/hub.rs`, `src/mirror.rs`, `src/gdrive.r
 - No shipped version has a per-file `mirrors` field (`FileRef` has none, in any tag), and no shipped tag (1.5.2,
   1.5.3, 1.5.4 checked) tries another host's copy of a single file. A hub file that fails on Pages has no fallback
   to its release copy from inside the app. The fallback is at the catalog level: when the GitVerse catalog cannot be
-  read, the GitHub catalog (release files) is used. Adding a per-file mirror
-  is an app change (`src/hub.rs`, `FileRef`, `serde(default)`; old readers ignore unknown fields: none of the
-  tags denies them).
+  read, the GitHub catalog (release files) is used. The per-file `mirrors` field is added by the 2026-11-22
+  follow-up (`src/hub.rs`, `FileRef`, `serde(default)`; old readers ignore unknown fields: none of the tags
+  denies them, checked in v1.5.2, v1.5.3 and v1.5.4). Versions before that follow-up do not have it.
 - The remote config's `game.links` (`data/remote/config.json`) is what 1.5.4 downloads the game from. It is
   still the attachment and the GitHub release until the config is changed (a separate publish: `publish_config.py`).
 

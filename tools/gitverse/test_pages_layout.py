@@ -149,6 +149,71 @@ class IndexTests(HermeticTestCase):
                 ph.check_pages_index(idx, GV_BASE)
 
 
+class MirrorTests(HermeticTestCase):
+    """The pages layout's per-file `mirrors`: the same bytes at the file's release copies, tried after the Pages file."""
+
+    ATTACH = "https://gitverse.ru/api/attachments/11111111-2222-3333-4444-555555555555"
+
+    def test_release_copies_name_github_and_a_gitverse_attachment_only_for_an_archive(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            uploaded = {"mod.zip": {"url": self.ATTACH, "size": 1, "sha256": "00"}, "map.dtm": {"url": self.ATTACH}}
+            copies = ph.release_copies(cat, uploaded)
+            self.assertEqual(copies["mod.zip"], [self.ATTACH, ph.GITHUB_HUB_RELEASE + "/mod.zip"],
+                             "an archive is a release asset as it is: its attachment is a copy")
+            self.assertEqual(copies["map.dtm"], [ph.GITHUB_HUB_RELEASE + "/map.dtm"],
+                             "a wrapped file's attachment is a zip, not a copy of the file")
+            self.assertNotIn("pic.png", copies, "pictures are not files: no mirrors")
+
+    def test_an_archive_with_no_upload_record_keeps_only_the_github_copy(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            copies = ph.release_copies(cat, {})
+            self.assertEqual(copies["mod.zip"], [ph.GITHUB_HUB_RELEASE + "/mod.zip"])
+
+    def test_the_index_gives_each_file_its_copies_after_its_pages_address(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            copies = ph.release_copies(cat, {"mod.zip": {"url": self.ATTACH}})
+            idx = ph.pages_index(cat, GV_BASE, [], copies)
+            mod = idx["entries"][2]["files"][0]
+            self.assertEqual(mod["path"], GV_BASE + "/files/" + sha(open(os.path.join(d, "mod.zip"), "rb").read()) + ".dat")
+            self.assertEqual(mod["mirrors"], [self.ATTACH, ph.GITHUB_HUB_RELEASE + "/mod.zip"])
+            self.assertEqual(idx["entries"][0]["files"][0]["mirrors"], [ph.GITHUB_HUB_RELEASE + "/map.dtm"])
+            self.assertTrue(all(m.startswith("https://") and m != f["path"]
+                                for e in idx["entries"] for f in e.get("files") or [] for m in f.get("mirrors", [])))
+            check = ph.check_pages_index(idx, GV_BASE)
+            self.assertIsNone(check)
+
+    def test_without_copies_the_index_has_no_mirror_fields_as_before(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            idx = ph.pages_index(cat, GV_BASE, [ph.GAME_URL])
+            for e in idx["entries"]:
+                for f in e.get("files") or []:
+                    self.assertNotIn("mirrors", f)
+            idx = ph.pages_index(cat, GV_BASE, [ph.GAME_URL], None)
+            self.assertNotIn("mirrors", idx["entries"][0]["files"][0])
+
+    def test_the_github_host_gives_the_same_copies(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            copies = ph.release_copies(cat, {"mod.zip": {"url": self.ATTACH}})
+            idx = ph.pages_index(cat, GH_BASE, [], copies)
+            self.assertEqual(idx["entries"][2]["files"][0]["mirrors"], [self.ATTACH, ph.GITHUB_HUB_RELEASE + "/mod.zip"])
+
+    def test_a_mirror_that_is_not_https_or_is_the_file_itself_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            cat, _ = real_catalog(d)
+            idx = ph.pages_index(cat, GV_BASE, [], ph.release_copies(cat, {}))
+            idx["entries"][2]["files"][0]["mirrors"] = ["http://x.example/mod.zip"]
+            with self.assertRaises(ph.HubError):
+                ph.check_pages_index(idx, GV_BASE)
+            idx["entries"][2]["files"][0]["mirrors"] = [idx["entries"][2]["files"][0]["path"]]
+            with self.assertRaises(ph.HubError):
+                ph.check_pages_index(idx, GV_BASE)
+
+
 class PublishDryRunTests(HermeticTestCase):
     def args(self, folder, host):
         return types.SimpleNamespace(catalog_dir=folder, tag=None, dry_run=True, no_pages=False, wait=0,

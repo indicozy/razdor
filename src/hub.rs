@@ -262,6 +262,11 @@ pub struct FileRef {
     pub archive_size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive_sha256: Option<String>,
+    /// Other addresses of the same bytes as `path` (the same file, the same size and SHA-256), tried in
+    /// order when `path` fails: a file's copies on the other host. Absent in the old catalogs (they read as
+    /// none); an old app ignores the field. Each is an https address (see [`check_mirrors`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<String>,
 }
 
 /// Likes and dislikes (👍/👎) on an entry's Discord post.
@@ -449,6 +454,7 @@ impl Catalog {
                     return Err(format!("index.json: {}: only a mod may be an archive", e.id));
                 }
                 check_wrapped(&e.id, f)?;
+                check_mirrors(f);
             }
             for (what, slot) in [("preview", &mut e.preview), ("picture", &mut e.picture)] {
                 if let Some(p) = slot {
@@ -554,6 +560,29 @@ fn check_wrapped(id: &str, f: &mut FileRef) -> Result<(), String> {
         }
         _ => Err(bad("the archive's SHA-256 is not 64 hex digits")),
     }
+}
+
+/// The file's other addresses: an https address, no repeats and not `path` itself. One that is not
+/// is dropped (the file stays, with the addresses that are good): a mirror is only ever a fallback.
+fn check_mirrors(f: &mut FileRef) {
+    let mut kept: Vec<String> = Vec::new();
+    for m in std::mem::take(&mut f.mirrors) {
+        if crate::remote_config::good_address(&m) && m != f.path && !kept.contains(&m) {
+            kept.push(m);
+        }
+    }
+    f.mirrors = kept;
+}
+
+/// The addresses of `f`'s bytes in the order they are tried: `path`, then the mirrors.
+fn file_addresses(f: &FileRef) -> Vec<&str> {
+    std::iter::once(f.path.as_str()).chain(f.mirrors.iter().map(String::as_str)).collect()
+}
+
+/// Whether the file has addresses after its `path` (the file's bytes are then tried at each in order).
+/// Only an https `path` takes them: a folder's relative path has no mirror.
+fn mirrored(f: &FileRef) -> bool {
+    !f.mirrors.is_empty() && f.path.starts_with("https://")
 }
 
 /// An entry id: it becomes a folder name, so nothing that could leave the hub folder.
@@ -1048,6 +1077,10 @@ pub fn ad_ini_text(a: &AdRef, picture: &str) -> String {
 
 /// The folder of the catalog cache.
 pub const CACHE_DIR: &str = "cache";
+/// The copies of the catalog files fetched from the mirrors, with their validators (`update::fetch_cached`):
+/// a 304 gives the copy back, so an unchanged catalog is not downloaded again.
+const COPY_INDEX_V2: &str = "copy-index-v2.json";
+const COPY_INDEX: &str = "copy-index.json";
 
 /// The cache file: the catalog as last fetched from `source`, in `<hub>/cache/index.json`.
 #[derive(Deserialize)]
@@ -1136,6 +1169,36 @@ impl Hub {
         }
     }
 
+    /// The bytes of `f`: from its `path`, or from its mirrors in order when that fails ([`mirrored`]). `check`
+    /// says whether bytes are the catalog's; the same check holds for every address (a mirror with other bytes
+    /// is a failure like any other). A file without mirrors is fetched as before.
+    fn fetch_checked(&self, f: &FileRef, check: &dyn Fn(&[u8]) -> Result<(), String>) -> Result<Vec<u8>, String> {
+        if !mirrored(f) {
+            let bytes = self.fetch(&f.path)?;
+            check(&bytes)?;
+            return Ok(bytes);
+        }
+        mirror::first_ok(&f.path, &file_addresses(f), |url| {
+            let bytes = crate::update::fetch(url, 60)?;
+            check(&bytes)?;
+            Ok(bytes)
+        })
+    }
+
+    /// Downloads `f` into `dest` (see [`Hub::fetch_checked`] for the addresses): `check` is run on the
+    /// downloaded file for every address. A file without mirrors is downloaded as before.
+    fn download_checked(&self, f: &FileRef, dest: &Path, max_bytes: u64, size: Option<u64>, check: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+        if !mirrored(f) {
+            self.download(&f.path, dest, max_bytes, size)?;
+            return check(dest);
+        }
+        mirror::first_ok(&f.path, &file_addresses(f), |url| {
+            let _ = std::fs::remove_file(dest);
+            crate::update::download_known(url, dest, 900, max_bytes, size)?;
+            check(dest)
+        })
+    }
+
     /// The file `f` is as the catalog says (its size and SHA-256), at `path`.
     fn check_file(path: &Path, f: &FileRef) -> Result<(), String> {
         check_sum(path, f.size, &f.sha256, &f.path)
@@ -1178,7 +1241,7 @@ impl Hub {
         }
         fs::create_dir_all(&folder).map_err(|e| format!("ads: {e}"))?;
         let part = folder.join(format!("{picture}.part"));
-        let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None };
+        let file = FileRef { path: a.image.clone(), name: picture.clone(), lang: None, size: a.size, sha256: a.sha256.clone(), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: Vec::new() };
         self.download(&a.image, &part, MAX_AD_BYTES, Some(a.size)).and_then(|()| Hub::check_file(&part, &file)).inspect_err(|_| {
             let _ = fs::remove_file(&part);
         })?;
@@ -1201,7 +1264,12 @@ impl Hub {
         match &self.source {
             Source::Mirrors => {
                 let bases = crate::remote_config::hub();
-                catalog_from_mirrors(&crate::remote_config::refs(&bases), |url| crate::update::fetch(url, 60))
+                let copies = self.local.join(CACHE_DIR);
+                catalog_from_mirrors(&crate::remote_config::refs(&bases), |url| {
+                    // The copy of each file (`index-v2.json`, `index.json`) is kept apart: a 304 gives it back.
+                    let file = copies.join(if url.ends_with(INDEX_V2) { COPY_INDEX_V2 } else { COPY_INDEX });
+                    crate::update::fetch_cached(url, 60, Some(&file), &|bytes| Catalog::parse(bytes).is_ok())
+                })
             }
             Source::Url(base) => {
                 let mut c = read_index(&mut |rel| self.fetch(rel))?;
@@ -1306,17 +1374,18 @@ impl Hub {
             if f.archive {
                 std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
                 let part = downloads.join(format!("{id}-{n}.zip"));
-                self.download(&f.path, &part, MAX_ARCHIVE_DOWNLOAD, Some(f.size))?;
-                Hub::check_file(&part, f)?;
+                self.download_checked(f, &part, MAX_ARCHIVE_DOWNLOAD, Some(f.size), &|path| Hub::check_file(path, f))?;
                 got.push((f, Got::Zip(part)));
             } else if f.wrapped.is_some() {
                 let bytes = self.fetch_wrapped(id, f, n, downloads)?;
                 got.push((f, Got::Bytes(bytes)));
             } else {
-                let bytes = self.fetch(&f.path)?;
-                if bytes.len() as u64 != f.size || crate::update::sha256_hex(&bytes) != f.sha256.to_lowercase() {
-                    return Err(format!("{}: the file does not match the catalog", f.path));
-                }
+                let bytes = self.fetch_checked(f, &|bytes| {
+                    if bytes.len() as u64 != f.size || crate::update::sha256_hex(bytes) != f.sha256.to_lowercase() {
+                        return Err(format!("{}: the file does not match the catalog", f.path));
+                    }
+                    Ok(())
+                })?;
                 got.push((f, Got::Bytes(bytes)));
             }
         }
@@ -1329,7 +1398,7 @@ impl Hub {
     fn fetch_wrapped(&self, id: &str, f: &FileRef, n: usize, downloads: &Path) -> Result<Vec<u8>, String> {
         std::fs::create_dir_all(downloads).map_err(|err| format!("downloads: {err}"))?;
         let zip = downloads.join(format!("{id}-{n}.wrapped.zip"));
-        let result = self.download(&f.path, &zip, MAX_ARCHIVE_DOWNLOAD, f.archive_size).and_then(|()| check_archive(&zip, f)).and_then(|()| {
+        let result = self.download_checked(f, &zip, MAX_ARCHIVE_DOWNLOAD, f.archive_size, &|path| check_archive(path, f)).and_then(|()| {
             let member = f.member.as_deref().unwrap_or_default();
             archive::member(&zip, member).map_err(|e| format!("{}: {e}", f.path))
         });
@@ -1557,7 +1626,7 @@ pub mod mock {
     impl Out<'_> {
         fn file(&self, path: String, name: &str, lang: Option<&str>, bytes: &[u8]) -> std::io::Result<FileRef> {
             crate::editor::files::write_atomically(&self.dir.join(&path), bytes)?;
-            Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None })
+            Ok(FileRef { path, name: name.into(), lang: lang.map(Into::into), size: bytes.len() as u64, sha256: crate::update::sha256_hex(bytes), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: Vec::new() })
         }
 
         /// A map or campaign: its chapters in `langs`, linked by their next-map names.
@@ -1997,6 +2066,31 @@ mod tests {
     /// A folder hub with one mod, `pack`, whose files are a zip: returns the hub and the zip's
     /// size and SHA-256.
     /// A catalog with one map whose file is `extra` (JSON fields added to a wrapped file's record).
+    #[test]
+    fn a_file_has_mirrors_only_as_https_addresses_of_its_own_bytes_in_order() {
+        let sum = "ab".repeat(32);
+        let page = "https://indicozy.gitverse.site/razdor-community/files/x.dat";
+        let mirrors = r#"["https://gitverse.ru/api/attachments/y","http://plain.example/z","https://gitverse.ru/api/attachments/y","https://github.com/indicozy/razdor-community/releases/latest/download/Map.DTm",""#.to_string() + page + r#""]"#;
+        let text = format!(
+            r#"{{"format":1,"entries":[{{"id":"hub-map","kind":"map","title":{{"ru":"Карта"}},"author":"a","version":"1","files":[{{"path":"{page}","name":"Hub_Map.DTm","size":3,"sha256":"{sum}","mirrors":{mirrors}}}]}}]}}"#
+        );
+        let c = Catalog::parse(text.as_bytes()).expect("a catalog with mirrors reads");
+        let f = &c.entries[0].files[0];
+        assert_eq!(f.mirrors, ["https://gitverse.ru/api/attachments/y", "https://github.com/indicozy/razdor-community/releases/latest/download/Map.DTm"]);
+        assert!(mirrored(f));
+        assert_eq!(file_addresses(f), [page, "https://gitverse.ru/api/attachments/y", "https://github.com/indicozy/razdor-community/releases/latest/download/Map.DTm"]);
+        // A folder's relative path takes no mirror; a catalog without the field has none.
+        let mut local = f.clone();
+        local.path = "Hub_Map.DTm".into();
+        assert!(!mirrored(&local));
+        let plain = Catalog::parse(wrapped_catalog("").as_bytes());
+        assert!(plain.is_ok_and(|c| c.entries[0].files[0].mirrors.is_empty()));
+        let out = serde_json::to_string(&c.entries[0].files[0]).unwrap();
+        assert!(out.contains("\"mirrors\""), "written when there are mirrors");
+        let none = FileRef { mirrors: Vec::new(), ..f.clone() };
+        assert!(!serde_json::to_string(&none).unwrap().contains("mirrors"), "an old app's shape is kept when there are none");
+    }
+
     fn wrapped_catalog(extra: &str) -> String {
         let sum = "ab".repeat(32);
         format!(
@@ -2360,6 +2454,7 @@ mod tests {
             member: None,
             archive_size: None,
             archive_sha256: None,
+            mirrors: Vec::new(),
         });
         std::fs::write(hub.local.join("installed.json"), serde_json::to_vec(&installed).unwrap()).unwrap();
         std::fs::remove_file(hub.local.join("maps/Hub_Merc1.DTm")).unwrap();
@@ -2420,7 +2515,7 @@ mod tests {
         std::fs::create_dir_all(root.join("previews")).unwrap();
         let png = mock::preview_png(320, 180);
         std::fs::write(root.join("previews/p.png"), &png).unwrap();
-        let f = FileRef { path: "previews/p.png".into(), name: "p.png".into(), lang: None, size: png.len() as u64, sha256: crate::update::sha256_hex(&png), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None };
+        let f = FileRef { path: "previews/p.png".into(), name: "p.png".into(), lang: None, size: png.len() as u64, sha256: crate::update::sha256_hex(&png), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: Vec::new() };
         let hub = Hub { source: Source::Dir(root.clone()), local: local.clone() };
         let path = hub.cache_preview(&f).unwrap();
         assert_eq!(path, preview_path(&local, &f));
@@ -2439,7 +2534,7 @@ mod tests {
         let local = hub.local.clone();
         // Fields the mock leaves out: a preview, a rating, an archive, a status note.
         let e = &mut c.entries[0];
-        e.preview = Some(FileRef { path: "previews/x.png".into(), name: "x.png".into(), lang: None, size: 9, sha256: "ab".repeat(32), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None });
+        e.preview = Some(FileRef { path: "previews/x.png".into(), name: "x.png".into(), lang: None, size: 9, sha256: "ab".repeat(32), archive: false, wrapped: None, member: None, archive_size: None, archive_sha256: None, mirrors: Vec::new() });
         e.rating = Some(Rating { up: 3, down: 1 });
         e.status_note = Text { ru: "Примечание".into(), en: "A note".into() };
         if let Some(m) = c.entries.iter_mut().find(|e| e.kind == Kind::Mod) {

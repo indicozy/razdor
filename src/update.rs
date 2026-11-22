@@ -464,6 +464,188 @@ fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
+/// The validators a copy was fetched with: the server's `ETag` and `Last-Modified`, sent back as
+/// `If-None-Match` and `If-Modified-Since` so that an unchanged file answers 304 (no body).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct Validators {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+}
+
+impl Validators {
+    /// The validators that can go into a request header: printable, short, or none (a damaged copy's
+    /// validator is dropped, and the fetch is then a normal one).
+    fn clean(self) -> Validators {
+        let fine = |v: &String| !v.is_empty() && v.len() <= 256 && v.bytes().all(|b| (0x20..0x7f).contains(&b));
+        Validators { etag: self.etag.filter(fine), last_modified: self.last_modified.filter(fine) }
+    }
+
+    fn any(&self) -> bool {
+        self.etag.is_some() || self.last_modified.is_some()
+    }
+}
+
+/// The answer of a conditional request: the body (with the validators the server sent), or 304.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Conditional {
+    Fresh { body: Vec<u8>, validators: Validators },
+    NotModified,
+}
+
+/// The body of `url` if it changed since the copy with `have` was fetched (see [`Conditional`]). A
+/// failure is noted as [`fetch`] notes it (a 429 pauses the host, with its Retry-After).
+pub(crate) fn fetch_conditional(url: &str, seconds: u32, have: &Validators) -> Result<Conditional, String> {
+    mirror::wait_host(url, &|| false);
+    let result = conditional_once(url, seconds, have);
+    match &result {
+        Ok(_) => mirror::answered(url),
+        Err(why) => match mirror::http_reply(why) {
+            Some((code, retry_after)) => mirror::note_failure(url, &format!("HTTP {code}"), retry_after),
+            None => mirror::note_failure(url, why, None),
+        },
+    }
+    result
+}
+
+/// One conditional request on the desktop: `curl` with the validators as headers and its response
+/// headers written to the output (`-D -`), parsed by [`parse_conditional`].
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn conditional_once(url: &str, seconds: u32, have: &Validators) -> Result<Conditional, String> {
+    let mut cmd = curl_base();
+    cmd.args(["--max-time", &seconds.to_string(), "-D", "-"]);
+    if let Some(tag) = &have.etag {
+        cmd.args(["-H", &format!("If-None-Match: {tag}")]);
+    }
+    if let Some(date) = &have.last_modified {
+        cmd.args(["-H", &format!("If-Modified-Since: {date}")]);
+    }
+    let out = cmd.arg(url).output().map_err(|e| format!("curl: {e}"))?;
+    if !out.status.success() {
+        return Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)));
+    }
+    parse_conditional(&out.stdout)
+}
+
+/// One conditional request on iOS: no headers there (`phone::get`), so the copy is always fresh.
+#[cfg(target_os = "ios")]
+fn conditional_once(url: &str, seconds: u32, _have: &Validators) -> Result<Conditional, String> {
+    Ok(Conditional::Fresh { body: phone::get(url, seconds)?, validators: Validators::default() })
+}
+
+/// One conditional request on Android (`phone::get_conditional`).
+#[cfg(target_os = "android")]
+fn conditional_once(url: &str, seconds: u32, have: &Validators) -> Result<Conditional, String> {
+    phone::get_conditional(url, seconds, have)
+}
+
+/// The end of the header block that starts `bytes`: the index after its blank line (or the end).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn header_end(bytes: &[u8]) -> usize {
+    let mut i = 0;
+    while i < bytes.len() {
+        let next = bytes[i..].iter().position(|&c| c == b'\n').map_or(bytes.len(), |p| i + p + 1);
+        let line = &bytes[i..next];
+        if line == b"\r\n" || line == b"\n" || next == bytes.len() {
+            return next;
+        }
+        i = next;
+    }
+    bytes.len()
+}
+
+/// What `curl -D -` wrote: each response's header block (a redirect's too) and then the body. The last
+/// block is the answer: 304 is [`Conditional::NotModified`], 2xx the body with its validators, and any
+/// other status a refusal (`HTTP <code>`, with ` retry-after <seconds>` when the server sent one).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn parse_conditional(out: &[u8]) -> Result<Conditional, String> {
+    let mut rest = out;
+    let mut status = None;
+    let mut head = Validators::default();
+    let mut retry = None;
+    while rest.starts_with(b"HTTP/") {
+        let end = header_end(rest);
+        let block = String::from_utf8_lossy(&rest[..end]).into_owned();
+        status = block.lines().next().and_then(|line| line.split_whitespace().nth(1)).and_then(|c| c.parse::<u16>().ok());
+        head = Validators::default();
+        retry = None;
+        for line in block.lines().skip(1) {
+            if let Some((name, value)) = line.split_once(':') {
+                let value = value.trim().to_string();
+                match name.trim().to_ascii_lowercase().as_str() {
+                    "etag" => head.etag = Some(value),
+                    "last-modified" => head.last_modified = Some(value),
+                    "retry-after" => retry = value.parse::<u64>().ok(),
+                    _ => {}
+                }
+            }
+        }
+        rest = &rest[end..];
+    }
+    match status {
+        Some(304) => Ok(Conditional::NotModified),
+        Some(200..=299) => Ok(Conditional::Fresh { body: rest.to_vec(), validators: head.clean() }),
+        Some(code) => Err(match retry {
+            Some(seconds) => format!("HTTP {code} retry-after {seconds}"),
+            None => format!("HTTP {code}"),
+        }),
+        None => Err("curl: no HTTP answer".into()),
+    }
+}
+
+/// A copy kept in a cache file: the address it came from, its validators and its body.
+#[derive(Serialize, Deserialize)]
+struct StoredCopy {
+    url: String,
+    #[serde(default)]
+    etag: Option<String>,
+    #[serde(default)]
+    last_modified: Option<String>,
+    body: String,
+}
+
+/// The copy in `file` (None when it is missing or does not read).
+fn read_copy(file: &Path) -> Option<StoredCopy> {
+    serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+}
+
+/// Keeps `body` as the copy of `url` in `file` (written whole, then renamed). A failure is logged: the
+/// next fetch is then a normal one.
+fn write_copy(file: &Path, url: &str, validators: &Validators, body: &[u8]) {
+    let Ok(text) = String::from_utf8(body.to_vec()) else { return };
+    let copy = StoredCopy { url: url.to_string(), etag: validators.etag.clone(), last_modified: validators.last_modified.clone(), body: text };
+    let Ok(json) = serde_json::to_vec(&copy) else { return };
+    if let Err(e) = crate::editor::files::write_atomically(file, &json) {
+        crate::diag!("http: the copy of {url} is not kept: {e}");
+    }
+}
+
+/// The body of `url` through the copy kept in `file`. The request carries the copy's validators when the
+/// copy is for this `url`: a 304 gives the copy back, and any other answer is the body, kept with its
+/// validators when it passes `accept` (a body that does not read is never kept, so a 304 never serves it).
+/// No `file`, no copy, no validators or a 304 without a usable copy: a normal fetch ([`fetch`]).
+pub(crate) fn fetch_cached(url: &str, seconds: u32, file: Option<&Path>, accept: &dyn Fn(&[u8]) -> bool) -> Result<Vec<u8>, String> {
+    let Some(file) = file else { return fetch(url, seconds) };
+    let copy = read_copy(file).filter(|c| c.url == url);
+    let have = copy
+        .as_ref()
+        .map(|c| Validators { etag: c.etag.clone(), last_modified: c.last_modified.clone() }.clean())
+        .unwrap_or_default();
+    match fetch_conditional(url, seconds, &have)? {
+        Conditional::Fresh { body, validators } => {
+            if validators.any() && accept(&body) {
+                write_copy(file, url, &validators, &body);
+            }
+            Ok(body)
+        }
+        Conditional::NotModified => match copy {
+            Some(copy) if have.any() && accept(copy.body.as_bytes()) => Ok(copy.body.into_bytes()),
+            _ => fetch(url, seconds),
+        },
+    }
+}
+
 #[derive(Deserialize)]
 struct ApiRelease {
     tag_name: String,
@@ -571,6 +753,18 @@ pub fn feed_from(addresses: &[&str], mut get: impl FnMut(&str) -> Result<Vec<u8>
     mirror::first_ok("update feed", addresses, |url| get(url).and_then(|json| parse_releases(&json, current, asset)))
 }
 
+/// The update feed's copy (the last feed that read, with its validators): `update-feed.json` in the cache
+/// folder. None when there is no cache folder (every check is then a normal fetch).
+fn feed_copy_file() -> Option<PathBuf> {
+    crate::platform::cache_dir().map(|d| d.join("update-feed.json"))
+}
+
+/// The feed at `url` for a check: a 304 gives the copy kept from the last feed that read (see
+/// [`fetch_cached`]); a feed that does not read as releases is never kept.
+fn fetch_feed(url: &str, current: Version, asset: &str) -> Result<Vec<u8>, String> {
+    fetch_cached(url, 20, feed_copy_file().as_deref(), &|json| parse_releases(json, current, asset).is_ok())
+}
+
 /// Asks GitHub for the latest release on a background thread (nothing when a check or a
 /// download is under way, or an update is already in place).
 pub fn check() {
@@ -579,7 +773,7 @@ pub fn check() {
     set(Status::Checking);
     let spawned = std::thread::Builder::new().name("update check".into()).spawn(move || {
         let feed = crate::remote_config::update_feed();
-        let found = feed_from(&crate::remote_config::refs(&feed), |url| fetch(url, 20), current(), asset);
+        let found = feed_from(&crate::remote_config::refs(&feed), |url| fetch_feed(url, current(), asset), current(), asset);
         let next = match found {
             Ok(Some(r)) => {
                 crate::diag!("update: {} is out (this is {})", r.version, current());
@@ -1580,5 +1774,57 @@ mod tests {
         remove_apk(&dir, Version(9, 9, 9));
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn a_conditional_answer_is_304_a_body_with_its_validators_or_a_refusal() {
+        let got = parse_conditional(b"HTTP/2 304\r\netag: \"a\"\r\n\r\n");
+        assert_eq!(got, Ok(Conditional::NotModified));
+        let got = parse_conditional(b"HTTP/1.1 304 Not Modified\nETag: \"a\"\n\n");
+        assert_eq!(got, Ok(Conditional::NotModified), "LF-only header blocks read too");
+        // A redirect's own header block comes first; the last block is the answer.
+        let got = parse_conditional(b"HTTP/1.1 301 Moved\r\nLocation: https://x.example/y\r\n\r\nHTTP/1.1 200 OK\r\nETag: \"b\"\r\nLast-Modified: Mon, 01 Jan 2026 00:00:00 GMT\r\n\r\n{\"format\":1}");
+        assert_eq!(
+            got,
+            Ok(Conditional::Fresh {
+                body: b"{\"format\":1}".to_vec(),
+                validators: Validators { etag: Some("\"b\"".into()), last_modified: Some("Mon, 01 Jan 2026 00:00:00 GMT".into()) },
+            })
+        );
+        let got = parse_conditional(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nbody");
+        assert_eq!(got, Ok(Conditional::Fresh { body: b"body".to_vec(), validators: Validators::default() }), "no validators sent: none kept");
+        assert_eq!(parse_conditional(b"HTTP/1.1 429 Too Many\r\nRetry-After: 30\r\n\r\n"), Err("HTTP 429 retry-after 30".into()));
+        assert_eq!(parse_conditional(b"HTTP/1.1 503 Busy\r\n\r\n"), Err("HTTP 503".into()));
+        assert_eq!(parse_conditional(b"HTTP/1.1 404 Not Found\r\n\r\n"), Err("HTTP 404".into()));
+        assert_eq!(parse_conditional(b""), Err("curl: no HTTP answer".into()));
+    }
+
+    #[test]
+    fn a_damaged_validator_is_dropped_and_a_good_one_is_kept() {
+        let bad = Validators { etag: Some("a\r\nX-Evil: 1".into()), last_modified: Some(String::new()) }.clean();
+        assert_eq!(bad, Validators::default());
+        let long = Validators { etag: Some("x".repeat(300)), last_modified: None }.clean();
+        assert_eq!(long.etag, None);
+        let good = Validators { etag: Some("\"0a1b\"".into()), last_modified: Some("Mon, 01 Jan 2026 00:00:00 GMT".into()) }.clean();
+        assert_eq!(good.etag.as_deref(), Some("\"0a1b\""));
+        assert!(good.any());
+    }
+
+    #[test]
+    fn a_copy_reads_back_for_its_own_address_and_a_damaged_file_is_no_copy() {
+        let dir = std::env::temp_dir().join(format!("razdor-copy-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("copy.json");
+        let validators = Validators { etag: Some("\"v1\"".into()), last_modified: None };
+        write_copy(&file, "https://x.example/index.json", &validators, b"{\"format\":1}");
+        let copy = read_copy(&file).expect("the copy reads back");
+        assert_eq!(copy.url, "https://x.example/index.json");
+        assert_eq!(copy.etag.as_deref(), Some("\"v1\""));
+        assert_eq!(copy.body, "{\"format\":1}");
+        std::fs::write(&file, b"{not json").unwrap();
+        assert!(read_copy(&file).is_none(), "a damaged copy is no copy: a normal fetch");
+        assert!(read_copy(&dir.join("missing.json")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

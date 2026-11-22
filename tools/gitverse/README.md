@@ -61,6 +61,13 @@ The release copies stay where they are, as the catalog's fallback.
   entry as it is (`size` and `sha256` of the file itself), and the archive flag (a mod) still unpacks it.
 - **Pictures** stay under `previews/`; the game archive is `files/<its sha256>.dat`, with its release addresses
   (the GitVerse attachment, the GitHub release file) as `mirrors`.
+- **Per-file `mirrors`** (the 2026-11-22 follow-up): each hub file's entry carries `mirrors`, the other addresses of
+  the same bytes, in the order the app tries them after the Pages file. They are `release_copies()`: the file's
+  GitHub release copy (`releases/latest/download/<name>`, the community catalog's bare file) and, for an archive
+  (a mod's zip, an APK: a release asset as it is), its GitVerse attachment from the zipped layout's state
+  (`gitverse-state.json`, `uploaded`). A wrapped file's GitVerse attachment is a zip, not a copy, so it is not
+  listed. Old app versions ignore the field; the app drops a mirror that is not https or repeats `path`.
+  The zipped layout's output is unchanged.
 - **Index**: each host's `index-v2.json` names its own host's files (absolute `https` addresses). The GitHub copy
   is read only once GitHub Pages is in the remote config's `hub` list (`data/remote/config.json`); no shipped
   version reads it yet.

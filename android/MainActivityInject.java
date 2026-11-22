@@ -500,6 +500,57 @@ public String razdorDownload(String url, String path, int stallSeconds, int tota
     }
 }
 
+// Fetches `url` for a copy the app keeps: `etag` and `lastModified` ("" when there is none) are sent as
+// If-None-Match and If-Modified-Since. Returns "304" when the copy is current (nothing is written), else
+// "200\n<ETag>\n<Last-Modified>" (empty lines for the headers the server did not send) with the body written
+// to `path`; a refusal, a stall, a timeout or an error comes back as razdorDownload words them.
+public String razdorFetchConditional(String url, String path, int stallSeconds, int totalSeconds, String etag, String lastModified) {
+    long deadline = System.currentTimeMillis() + totalSeconds * 1000L;
+    HttpURLConnection connection = null;
+    try {
+        connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setConnectTimeout(stallSeconds * 1000);
+        connection.setReadTimeout(stallSeconds * 1000);
+        connection.setRequestProperty("User-Agent", "razdor");
+        if (etag != null && !etag.isEmpty()) {
+            connection.setRequestProperty("If-None-Match", etag);
+        }
+        if (lastModified != null && !lastModified.isEmpty()) {
+            connection.setRequestProperty("If-Modified-Since", lastModified);
+        }
+        int code = connection.getResponseCode();
+        if (code == 304) {
+            return "304";
+        }
+        if (code / 100 != 2) {
+            String retryAfter = connection.getHeaderField("Retry-After");
+            return "HTTP " + code + (retryAfter == null ? "" : " retry-after " + retryAfter.trim());
+        }
+        String newEtag = connection.getHeaderField("ETag");
+        String newModified = connection.getHeaderField("Last-Modified");
+        int n = 1;
+        try (InputStream in = connection.getInputStream(); FileOutputStream out = new FileOutputStream(path)) {
+            byte[] buffer = new byte[65536];
+            while (System.currentTimeMillis() < deadline && (n = in.read(buffer)) > 0) {
+                out.write(buffer, 0, n);
+            }
+        }
+        // The loop ended at the cap with the last read still running (n > 0), not at the end.
+        if (n > 0) {
+            return "timeout: the download took longer than " + totalSeconds + " s";
+        }
+        return "200\n" + (newEtag == null ? "" : newEtag.trim()) + "\n" + (newModified == null ? "" : newModified.trim());
+    } catch (java.net.SocketTimeoutException e) {
+        return "stalled: " + e;
+    } catch (Exception e) {
+        return e.toString();
+    } finally {
+        if (connection != null) {
+            connection.disconnect();
+        }
+    }
+}
+
 // Installs the APK at `path` over this app: the file is copied into an installer session
 // (before this returns, so the caller may delete it), and the session is committed. The
 // installer then asks the player to confirm (or says why not) through razdorInstallReceiver.

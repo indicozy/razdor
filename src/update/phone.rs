@@ -192,10 +192,63 @@ mod android {
         let _ = std::fs::remove_file(&path);
         body
     }
+
+    /// A conditional request for `url` (`update::fetch_conditional`): the Java side sends the validators
+    /// and gives "304", or "200" with the body's file and its validators (see `razdorFetchConditional`).
+    pub fn get_conditional(url: &str, seconds: u32, have: &crate::update::Validators) -> Result<crate::update::Conditional, String> {
+        use crate::update::{Conditional, Validators};
+        crate::mirror::wait_host(url, &|| false);
+        secure(url)?;
+        let path = cache_dir()?.join(crate::update::fetch_temp_name());
+        let text = java_conditional(url, &path, seconds, have);
+        let result = match text {
+            Ok(text) if text == "304" => Ok(Conditional::NotModified),
+            Ok(text) if text.starts_with("200\n") => {
+                let mut lines = text.splitn(3, '\n').skip(1);
+                let line = |s: Option<&str>| s.map(str::trim).filter(|s| !s.is_empty()).map(String::from);
+                let validators = Validators { etag: line(lines.next()), last_modified: line(lines.next()) }.clean();
+                std::fs::read(&path).map(|body| Conditional::Fresh { body, validators }).map_err(|e| e.to_string())
+            }
+            Ok(text) if crate::mirror::http_reply(&text).is_some() => Err(text),
+            Ok(text) if text.starts_with("stalled") => {
+                crate::diag!("download: {text}");
+                Err(crate::update::STALLED.into())
+            }
+            Ok(text) if text.is_empty() => Err("no reply".into()),
+            Ok(text) => Err(text),
+            Err(e) => Err(e),
+        };
+        let _ = std::fs::remove_file(&path);
+        result
+    }
+
+    /// The Java side's `razdorFetchConditional` for `url` into `path`: its reply text (see there).
+    fn java_conditional(url: &str, path: &Path, seconds: u32, have: &crate::update::Validators) -> Result<String, String> {
+        secure(url)?;
+        let path = path.to_str().ok_or("the file's path is not text")?;
+        // SAFETY: as in `cache_dir`.
+        unsafe {
+            let env = attach_jni_env();
+            let sig = "(Ljava/lang/String;Ljava/lang/String;IILjava/lang/String;Ljava/lang/String;)Ljava/lang/String;";
+            let mid = method(env, activity_class(env).obj, "razdorFetchConditional", sig, false);
+            if mid.is_null() || cleared(env) {
+                return Err("razdorFetchConditional is missing".into());
+            }
+            let (url, path) = (string(env, url), string(env, path));
+            let etag = string(env, have.etag.as_deref().unwrap_or(""));
+            let modified = string(env, have.last_modified.as_deref().unwrap_or(""));
+            let stall = crate::update::STALL_SECONDS as i32;
+            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32, etag.obj, modified.obj));
+            if cleared(env) {
+                return Err("the download failed".into());
+            }
+            to_text(env, reply.obj).ok_or_else(|| "no reply".into())
+        }
+    }
 }
 
 #[cfg(target_os = "android")]
-pub use android::{cache_dir, download, download_cancel, download_range, get, install, installer_outcome};
+pub use android::{cache_dir, download, download_cancel, download_range, get, get_conditional, install, installer_outcome};
 
 /// iOS: a download is one `NSData` call that cannot be stopped in the middle (the caller's
 /// cancel is seen when it returns). Nothing to do.

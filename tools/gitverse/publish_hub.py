@@ -73,6 +73,8 @@ REMOTE_GAME = "remote-game"  # the game archive, fetched here during publishing 
 GITVERSE_BASE = pages.HOSTS["gitverse"]["base"].rstrip("/")
 GITHUB_BASE = pages.HOSTS["github"]["base"].rstrip("/")
 PREVIEWS = "previews/"
+# The community repository's latest release (the app's DEFAULT_SOURCE): its files are the catalog's, bare.
+GITHUB_HUB_RELEASE = "https://github.com/indicozy/razdor-community/releases/latest/download"
 STATE = "gitverse-state.json"
 STAGE = "gitverse"
 ZIPS = "gitverse-zips"
@@ -486,14 +488,38 @@ def fetch_game(folder, cat):
     return pages_site_path(g.get("sha256")), REMOTE_GAME + "/" + g["name"]
 
 
-def pages_index(cat, base, game_mirrors):
+def release_copies(cat, uploaded):
+    """{catalog file name: [addresses of the same bytes]} for the pages layout's `mirrors`: the file's GitHub
+    release copy (the community catalog's latest release, bare), and its GitVerse release attachment when the
+    file is a release asset as it is (an archive; a wrapped file's attachment is a zip, which is no copy of the
+    file, so it is not listed). `uploaded` is the zipped layout's state (asset name -> {"url", ...}). A file
+    with no copy has no entry."""
+    out = {}
+    for name, role in refs(cat):
+        if role != "file":
+            continue
+        urls = []
+        if ext_of(name) in ARCHIVE_EXT:
+            asset = uploaded.get(name) or {}
+            if isinstance(asset.get("url"), str) and asset["url"].startswith("https://"):
+                urls.append(asset["url"])
+        urls.append(GITHUB_HUB_RELEASE + "/" + name)
+        out[name] = urls
+    return out
+
+
+def pages_index(cat, base, game_mirrors, copies=None):
     """The Pages copy of the catalog for the host at `base`: a file's address is `base/files/<sha256>.dat` (its
     own size and SHA-256; bare, no wrapping); pictures are relative under previews/; the game's address is its
-    Pages file, with `game_mirrors` after it."""
+    Pages file, with `game_mirrors` after it. `copies` (see [`release_copies`]) gives a file its `mirrors`: the
+    addresses of the same bytes that the app tries when the Pages file fails."""
     out = copy.deepcopy(cat)
     for e in out["entries"]:
         for f in e.get("files") or []:
             if not f["path"].startswith("https://"):
+                urls = [u for u in (copies or {}).get(f["path"], []) if u != f["path"]]
+                if urls:
+                    f["mirrors"] = urls
                 f["path"] = base + "/" + pages_site_path(f["sha256"])
         for key in ("preview", "picture"):
             ref = e.get(key)
@@ -524,6 +550,9 @@ def check_pages_index(idx, base):
             p = str(f.get("path", ""))
             if not p.startswith(want) or not p.endswith("." + PAGES_EXT):
                 raise HubError(f"entry {e.get('id')}: {f.get('name')}: not a Pages file under {want}")
+            for m in f.get("mirrors") or []:
+                if not str(m).startswith("https://") or m == p:
+                    raise HubError(f"entry {e.get('id')}: {f.get('name')}: a mirror is not another https address")
             if any(k in f for k in ("wrapped", "member", "archive_size", "archive_sha256")):
                 raise HubError(f"entry {e.get('id')}: {f.get('name')}: the pages layout has no zip fields")
     game = idx.get("game")
@@ -573,7 +602,8 @@ def publish_pages(args, folder, cat, host):
         mirrors = [GAME_URL, GAME_GITHUB_URL]
     else:
         mirrors = [GITVERSE_BASE + "/" + game_where, GAME_URL]
-    idx = pages_index(cat, base, mirrors)
+    uploaded = load_state(folder).get("uploaded", {})
+    idx = pages_index(cat, base, mirrors, release_copies(cat, uploaded))
     stage = write_stage(folder, idx, site, name="pages-" + host)
     check_stage(stage, idx)
     check_pages_stage(stage, idx, base, site)
