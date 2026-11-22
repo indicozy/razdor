@@ -180,6 +180,7 @@ impl Validate for SavePut {
 #[serde(rename_all = "snake_case")]
 pub enum MarkLevel {
     Green,
+    Fixes,
     Grey,
     Yellow,
     Red,

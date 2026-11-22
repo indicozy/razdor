@@ -773,8 +773,10 @@ impl Game {
         if self.cheats.used {
             mark.worsen(Level::Red, Reason::Cheat(String::new()));
         }
-        if let Some(rule) = self.experimental.first_on() {
+        if let Some(rule) = self.experimental.first_on_in(crate::rules::content::Group::Cheats) {
             mark.worsen(Level::Yellow, Reason::Rule(rule.to_string()));
+        } else if let Some(rule) = self.experimental.first_on_in(crate::rules::content::Group::Fixes) {
+            mark.worsen(Level::Fixes, Reason::Rule(rule.to_string()));
         }
         for (setting, value) in gameplay {
             mark.worsen(Level::Grey, Reason::Setting(setting.to_string()));
@@ -4013,6 +4015,20 @@ mod tests {
         g.foe = Some(Foe::Army(0));
         g.back_to = Some(from);
         (g, from)
+    }
+
+    #[test]
+    fn a_run_with_only_fixes_is_green_with_a_r_and_a_cheat_makes_it_yellow() {
+        use crate::rules::marks::{Level, Reason};
+        let (mut g, _from) = caught_by_army();
+        g.experimental = crate::rules::content::ExperimentalRules { bless_once: true, ..Default::default() };
+        g.note_settings(&[]);
+        assert_eq!(g.run_mark().level, Level::Fixes);
+        assert_eq!(g.run_mark().reason, Reason::Rule("Bless once a turn".into()));
+        g.experimental.two_potions = true;
+        g.note_settings(&[]);
+        assert_eq!(g.run_mark().level, Level::Yellow, "a cheat is yellow, and the mark never falls back to the fix");
+        assert_eq!(g.run_mark().reason, Reason::Rule("At most two potions per character".into()));
     }
 
     #[test]

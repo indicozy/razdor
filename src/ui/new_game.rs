@@ -13,7 +13,7 @@ use std::sync::Arc;
 use macroquad::prelude::*;
 
 use razdor::i18n::{self, n_, tr, Lang};
-use razdor::rules::content::{Content, ExperimentalRules, HeroClass};
+use razdor::rules::content::{Content, ExperimentalRules, Group as SwitchGroup, HeroClass, Preset, Switch, SWITCHES};
 use razdor::rules::game::Game;
 use razdor::dt::map_lang::MapLang;
 use razdor::rules::marks;
@@ -823,6 +823,7 @@ fn tick_hit(mark: Rect, dp: Option<f32>, within: Rect, limit_right: f32) -> Rect
 fn mark_ink(level: marks::Level) -> Color {
     match level {
         marks::Level::Green => TICK_GREEN,
+        marks::Level::Fixes => TICK_GREEN,
         marks::Level::Grey => MARK_GREY,
         marks::Level::Yellow => MARK_YELLOW,
         marks::Level::Red => MARK_RED,
@@ -844,6 +845,7 @@ fn mark_lines_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> Vec<String>
         marks::Reason::Honest => one(t(n_("Completed honestly")).to_string()),
         marks::Reason::Cheat(command) if command.is_empty() => one(t(n_("Completed with cheats")).to_string()),
         marks::Reason::Cheat(command) => one(format!("{} ({command})", t(n_("Completed with cheats")))),
+        marks::Reason::Rule(rule) if mark.level == marks::Level::Fixes => one(format!("{}: {}", t(n_("Completed with Razdor's rules")), t(rule))),
         marks::Reason::Rule(rule) => one(format!("{}: {}", t(n_("Completed with experimental rules")), t(rule))),
         // An old mark: its one setting name, which may be a name an older Razdor saved (see the tests).
         marks::Reason::Setting(setting) if mark.settings.is_empty() => one(format!("{}: {}", t(n_("Completed with settings not as in the original")), t(setting))),
@@ -859,6 +861,16 @@ fn mark_lines_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> Vec<String>
 /// The tooltip lines of a run mark in the current language (one `info_later` line each).
 fn mark_lines(mark: &marks::RunMark) -> Vec<String> {
     mark_lines_in(mark, tr)
+}
+
+/// A run mark's tick in a box of side `s` at `(x, y)`; a run with Razdor's fixes only (`Level::Fixes`)
+/// gets a «Р» beside it (the owner's decision, 2026-11-22), so it reads apart from the plain green tick.
+fn mark_tick(level: marks::Level, x: f32, y: f32, s: f32) {
+    tick(x, y, s, mark_ink(level));
+    if level == marks::Level::Fixes {
+        let size = (s * 1.4).max(12.0);
+        chrome::shadow_text("Р", x + s + 2.0, y + s, size, mark_ink(level));
+    }
 }
 
 /// A tick (the completed mark) in a box of side `s` at `(x, y)`.
@@ -1221,7 +1233,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
         // map with no record (won before the marks) keeps the plain green tick.
         let mark_r = mark_box(head, k);
         if let Some(mark) = &f.mark {
-            tick(mark_r.x, mark_r.y, mark_r.w, mark_ink(mark.level));
+            mark_tick(mark.level, mark_r.x, mark_r.y, mark_r.w);
             // The hover area: a finger's square on a phone, cut at the star's tap area (`tick_hit`).
             let hit = tick_hit(mark_r, super::display::dp_px(), r, finger_hit(star_r).x);
             if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
@@ -1285,7 +1297,7 @@ fn scenario_select_screen(scenarios: &[ScenarioEntry], has_install: bool, mods: 
             super::dt_font::legacy_metrics_if(is_grown, || chrome::shadow_text(&ellipsize(title(&scenarios[c]), room, small), r.x + 52.0 * k, cy, small, ink.color()));
             let tick_r = Rect::new(head.x + head.w - 40.0 * k, cy - small * 0.36 - 5.0 * k, 10.0 * k, 10.0 * k);
             if let Some(mark) = &mark {
-                tick(tick_r.x, tick_r.y, tick_r.w, mark_ink(mark.level));
+                mark_tick(mark.level, tick_r.x, tick_r.y, tick_r.w);
                 let margin = Rect::new(tick_r.x - 4.0 * k, tick_r.y - 4.0 * k, tick_r.w + 8.0 * k, tick_r.h + 8.0 * k);
                 let hit = tick_hit(margin, super::display::dp_px(), r, r.right());
                 if over_list && hit.contains(crate::ui::widgets::pointer().into()) {
@@ -1661,8 +1673,6 @@ const OK_DP: f32 = 44.0;
 /// window grows with them. The rows take one, two or three columns: the fewest whose height fits
 /// the screen (a phone's landscape takes two or three); the window then takes the screen's width.
 fn experimental_menu() {
-    /// The switches in the window (one row each).
-    const ROWS: usize = 17;
     let (sw, sh) = (screen_width(), screen_height());
     let k = chrome::k();
     let o = super::display::popup_o(k, 550.0, 410.0).min((sw - 12.0) / 550.0).min((sh - 12.0) / 410.0);
@@ -1702,26 +1712,19 @@ fn experimental_menu() {
     // lines. A row is as tall as two lines when any label wraps at that column count, else one.
     let normal = 16.0 * tx;
     let label_pitch = normal * 1.2;
-    let preset_label = tr("Razdor's rules");
-    let labels: [&str; ROWS] = [
-        tr("All special bonuses simultaneously"),
-        tr("No item limits"),
-        tr("At most two potions per character"),
-        tr("Six equipment cells"),
-        tr("Free units"),
-        tr("Automatic promotion"),
-        tr("Units don't die"),
-        tr("Faster AI"),
-        tr("Bless once a turn"),
-        tr("Poison spares the Undead"),
-        tr("No spell book limit"),
-        tr("Merchant discount from an item"),
-        tr("Rear Service always −30%"),
-        tr("Store in your own buildings"),
-        tr("Death curse on counter blows"),
-        tr("No corpses in garrisons"),
-        tr("Strict initiative order"),
+    let hdr_h = 26.0 * big;
+    // The two headed groups (the owner's decision, 2026-11-22): the fixes on top of DT, then the cheats.
+    let groups: [(&str, Vec<&'static Switch>); 2] = [
+        ("Fixes", ExperimentalRules::switches(SwitchGroup::Fixes).collect()),
+        ("Cheats", ExperimentalRules::switches(SwitchGroup::Cheats).collect()),
     ];
+    // The «Правила» choice: DT or Razdor (two buttons); its state line says what it is now.
+    let preset = now.preset();
+    let state_text = tr(match preset {
+        Preset::Dt => "Rules DT: no fix is on; the rules are the original's.",
+        Preset::Razdor => "Razdor's rules: every fix is on. Cheats are separate.",
+        Preset::Mixed => "Mixed: some fixes are on and some are off. Pick DT or Razdor's rules to set them all.",
+    });
     // An upright phone's window takes the screen less the safe area (cutouts) and 12 px each side.
     let safe = super::display::safe_area();
     let phone_w = (sw - safe.left - safe.right - 24.0).max(0.0);
@@ -1740,17 +1743,22 @@ fn experimental_menu() {
         let iw = width_for(cols) - 40.0 * big - bar_w;
         (iw - 20.0 * big * (cols as f32 - 1.0)) / cols as f32
     };
-    let wraps = |cols: usize| labels.iter().any(|l| super::dt_font::legacy_metrics_if(true, || wrap_cached(l, col_w_for(cols) - 30.0 * big, normal)).len() > 1);
+    let wraps = |cols: usize| SWITCHES.iter().any(|s| super::dt_font::legacy_metrics_if(true, || wrap_cached(tr(s.name), col_w_for(cols) - 30.0 * big, normal)).len() > 1);
     let row_h_for = |cols: usize| if wraps(cols) { row_h.max(2.0 * label_pitch + 6.0 * big) } else { row_h };
-    // The «Правила Раздора» row (full width, above the switches) and its hint lines (wrapped to the
-    // window's width, as the hints at the bottom); the switches start under them.
-    let preset_lines = |cols: usize| super::dt_font::legacy_metrics_if(true, || wrap_cached(tr("Turns on at once all Razdor's rules that differ from the original; each can be turned off on its own afterwards."), width_for(cols) - 40.0 * big - bar_w, hint_size));
+    // The state line under the choice buttons, wrapped to the window's width.
+    let preset_lines = |cols: usize| super::dt_font::legacy_metrics_if(true, || wrap_cached(state_text, width_for(cols) - 40.0 * big - bar_w, hint_size));
     let top_h = |cols: usize| row_h + 4.0 * big + preset_lines(cols).len() as f32 * hint_pitch + gap;
-    // The window's height with `cols` columns of rows and `lines` lines of hints.
-    let height = |cols: usize, lines: usize| {
-        let per = ROWS.div_ceil(cols) as f32;
-        54.0 * o + top_h(cols) + per * row_h_for(cols) + (per - 1.0) * gap + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big
+    // One group: its header and its rows in `cols` columns (a group with no rows takes no room).
+    let group_h = |n: usize, cols: usize| {
+        if n == 0 {
+            return 0.0;
+        }
+        let per = n.div_ceil(cols) as f32;
+        hdr_h + per * row_h_for(cols) + (per - 1.0) * gap + gap
     };
+    let grid_h = |cols: usize| groups.iter().map(|(_, list)| group_h(list.len(), cols)).sum::<f32>();
+    // The window's height with `cols` columns of rows and `lines` lines of hints.
+    let height = |cols: usize, lines: usize| 54.0 * o + top_h(cols) + grid_h(cols) + 8.0 * big + lines as f32 * hint_pitch + 8.0 * big + ok_h + 12.0 * big;
     let lines_for = |cols: usize| wrapped(width_for(cols) - 40.0 * big - bar_w);
     // An upright phone has one column: its height scrolls, so the rows are never squeezed.
     let cols = if upright { 1 } else { (1..=3).find(|&c| height(c, lines_for(c).len()) <= sh - 12.0).unwrap_or(3) };
@@ -1760,14 +1768,13 @@ fn experimental_menu() {
     let h = height(cols, lines.len()).min(cap);
     let r = Rect::new(((sw - w) / 2.0).round(), ((sh - h) / 2.0).round(), w, h);
     let iw = w - 40.0 * big - bar_w;
-    let per_col = ROWS.div_ceil(cols);
     let col_gap = 20.0 * big;
     let col_w = (iw - col_gap * (cols as f32 - 1.0)) / cols as f32;
     // The scroll area: from under the title down to 8 units above the OK button. Its rows and
     // hints are as tall as the window's natural content, so it scrolls only when the cap bites.
     let ok_top = r.bottom() - 12.0 * big - ok_h;
     let view = Rect::new(r.x + 20.0 * big, r.y + 54.0 * o, iw + bar_w, (ok_top - 8.0 * big) - (r.y + 54.0 * o));
-    let content_h = top_h(cols) + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big + lines.len() as f32 * hint_pitch;
+    let content_h = top_h(cols) + grid_h(cols) + 8.0 * big + lines.len() as f32 * hint_pitch;
     let most = (content_h - view.h).max(0.0);
     let mut scroll = RULES_SCROLL.with(|s| s.get()).clamp(0.0, most);
     if most > 0.0 {
@@ -1785,6 +1792,7 @@ fn experimental_menu() {
     let (_, close) = chrome::window(r, tr("Experimental scenario rules"), chrome::Skin::Marble, true);
     drop(frame_scale);
     let mut rules = experimental_rules();
+    let in_view = |row: Rect| row.bottom() > view.y && row.y < view.bottom();
     let check_row = |row: Rect, label: &str, value: &mut bool| {
         let box_r = Rect::new(row.x, row.y + (row_h - 20.0 * big) / 2.0, 20.0 * big, 20.0 * big);
         chrome::silver_frame(box_r, big.max(1.0));
@@ -1805,45 +1813,54 @@ fn experimental_menu() {
         }
         // A row toggles on a press of its own, only where the pointer is in the visible view (a
         // swipe is no press), so a row scrolled out of view cannot toggle.
-        let in_view = row.bottom() > view.y && row.y < view.bottom();
-        let (_, _, pressed) = if in_view { button_state(row, true) } else { (false, false, false) };
+        let (_, _, pressed) = if in_view(row) { button_state(row, true) } else { (false, false, false) };
         if pressed && view.contains(crate::ui::widgets::pointer().into()) { *value = !*value; }
     };
-    let check = |index: usize, label: &str, value: &mut bool| {
-        let (c, rr) = (index / per_col, index % per_col);
-        check_row(Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), grid_top + rr as f32 * (row_h + gap), col_w, row_h), label, value);
-    };
     let clip = super::widgets::Clip::new(view);
-    // The «Правила Раздора» row: on when all six of its switches are on. Pressed, it sets all six
-    // (on, or off when they are all on) and leaves the other switches alone. Its hint is under it.
-    let mut preset_on = rules.is_razdor_preset_on();
-    check_row(Rect::new(r.x + 20.0 * big, content_top, iw, row_h), preset_label, &mut preset_on);
-    if preset_on != rules.is_razdor_preset_on() {
-        rules.set_razdor_preset(preset_on);
+    // The «Правила» choice: DT (every fix off) or Razdor's rules (every fix on), each drawn pressed
+    // while it is the choice; a mix has neither. A press sets the fixes only; the cheats stay.
+    let half = (iw - gap) / 2.0;
+    let choice_rects = [
+        (Rect::new(r.x + 20.0 * big, content_top, half, row_h), tr("Rules DT"), Preset::Dt),
+        (Rect::new(r.x + 20.0 * big + half + gap, content_top, half, row_h), tr("Razdor's rules"), Preset::Razdor),
+    ];
+    let mut chosen = None;
+    for (rect, label, choice) in choice_rects {
+        let (_, _, pressed) = if in_view(rect) { button_state(rect, true) } else { (false, false, false) };
+        if pressed && view.contains(crate::ui::widgets::pointer().into()) {
+            chosen = Some(choice);
+        }
+        let size = match dp { Some(d) => 17.0 * d, None => normal };
+        chrome::marble_button_sized(rect, label, true, preset == choice, size);
+    }
+    if let Some(choice) = chosen {
+        rules.set_fixes(choice == Preset::Razdor);
     }
     let preset_top = content_top + row_h + 4.0 * big;
     for (i, line) in preset_lines(cols).iter().enumerate() {
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, preset_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));
     }
-    check(0, labels[0], &mut rules.simultaneous_bonuses);
-    check(1, labels[1], &mut rules.unlimited_items);
-    check(2, labels[2], &mut rules.two_potions);
-    check(3, labels[3], &mut rules.six_cells);
-    check(4, labels[4], &mut rules.free_units);
-    check(5, labels[5], &mut rules.auto_promotion);
-    check(6, labels[6], &mut rules.undying_units);
-    check(7, labels[7], &mut rules.fast_ai);
-    check(8, labels[8], &mut rules.bless_once);
-    check(9, labels[9], &mut rules.undead_poison_immune);
-    check(10, labels[10], &mut rules.unlimited_spells);
-    check(11, labels[11], &mut rules.merchant_item);
-    check(12, labels[12], &mut rules.rear_service_flat);
-    check(13, labels[13], &mut rules.building_store);
-    check(14, labels[14], &mut rules.death_curse_counter);
-    check(15, labels[15], &mut rules.no_corpse_garrison);
-    check(16, labels[16], &mut rules.strict_initiative);
+    // The two groups, each under its header, its rows in `cols` columns.
+    let mut group_top = grid_top;
+    for (name, list) in &groups {
+        if list.is_empty() {
+            continue;
+        }
+        let per = list.len().div_ceil(cols);
+        super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(tr(name), r.x + 20.0 * big, group_top + hdr_h * 0.75, normal, chrome::GOLD));
+        for (i, switch) in list.iter().enumerate() {
+            let (c, rr) = (i / per, i % per);
+            let row = Rect::new(r.x + 20.0 * big + c as f32 * (col_w + col_gap), group_top + hdr_h + rr as f32 * (row_h + gap), col_w, row_h);
+            let mut value = (switch.get)(&rules);
+            check_row(row, tr(switch.name), &mut value);
+            if value != (switch.get)(&rules) {
+                (switch.set)(&mut rules, value);
+            }
+        }
+        group_top += group_h(list.len(), cols);
+    }
     EXPERIMENTAL.with(|p| p.set(rules));
-    let hints_top = grid_top + per_col as f32 * row_h + (per_col as f32 - 1.0) * gap + 8.0 * big;
+    let hints_top = grid_top + grid_h(cols) + 8.0 * big;
     for (i, line) in lines.iter().enumerate() {
         // The baseline sits 0.8 of the size below the line's top.
         super::dt_font::legacy_metrics_if(true, || chrome::shadow_text(line, r.x + 20.0 * big, hints_top + i as f32 * hint_pitch + hint_size * 0.8, hint_size, chrome::CREAM));

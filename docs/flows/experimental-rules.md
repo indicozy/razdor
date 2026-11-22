@@ -224,8 +224,7 @@ keep the item and show the existing refusal. All equipment rules and potion limi
 
 The choice is remembered (the owner's yes, 2026-11-02): when the window closes (OK, Esc, Enter or its close button) and when a game starts, the seventeen switches are written to `settings.json` (`language::Settings::experimental_rules`, all off on an older file, and a switch whose key a file lacks is off, `remembered_rules`). `open_list` starts from them, so the scenario list's «Экспериментальные правила включены» label shows a remembered choice too.
 
-Opened from the scenario list's «Экспериментальные правила» button. Above the seventeen rows is a full-width
-«Правила Раздора» row with its hint line (`ExperimentalRules::razdor_preset` and `set_razdor_preset`, `is_razdor_preset_on`): on when all nine preset switches (the six parity switches `bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`, and Razdor's fixes `death_curse_counter`, `no_corpse_garrison` and `strict_initiative`) are on, and pressed it sets all nine together (off when they are all on), leaving the other experiments alone. The owner's rule (2026-11-08): every Razdor QoL fix behind a switch joins the preset. The row and its hint scroll with the rows (the grid starts under them, `grid_top`). Its scale is `display::popup_o`
+Opened from the scenario list's «Экспериментальные правила» button. Its top is the «Правила» choice (`ExperimentalRules::preset`, `set_fixes`; the owner's decision, 2026-11-22): two buttons, «Правила DT» (every «Исправления» switch off) and «Правила Раздора» (every one on), the one that is the choice drawn pressed. A mix made switch by switch is «Свои»: neither is pressed, and the state line under the buttons says so. A press sets only the fixes; the cheats stay. The window lists the seventeen switches in two headed groups, from `SWITCHES` (one `Group` per switch; a test checks every saved switch is in the table): «Исправления» (`Group::Fixes`: `fast_ai`, `bless_once`, `undead_poison_immune`, `unlimited_spells`, `merchant_item`, `rear_service_flat`, `building_store`, `death_curse_counter`, `no_corpse_garrison`, `strict_initiative`), then «Читы» (`Group::Cheats`: `simultaneous_bonuses`, `unlimited_items`, `two_potions`, `six_cells`, `free_units`, `auto_promotion`, `undying_units`). The choice and both headers scroll with the rows (the grid starts under the choice, `grid_top`; each group has its header, `hdr_h`). Its scale is `display::popup_o`
 fitted to the screen. Its seventeen rows and OK are touch targets (40 dp on a phone); its texts are one
 px per dp on a phone, grown with the text size (`button_grow`) and never under Normal; the hints
 wrap to its width and the window grows with them. The rows take one, two or three columns: the
@@ -246,9 +245,7 @@ of an opposing unit kills it, while another move leaves none exposed (`battle-ai
 
 ## The run's mark (1532)
 
-Any experimental rule on in the playthrough makes its run yellow, with the first rule on (in the panel's
-order) as the reason (`ExperimentalRules::first_on`, read by `Game::note_settings`). The rules are fixed for
-a playthrough, so the mark comes from `Game::experimental`, not from the window's setting. A gameplay setting
+The run's mark (`Game::note_settings`) comes from the playthrough's rules, which are fixed for it (`Game::experimental`, not the window's setting). A «Читы» switch on makes the run yellow, with the first cheat on as the reason (`first_on_in(Group::Cheats)`). Only «Исправления» on (any subset) makes it the green mark with a «Р» (`Level::Fixes`, reason `Rule` with the first fix on): it counts as completed. Order: green, green «Р», grey, yellow, red; the mark only rises. Stored yellows from older runs stay yellow (no downgrade); the cloud's `MarkLevel::Fixes` ranks between green and grey (`cloud/merge.rs`, `server/src/cloud.rs`). A gameplay setting
 that differs from the original's is grey (`ui::audio::Settings::gameplay_differs_from_original`); see `saves.md`.
 
 Inherited switches (backlog 1601): a save from before the six `INHERITABLE` switches (the five parity

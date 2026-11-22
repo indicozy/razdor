@@ -211,6 +211,59 @@ const INHERITABLE: [(u32, &str); 6] = [
     (BUILDING_STORE, "building_store"),
 ];
 
+/// The rules window's two headed groups (the owner's decision, 2026-11-22). Every switch is in
+/// exactly one group (`SWITCHES`, checked by a test).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    /// «Исправления»: Razdor's fixes on top of DT. Razdor's rules are all of them on; a run with
+    /// only these on is green with a «Р».
+    Fixes,
+    /// «Читы»: a cheat-like rule. A run with one on is yellow.
+    Cheats,
+}
+
+/// One experimental switch: its save key, its catalog name, its group, its bit in
+/// `ExperimentalRules::inherited` (0 unless it is one of the `INHERITABLE` switches), and its accessors.
+pub struct Switch {
+    pub key: &'static str,
+    pub name: &'static str,
+    pub group: Group,
+    pub inherited_bit: u32,
+    pub get: fn(&ExperimentalRules) -> bool,
+    pub set: fn(&mut ExperimentalRules, bool),
+}
+
+/// Every experimental switch, in the rules window's order: the fixes, then the cheats. The order
+/// inside a group is the order a run's mark names its reason by.
+pub const SWITCHES: [Switch; 17] = [
+    Switch { key: "fast_ai", name: "Faster AI", group: Group::Fixes, inherited_bit: 0, get: |r| r.fast_ai, set: |r, v| r.fast_ai = v },
+    Switch { key: "bless_once", name: "Bless once a turn", group: Group::Fixes, inherited_bit: BLESS_ONCE, get: |r| r.bless_once, set: |r, v| r.bless_once = v },
+    Switch { key: "undead_poison_immune", name: "Poison spares the Undead", group: Group::Fixes, inherited_bit: UNDEAD_POISON_IMMUNE, get: |r| r.undead_poison_immune, set: |r, v| r.undead_poison_immune = v },
+    Switch { key: "unlimited_spells", name: "No spell book limit", group: Group::Fixes, inherited_bit: UNLIMITED_SPELLS, get: |r| r.unlimited_spells, set: |r, v| r.unlimited_spells = v },
+    Switch { key: "merchant_item", name: "Merchant discount from an item", group: Group::Fixes, inherited_bit: MERCHANT_ITEM, get: |r| r.merchant_item, set: |r, v| r.merchant_item = v },
+    Switch { key: "rear_service_flat", name: "Rear Service always −30%", group: Group::Fixes, inherited_bit: REAR_SERVICE_FLAT, get: |r| r.rear_service_flat, set: |r, v| r.rear_service_flat = v },
+    Switch { key: "building_store", name: "Store in your own buildings", group: Group::Fixes, inherited_bit: BUILDING_STORE, get: |r| r.building_store, set: |r, v| r.building_store = v },
+    Switch { key: "death_curse_counter", name: "Death curse on counter blows", group: Group::Fixes, inherited_bit: 0, get: |r| r.death_curse_counter, set: |r, v| r.death_curse_counter = v },
+    Switch { key: "no_corpse_garrison", name: "No corpses in garrisons", group: Group::Fixes, inherited_bit: 0, get: |r| r.no_corpse_garrison, set: |r, v| r.no_corpse_garrison = v },
+    Switch { key: "strict_initiative", name: "Strict initiative order", group: Group::Fixes, inherited_bit: 0, get: |r| r.strict_initiative, set: |r, v| r.strict_initiative = v },
+    Switch { key: "simultaneous_bonuses", name: "All special bonuses simultaneously", group: Group::Cheats, inherited_bit: 0, get: |r| r.simultaneous_bonuses, set: |r, v| r.simultaneous_bonuses = v },
+    Switch { key: "unlimited_items", name: "No item limits", group: Group::Cheats, inherited_bit: 0, get: |r| r.unlimited_items, set: |r, v| r.unlimited_items = v },
+    Switch { key: "two_potions", name: "At most two potions per character", group: Group::Cheats, inherited_bit: 0, get: |r| r.two_potions, set: |r, v| r.two_potions = v },
+    Switch { key: "six_cells", name: "Six equipment cells", group: Group::Cheats, inherited_bit: 0, get: |r| r.six_cells, set: |r, v| r.six_cells = v },
+    Switch { key: "free_units", name: "Free units", group: Group::Cheats, inherited_bit: 0, get: |r| r.free_units, set: |r, v| r.free_units = v },
+    Switch { key: "auto_promotion", name: "Automatic promotion", group: Group::Cheats, inherited_bit: 0, get: |r| r.auto_promotion, set: |r, v| r.auto_promotion = v },
+    Switch { key: "undying_units", name: "Units don't die", group: Group::Cheats, inherited_bit: 0, get: |r| r.undying_units, set: |r, v| r.undying_units = v },
+];
+
+/// The «Правила» choice of the rules window: DT (every fix off), Razdor (every fix on), or a mix
+/// the player made switch by switch («Свои»).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preset {
+    Dt,
+    Razdor,
+    Mixed,
+}
+
 impl ExperimentalRules {
     pub fn for_new_game() -> Self { Self::default() }
 
@@ -230,68 +283,56 @@ impl ExperimentalRules {
         }
     }
 
-    /// The «Правила Раздора» switches: the six that hold Razdor's own former rules (the set
-    /// `before_the_rules_were_saved` turns on) and Razdor's fixes of the original's gaps
-    /// (`death_curse_counter`, `no_corpse_garrison`, `strict_initiative`). The owner's rule (2026-11-08): every Razdor QoL
-    /// fix behind a switch joins this preset. The rules window's «Правила Раздора» row sets them
-    /// together; the other switches are extra experiments and are left alone.
-    const RAZDOR_PRESET: [fn(&mut Self) -> &mut bool; 9] = [
-        |r| &mut r.bless_once,
-        |r| &mut r.undead_poison_immune,
-        |r| &mut r.unlimited_spells,
-        |r| &mut r.merchant_item,
-        |r| &mut r.rear_service_flat,
-        |r| &mut r.building_store,
-        |r| &mut r.death_curse_counter,
-        |r| &mut r.no_corpse_garrison,
-        |r| &mut r.strict_initiative,
-    ];
-
-    /// Turns on the six «Правила Раздора» switches; the other switches stay as they are.
-    pub fn razdor_preset(&mut self) {
-        self.set_razdor_preset(true);
+    /// The switches of one group, in the table's order.
+    pub fn switches(group: Group) -> impl Iterator<Item = &'static Switch> {
+        SWITCHES.iter().filter(move |s| s.group == group)
     }
 
-    /// Sets the six «Правила Раздора» switches together (`on`), the others untouched.
-    pub fn set_razdor_preset(&mut self, on: bool) {
-        for switch in Self::RAZDOR_PRESET {
-            *switch(self) = on;
+    /// Sets every «Исправления» switch to `on`; the cheats stay as they are.
+    pub fn set_fixes(&mut self, on: bool) {
+        for switch in Self::switches(Group::Fixes) {
+            (switch.set)(self, on);
         }
     }
 
-    /// Whether all six «Правила Раздора» switches are on (the row shows on); a partly set preset is off.
-    pub fn is_razdor_preset_on(&self) -> bool {
-        let mut all = *self;
-        Self::RAZDOR_PRESET.iter().all(|switch| *switch(&mut all))
+    /// Turns on the «Исправления»: Razdor's rules.
+    pub fn razdor_preset(&mut self) {
+        self.set_fixes(true);
     }
 
-    /// The first rule that is on, by its catalog name (the one the scenario list's yellow mark
-    /// gives as its reason, `rules::marks`); `None` with the classic rules. A switch inherited from
-    /// an older save (`inherited`) is not counted: the player did not choose it. Each entry is
-    /// (on, its inherited bit or 0, name); only the six `INHERITABLE` switches have a bit.
+    /// Sets the «Исправления» together (`on`), the cheats untouched.
+    pub fn set_razdor_preset(&mut self, on: bool) {
+        self.set_fixes(on);
+    }
+
+    /// The choice these switches make: DT when no fix is on, Razdor when all are, else a mix.
+    pub fn preset(&self) -> Preset {
+        let fixes: Vec<bool> = Self::switches(Group::Fixes).map(|s| (s.get)(self)).collect();
+        if fixes.iter().all(|on| !on) {
+            Preset::Dt
+        } else if fixes.iter().all(|on| *on) {
+            Preset::Razdor
+        } else {
+            Preset::Mixed
+        }
+    }
+
+    /// Whether the choice is Razdor's («Правила Раздора»: every fix on).
+    pub fn is_razdor_preset_on(&self) -> bool {
+        self.preset() == Preset::Razdor
+    }
+
+    /// The first switch of `group` that is on, by its catalog name, not counting an inherited one
+    /// (`inherited`: the player did not choose it).
+    pub fn first_on_in(&self, group: Group) -> Option<&'static str> {
+        Self::switches(group)
+            .find(|s| (s.get)(self) && self.inherited & s.inherited_bit == 0)
+            .map(|s| crate::i18n::n_(s.name))
+    }
+
+    /// The first cheat that is on (the reason of a yellow mark), else the first fix on.
     pub fn first_on(&self) -> Option<&'static str> {
-        [
-            (self.simultaneous_bonuses, 0, crate::i18n::n_("All special bonuses simultaneously")),
-            (self.unlimited_items, 0, crate::i18n::n_("No item limits")),
-            (self.two_potions, 0, crate::i18n::n_("At most two potions per character")),
-            (self.six_cells, 0, crate::i18n::n_("Six equipment cells")),
-            (self.free_units, 0, crate::i18n::n_("Free units")),
-            (self.auto_promotion, 0, crate::i18n::n_("Automatic promotion")),
-            (self.undying_units, 0, crate::i18n::n_("Units don't die")),
-            (self.fast_ai, 0, crate::i18n::n_("Faster AI")),
-            (self.bless_once, BLESS_ONCE, crate::i18n::n_("Bless once a turn")),
-            (self.undead_poison_immune, UNDEAD_POISON_IMMUNE, crate::i18n::n_("Poison spares the Undead")),
-            (self.unlimited_spells, UNLIMITED_SPELLS, crate::i18n::n_("No spell book limit")),
-            (self.merchant_item, MERCHANT_ITEM, crate::i18n::n_("Merchant discount from an item")),
-            (self.rear_service_flat, REAR_SERVICE_FLAT, crate::i18n::n_("Rear Service always −30%")),
-            (self.building_store, BUILDING_STORE, crate::i18n::n_("Store in your own buildings")),
-            (self.death_curse_counter, 0, crate::i18n::n_("Death curse on counter blows")),
-            (self.no_corpse_garrison, 0, crate::i18n::n_("No corpses in garrisons")),
-            (self.strict_initiative, 0, crate::i18n::n_("Strict initiative order")),
-        ]
-        .into_iter()
-        .find(|(on, bit, _)| *on && self.inherited & bit == 0)
-        .map(|(_, _, name)| name)
+        self.first_on_in(Group::Cheats).or_else(|| self.first_on_in(Group::Fixes))
     }
 }
 
@@ -965,7 +1006,7 @@ mod tests {
 
 #[cfg(test)]
 mod experimental_rules_save_tests {
-    use super::ExperimentalRules;
+    use super::{ExperimentalRules, Group, Preset, SWITCHES};
 
     /// A save from before the item switches with the classic restriction (no duplicates key
     /// set, or `no_duplicate_items` true) keeps the item rules classic: `unlimited_items` off.
@@ -1108,31 +1149,66 @@ mod experimental_rules_save_tests {
         assert!(!before.simultaneous_bonuses && !before.unlimited_items && !before.two_potions && !before.six_cells && !before.free_units && !before.auto_promotion && !before.undying_units && !before.fast_ai);
     }
 
-    /// The «Правила Раздора» row turns on exactly the six former rules and leaves the others alone;
-    /// it is on only when all six are on.
+    /// The «Правила Раздора» choice turns on exactly the «Исправления» group (ten switches, the
+    /// former six, the three Razdor fixes and `fast_ai`) and leaves the cheats alone; it is on
+    /// only when all ten are on.
     #[test]
-    fn the_razdor_preset_turns_on_the_six_former_rules_and_nothing_else() {
-        let mut rules = ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() };
+    fn the_razdor_preset_turns_on_the_fixes_and_nothing_else() {
+        let mut rules = ExperimentalRules { free_units: true, ..Default::default() };
         assert!(!rules.is_razdor_preset_on());
         rules.razdor_preset();
         assert!(rules.is_razdor_preset_on());
-        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, death_curse_counter: true, no_corpse_garrison: true, strict_initiative: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
+        assert_eq!(rules, ExperimentalRules { free_units: true, fast_ai: true, death_curse_counter: true, no_corpse_garrison: true, strict_initiative: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
         rules.set_razdor_preset(false);
-        assert_eq!(rules, ExperimentalRules { fast_ai: true, free_units: true, ..Default::default() });
+        assert_eq!(rules, ExperimentalRules { free_units: true, ..Default::default() });
         assert!(!rules.is_razdor_preset_on());
     }
 
-    /// A preset with one of its six switches off is not on, and turning the row on sets all six.
+    /// A choice with one fix off is Mixed, not Razdor's; setting the choice sets every fix.
     #[test]
-    fn a_partly_set_preset_is_off_and_the_row_sets_all_six() {
+    fn a_partly_set_choice_is_mixed_and_the_choice_sets_every_fix() {
         let mut rules = ExperimentalRules::before_the_rules_were_saved();
         rules.building_store = false;
         assert!(!rules.is_razdor_preset_on());
+        assert_eq!(rules.preset(), Preset::Mixed);
         rules.set_razdor_preset(true);
         assert!(rules.is_razdor_preset_on() && rules.building_store);
-        assert!(!ExperimentalRules::default().is_razdor_preset_on());
-        // A save from before the rules were saved has the six former rules but not the newer fix.
-        assert!(!ExperimentalRules::before_the_rules_were_saved().is_razdor_preset_on());
+        assert_eq!(ExperimentalRules::default().preset(), Preset::Dt);
+        // A save from before the rules were saved has the six former rules but not the newer fixes.
+        assert_eq!(ExperimentalRules::before_the_rules_were_saved().preset(), Preset::Mixed);
+    }
+
+    /// Every switch sits in exactly one group, and the table covers every switch the save writes
+    /// (a new switch without a group fails here).
+    #[test]
+    fn every_switch_is_in_exactly_one_group_and_the_table_covers_the_save() {
+        use std::collections::BTreeSet;
+        let mut all_on = ExperimentalRules::default();
+        for switch in SWITCHES.iter() {
+            (switch.set)(&mut all_on, true);
+        }
+        let saved = serde_json::to_value(all_on).unwrap();
+        let saved: BTreeSet<String> = saved.as_object().unwrap().iter().filter(|(k, _)| k.as_str() != "inherited").map(|(k, _)| k.clone()).collect();
+        let table: BTreeSet<String> = SWITCHES.iter().map(|s| s.key.to_string()).collect();
+        assert_eq!(table.len(), SWITCHES.len(), "no switch is listed twice");
+        assert_eq!(table, saved, "the table lists every switch the save writes, and only those");
+        assert_eq!(ExperimentalRules::switches(Group::Fixes).count(), 10);
+        assert_eq!(ExperimentalRules::switches(Group::Cheats).count(), 7);
+    }
+
+    /// The cheats are not part of the preset: switching the fixes leaves them, and a cheat on
+    /// names the mark's reason before any fix does.
+    #[test]
+    fn the_cheats_are_their_own_group_and_name_the_reason_first() {
+        let mut rules = ExperimentalRules { two_potions: true, ..Default::default() };
+        rules.set_fixes(true);
+        assert!(rules.two_potions, "switching the fixes leaves the cheats");
+        assert_eq!(rules.first_on_in(Group::Cheats), Some("At most two potions per character"));
+        assert_eq!(rules.first_on_in(Group::Fixes), Some("Faster AI"));
+        assert_eq!(rules.first_on(), Some("At most two potions per character"));
+        let fixes_only = ExperimentalRules { bless_once: true, ..Default::default() };
+        assert_eq!(fixes_only.first_on_in(Group::Cheats), None);
+        assert_eq!(fixes_only.first_on(), Some("Bless once a turn"));
     }
 
     /// Each of the five names the rules window and the scenario list's mark (`first_on`).

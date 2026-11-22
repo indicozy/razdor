@@ -448,9 +448,10 @@ pub async fn delete_save(
 fn rank(level: MarkLevel) -> u8 {
     match level {
         MarkLevel::Green => 0,
-        MarkLevel::Grey => 1,
-        MarkLevel::Yellow => 2,
-        MarkLevel::Red => 3,
+        MarkLevel::Fixes => 1,
+        MarkLevel::Grey => 2,
+        MarkLevel::Yellow => 3,
+        MarkLevel::Red => 4,
     }
 }
 

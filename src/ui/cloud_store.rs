@@ -490,6 +490,7 @@ fn mtime(path: &Path) -> Option<u64> {
 fn mark_level(level: Level) -> MarkLevel {
     match level {
         Level::Green => MarkLevel::Green,
+        Level::Fixes => MarkLevel::Fixes,
         Level::Grey => MarkLevel::Grey,
         Level::Yellow => MarkLevel::Yellow,
         Level::Red => MarkLevel::Red,

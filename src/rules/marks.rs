@@ -1,7 +1,7 @@
 //! The run's mark (Razdor's, backlog 1532, the owner's decisions): the worst thing a run has used,
 //! shown as a coloured checkmark on the scenario list. A run is a game from the map's start; its
-//! mark rises and never falls: a cheat (red), an experimental rule (yellow), a gameplay setting
-//! that is not the original's (grey), else green. The run keeps it in its save (`Game::run_mark`),
+//! mark rises and never falls: a console cheat (red), a «Читы» switch (yellow), a gameplay setting
+//! that is not the original's (grey), a «Исправления» switch (green with a «Р»), else green. The run keeps it in its save (`Game::run_mark`),
 //! and a victory writes the map's best mark ever into the player's `marks.json` (`Records`).
 
 use std::collections::BTreeMap;
@@ -19,9 +19,12 @@ pub enum Level {
     /// No cheat, no experimental rule, every gameplay setting the original's. A run whose history
     /// is unknown (a save from before the marks) is green too, unless its save shows otherwise.
     Green,
+    /// Only Razdor's fixes are on (the «Исправления» group, any subset): the run is green with a
+    /// «Р» and counts as completed. Added 2026-11-22; a run with a cheat is yellow, not this.
+    Fixes,
     /// A gameplay setting that is not the original's.
     Grey,
-    /// An experimental scenario rule is on.
+    /// A cheat (an experimental «Читы» switch) is on.
     Yellow,
     /// A cheat was used.
     Red,
@@ -249,6 +252,42 @@ mod tests {
         }
     }
 
+    /// The order: green, then green with a «Р» (fixes only), grey, yellow, red; a fixes run is
+    /// completed (not worse than a clean one) and a cheat is worse than any fix.
+    #[test]
+    fn the_levels_run_green_fixes_grey_yellow_red() {
+        assert!(Level::Green < Level::Fixes && Level::Fixes < Level::Grey && Level::Grey < Level::Yellow && Level::Yellow < Level::Red);
+        let mut m = RunMark::start();
+        assert!(m.worsen(Level::Fixes, Reason::Rule("Faster AI".into())));
+        assert!(!m.worsen(Level::Green, Reason::Honest), "a fixes run never goes back to green");
+        assert!(m.worsen(Level::Yellow, Reason::Rule("Free units".into())));
+        assert!(!m.worsen(Level::Fixes, Reason::Rule("Faster AI".into())), "a fix never lowers a cheat's yellow");
+        assert_eq!(m.reason, Reason::Rule("Free units".into()));
+    }
+
+    /// Marks written before the «Исправления» level still load (their levels keep their names), and
+    /// a fixes mark round-trips under its own name.
+    #[test]
+    fn an_old_marks_file_still_loads_and_the_fixes_level_round_trips() {
+        let old = r#"{"maps":{"one":{"mark":{"level":"green","reason":"Honest"},"date":"2026-01-01"},
+            "two":{"mark":{"level":"yellow","reason":{"Rule":"Free units"}},"date":"2026-01-02"},
+            "three":{"mark":{"level":"grey","reason":{"Setting":"Unit battle participation"}},"date":"2026-01-03"},
+            "four":{"mark":{"level":"red","reason":{"Cheat":"god"}},"date":"2026-01-04"}}}"#;
+        let records = Records::from_json(old);
+        assert_eq!(records.get("one").unwrap().mark.level, Level::Green);
+        assert_eq!(records.get("two").unwrap().mark.level, Level::Yellow, "a stored yellow stays yellow");
+        assert_eq!(records.get("three").unwrap().mark.level, Level::Grey);
+        assert_eq!(records.get("four").unwrap().mark.level, Level::Red);
+        let mut records = records;
+        records.record_victory("one", &mark(Level::Fixes, Reason::Rule("Bless once a turn".into())), "2026-11-22");
+        assert_eq!(records.get("one").unwrap().mark.level, Level::Green, "a clean record beats a fixes one");
+        records.record_victory("four", &mark(Level::Fixes, Reason::Rule("Bless once a turn".into())), "2026-11-22");
+        assert_eq!(records.get("four").unwrap().mark.level, Level::Fixes, "a fixes win replaces a red record");
+        let back = Records::from_json(&records.to_json());
+        assert_eq!(back.get("four").unwrap().mark.level, Level::Fixes);
+        assert!(records.to_json().contains("\"fixes\""));
+    }
+
     #[test]
     fn a_run_goes_green_grey_yellow_red_and_never_back_up() {
         let mut m = RunMark::start();
@@ -474,7 +513,7 @@ mod tests {
         chosen["experimental"]["bless_once"] = serde_json::json!(true);
         let mut chosen: Game = serde_json::from_value(chosen).unwrap();
         chosen.note_settings(&[]);
-        assert_eq!(chosen.run_mark(), mark(Level::Yellow, Reason::Rule("Bless once a turn".into())));
+        assert_eq!(chosen.run_mark(), mark(Level::Fixes, Reason::Rule("Bless once a turn".into())), "a chosen fix is the green “Р” mark");
     }
 
     #[test]

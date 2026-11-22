@@ -10,9 +10,10 @@ use razdor_wire::SCHEMA;
 fn rank(level: MarkLevel) -> u8 {
     match level {
         MarkLevel::Green => 0,
-        MarkLevel::Grey => 1,
-        MarkLevel::Yellow => 2,
-        MarkLevel::Red => 3,
+        MarkLevel::Fixes => 1,
+        MarkLevel::Grey => 2,
+        MarkLevel::Yellow => 3,
+        MarkLevel::Red => 4,
     }
 }
 
@@ -82,6 +83,18 @@ mod tests {
     use super::*;
     use razdor_wire::cloud::{MarkRecord, SettingValue};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn a_fixes_mark_beats_grey_and_loses_to_a_clean_one() {
+        let a = marks(vec![("one", rec(MarkLevel::Fixes, "2026-01-01")), ("two", rec(MarkLevel::Grey, "2026-01-01"))]);
+        let b = marks(vec![("one", rec(MarkLevel::Grey, "2026-02-01")), ("two", rec(MarkLevel::Fixes, "2025-01-01"))]);
+        let m = merge_marks(&a, &b, 0);
+        assert_eq!(m.maps["one"].level, MarkLevel::Fixes);
+        assert_eq!(m.maps["two"].level, MarkLevel::Fixes);
+        let clean = marks(vec![("one", rec(MarkLevel::Green, "2025-01-01"))]);
+        assert_eq!(merge_marks(&a, &clean, 0).maps["one"].level, MarkLevel::Green);
+        assert_eq!(merge_marks(&clean, &a, 0).maps["one"].level, MarkLevel::Green);
+    }
 
     fn rec(level: MarkLevel, date: &str) -> MarkRecord {
         MarkRecord { level, date: date.into(), mark: serde_json::json!({}) }
