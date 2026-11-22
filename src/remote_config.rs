@@ -56,6 +56,11 @@ pub struct Config {
     /// and a config without the key both say `false`, so nothing is sent until the remote config says
     /// `"telemetry": true` (the owner turns it on after the server has run stably for 2-3 days).
     pub telemetry: bool,
+    /// The cloud switch: `false` hides the cloud saves (the settings rows, the load list's marks, the
+    /// Hub offer) and keeps the worker from starting, even with an account key on this device. Off by
+    /// default: the built-in config and a config without the key both say `false`; the owner turns it
+    /// on when the cloud server is live.
+    pub cloud: bool,
 }
 
 /// The config as the file spells it. Unknown fields are ignored (a newer config keeps working).
@@ -72,6 +77,8 @@ struct Raw {
     api: Vec<String>,
     #[serde(default)]
     telemetry: Option<bool>,
+    #[serde(default)]
+    cloud: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +117,7 @@ impl Config {
             },
             api: vec![API_BUILTIN.to_string()],
             telemetry: false,
+            cloud: false,
         }
     }
 
@@ -137,7 +145,8 @@ impl Config {
         };
         let api = addresses("api", raw.api).unwrap_or(built.api);
         let telemetry = raw.telemetry.unwrap_or(false);
-        Ok(Config { update_feed, hub, game, api, telemetry })
+        let cloud = raw.cloud.unwrap_or(false);
+        Ok(Config { update_feed, hub, game, api, telemetry, cloud })
     }
 }
 
@@ -265,6 +274,11 @@ pub fn api() -> Vec<String> {
 /// Whether the config lets the analytics send (the kill switch; `true` unless the config turns it off).
 pub fn telemetry_allowed() -> bool {
     current().telemetry
+}
+
+/// Whether the cloud saves show and run (the `cloud` switch; `false` unless the config turns it on).
+pub fn cloud_allowed() -> bool {
+    current().cloud
 }
 
 /// The game archive as the config gives it (`gdrive::game`).
@@ -440,6 +454,17 @@ mod tests {
         assert!(!Config::parse(br#"{"schema":1}"#).unwrap().telemetry);
         assert!(!Config::parse(br#"{"schema":1,"telemetry":false}"#).unwrap().telemetry);
         assert!(Config::parse(br#"{"schema":1,"telemetry":true}"#).unwrap().telemetry);
+    }
+
+    #[test]
+    fn the_cloud_switch_is_read_and_defaults_to_off() {
+        assert!(!Config::builtin().cloud, "the cloud stays hidden until the remote config turns it on");
+        assert!(!Config::parse(br#"{"schema":1}"#).unwrap().cloud);
+        assert!(!Config::parse(br#"{"schema":1,"cloud":false}"#).unwrap().cloud);
+        assert!(!Config::parse(br#"{"schema":1,"cloud":null}"#).unwrap().cloud);
+        assert!(Config::parse(br#"{"schema":1,"cloud":true}"#).unwrap().cloud);
+        assert!(!Config::parse(br#"{"schema":1,"telemetry":true}"#).unwrap().cloud, "the two switches are separate");
+        assert!(Config::parse(br#"{"schema":1,"cloud":"yes"}"#).is_err(), "a bad switch is a bad config, as telemetry's is");
     }
 
     #[test]

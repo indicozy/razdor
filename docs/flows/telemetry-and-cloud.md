@@ -284,6 +284,13 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
 
 The game's side (`src/ui/cloud_store.rs`, `src/ui/cloud_view.rs`; the bin, not the lib):
 
+- Remote switch `cloud` (`remote_config::cloud_allowed`; `false` in the built-in config, in
+  `data/remote/config.json` and when the key is absent). Off, the game shows none of the cloud: no settings
+  rows (`main_menu`'s `Row::shown` through `cloud_view::rows_visible`), no load-list marks (`saves` passes no
+  cloud state, no origin device), no Hub offer (`check_offer`). `cloud_store::active` checks it too, so no
+  worker starts and no request is queued, even with an account key on the device (the key stays, idle).
+  On: everything below. The appearance is the owner's switch, not a build's.
+
 - `cloud_store::Store` implements `sync::Local` over this device. Saves: the install's manual folder
   (`save::games_dir`), where a quick save is a manual save named «Quick save» and the «Продолжить» slot
   is the auto folder's `session.rzsave`; the map is the save's scenario (`demo` or the map's slot key).

@@ -221,8 +221,17 @@ pub fn should_ask(missing: &[String], fingerprint: &str, answered: Option<&str>)
     !missing.is_empty() && answered.map(str::trim_end) != Some(fingerprint)
 }
 
+/// Whether the cloud's settings rows, the load list's cloud marks and the Hub offer show: the remote
+/// config's `cloud` switch (`remote_config::cloud_allowed`), nothing else.
+pub fn rows_visible(switch: bool) -> bool {
+    switch
+}
+
 /// Looks at the worker's set once per change: when it is new and asks, the window is queued.
 fn check_offer() {
+    if !rows_visible(razdor::remote_config::cloud_allowed()) {
+        return;
+    }
     let Some(list) = cloud_store::HUB_OFFER.lock().ok().and_then(|o| o.clone()) else { return };
     let fingerprint = fingerprint(&list);
     {
@@ -424,6 +433,13 @@ mod tests {
         assert!(lines.len() > 1, "the phrase is wrapped, not one long line");
         assert!(lines.iter().all(|l| l.chars().count() <= 24), "five groups of four and their dashes");
         assert_eq!(lines.join("-"), phrase);
+    }
+
+    #[test]
+    fn the_cloud_rows_show_only_with_the_remote_switch_on() {
+        assert!(!rows_visible(false));
+        assert!(rows_visible(true));
+        assert!(!rows_visible(razdor::remote_config::Config::builtin().cloud), "the built-in config hides the cloud");
     }
 
     #[test]

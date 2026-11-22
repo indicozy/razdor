@@ -2320,6 +2320,10 @@ pub const ALL: [Row; 83] = [
             Row::LightCycle => audio.map_light == LightMode::Cycle,
             // The picker is Android's (`ui::saves_move`).
             Row::OldSaves => cfg!(target_os = "android"),
+            // The cloud saves' rows: only while the remote config's `cloud` switch is on (`cloud_view::rows_visible`).
+            Row::CloudSaves | Row::CloudState | Row::CloudSpace | Row::CloudSync | Row::CloudLink | Row::CloudEnter | Row::CloudPhrase | Row::CloudDelete => {
+                super::cloud_view::rows_visible(razdor::remote_config::cloud_allowed())
+            }
             // The log goes out on Android (the document creator) and opens its folder on the desktop; none on iPhone.
             Row::SendLog => !cfg!(target_os = "ios"),
             Row::LightHour => audio.map_light == LightMode::Fixed,
@@ -4791,6 +4795,15 @@ mod tests {
         for g in Group::ALL {
             assert_eq!(Group::from_name(g.name()), Some(g));
         }
+    }
+
+    /// The cloud rows are not drawn while the remote config's `cloud` switch is off (the built-in default).
+    #[test]
+    fn the_cloud_rows_are_hidden_while_the_switch_is_off() {
+        let audio = crate::ui::audio::Settings::default();
+        assert!(!Row::CloudSaves.shown(&audio));
+        assert!(!Row::CloudDelete.shown(&audio));
+        assert!(Row::Telemetry.shown(&audio), "the other rows of the tab stay");
     }
 
     /// «Ровная яркость» is shown only under «Освещение» (on), and its hint is behind the «?».

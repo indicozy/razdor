@@ -434,10 +434,11 @@ fn row_of(e: &ListedSave) -> Row {
     let mut scenario = if m.cheats { razdor::trf!("{title} (cheats)", title = m.title) } else { m.title.clone() };
     // A save pulled from the cloud from another device says which («… — телефон, 22:10»); the
     // scenario line has the room the name's line lacks.
-    if let Some(device) = super::cloud_store::origin_of(&e.path) {
+    let cloud_shown = super::cloud_view::rows_visible(razdor::remote_config::cloud_allowed());
+    if let Some(device) = super::cloud_store::origin_of(&e.path).filter(|_| cloud_shown) {
         scenario = format!("{scenario} — {device}, {}", super::cloud_view::hhmm(m.saved_at));
     }
-    let cloud = Some(super::cloud_store::state_of(&e.path.to_string_lossy()));
+    let cloud = cloud_shown.then(|| super::cloud_store::state_of(&e.path.to_string_lossy()));
     Row { name, scenario, time: time_line(m.saved_at), pinned: e.pinned, waiting: false, mark: None, placeholder: false, caret: None, cloud, locked: false }
 }
 

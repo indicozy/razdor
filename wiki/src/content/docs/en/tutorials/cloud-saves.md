@@ -8,7 +8,7 @@ sidebar:
 Cloud saves keep your saves, marks and some settings on the Razdor server. This lets you carry on the game on another device.
 
 :::caution
-Cloud saves do not work yet: the server is not running. This page describes how they will work. When the server is up, this page will get setup steps. We do not give a date yet.
+Cloud saves are off for now. Their rows appear in the game when the server starts. We do not give a date yet. This page describes how they will work.
 :::
 
 ## Turning it on

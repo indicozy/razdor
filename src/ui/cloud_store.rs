@@ -41,9 +41,10 @@ pub fn cloud_dir() -> Option<PathBuf> {
 }
 
 /// Whether the cloud runs in this process at all: not under `cargo test`, not in the off-screen
-/// scenes or snapshots.
+/// scenes or snapshots, and only when the remote config's `cloud` switch is on. Off, no worker starts
+/// and nothing is sent, even with an account key on this device (the key stays).
 pub fn active() -> bool {
-    !cfg!(test) && std::env::var_os("RAZDOR_SNAPSHOT").is_none() && std::env::var_os("RAZDOR_SCENE").is_none()
+    !cfg!(test) && std::env::var_os("RAZDOR_SNAPSHOT").is_none() && std::env::var_os("RAZDOR_SCENE").is_none() && razdor::remote_config::cloud_allowed()
 }
 
 /// The worker, once started (see [`request`]).
