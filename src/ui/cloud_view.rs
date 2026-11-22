@@ -409,25 +409,6 @@ fn phrase_lines(phrase: &str) -> Vec<String> {
     phrase.split('-').collect::<Vec<_>>().chunks(5).map(|c| c.join("-")).collect()
 }
 
-/// Splits a phrase into lines of about `width` characters, at its spaces.
-fn split(text: &str, width: usize) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut line = String::new();
-    for word in text.split_whitespace() {
-        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
-            out.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        line.push_str(word);
-    }
-    if !line.is_empty() {
-        out.push(line);
-    }
-    out
-}
-
 fn close() {
     *PANEL.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
@@ -435,13 +416,6 @@ fn close() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_phrase_splits_at_spaces_into_short_lines() {
-        let lines = split("alpha bravo charlie delta echo foxtrot", 12);
-        assert_eq!(lines, ["alpha bravo", "charlie", "delta echo", "foxtrot"]);
-        assert!(split("", 12).is_empty());
-    }
 
     #[test]
     fn a_recovery_phrase_wraps_by_group_and_keeps_every_character() {
