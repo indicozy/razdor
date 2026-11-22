@@ -11,6 +11,7 @@
 //! the scrollbar beside them. The pane is clipped above the bottom row, and words too long for
 //! its width (a link) are broken there (`wrap_long`).
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 
@@ -37,6 +38,7 @@ const SEARCH_KEY: &str = "hub-search";
 enum Done {
     Installed(Result<Vec<String>, String>),
     Removed(Result<String, String>),
+    Updated(Result<String, String>),
 }
 
 pub struct HubView {
@@ -71,6 +73,11 @@ pub struct HubView {
     /// Something was installed or removed while the window was open (the new-game list is
     /// read again on the way out).
     pub changed: bool,
+    /// The installed entries whose files differ from the shown catalog (`hub::update_available`): their
+    /// row says so and their detail offers «Обновить».
+    updates: BTreeSet<String>,
+    /// The entries updated while the window was open (the App loads the one played again).
+    pub updated: Vec<String>,
     /// The picked entry's picture (`ensure_preview`).
     preview: Option<Preview>,
 }
@@ -168,6 +175,8 @@ impl HubView {
             offline: false,
             note: None,
             changed: false,
+            updates: BTreeSet::new(),
+            updated: Vec::new(),
             preview: None,
         };
         v.open();
@@ -192,6 +201,27 @@ impl HubView {
             self.picked = keep_pick(self.picked.as_deref(), c);
         }
         self.detail = pick.is_some();
+        self.refresh_updates();
+    }
+
+    /// Reads which installed entries differ from the shown catalog (`hub::update_available`, by SHA-256; no
+    /// download). Called where the catalog or the installed list changes.
+    fn refresh_updates(&mut self) {
+        let code = match lang() {
+            Lang::En => "en",
+            Lang::Ru => "ru",
+        };
+        let updates: BTreeSet<String> = match (self.hub.as_ref(), self.catalog.as_ref()) {
+            (Some(hub), Some(Ok(c))) => self
+                .installed
+                .entries
+                .keys()
+                .filter(|id| hub::update_available(&hub.local, c, &self.installed, id, code))
+                .cloned()
+                .collect(),
+            _ => BTreeSet::new(),
+        };
+        self.updates = updates;
     }
 
     /// Shows the cached catalog at once (`show_cache`) and reads the current one on a thread
@@ -205,6 +235,7 @@ impl HubView {
             self.offline = false;
             self.picked = keep_pick(self.picked.as_deref(), c);
             self.catalog = Some(Ok(c.clone()));
+            self.refresh_updates();
             return;
         }
         self.reload();
@@ -218,6 +249,7 @@ impl HubView {
         self.installed = hub.installed();
         self.offline = false;
         self.show_cache(&hub);
+        self.refresh_updates();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
             let _ = tx.send(hub.fetch_catalog());
@@ -276,6 +308,7 @@ impl HubView {
         if let Some(fetched) = self.fetching.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.fetching = None;
             self.landed(fetched);
+            self.refresh_updates();
         }
         let Some(done) = self.job.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
         self.job = None;
@@ -283,9 +316,17 @@ impl HubView {
             if let Some(h) = &v.hub {
                 v.installed = h.installed();
             }
+            v.refresh_updates();
             v.changed = true;
         };
         match done {
+            Done::Updated(Ok(id)) => {
+                cue(Cue::Button);
+                refresh(self);
+                let names = self.titles(std::slice::from_ref(&id));
+                self.note = Some((trf!("Updated: {names}", names), false));
+                self.updated.push(id);
+            }
             Done::Installed(Ok(ids)) => {
                 cue(Cue::Button);
                 refresh(self);
@@ -297,7 +338,7 @@ impl HubView {
                 let names = self.titles(&[id]);
                 self.note = Some((trf!("Removed: {names}", names), false));
             }
-            Done::Installed(Err(e)) | Done::Removed(Err(e)) => {
+            Done::Installed(Err(e)) | Done::Removed(Err(e)) | Done::Updated(Err(e)) => {
                 refresh(self);
                 self.note = Some((download_text(e), true));
             }
@@ -754,7 +795,7 @@ pub fn frame(view: &mut HubView) -> bool {
                     let picked = view.picked.as_deref() == Some(e.id.as_str());
                     row_paint(rr, picked);
                     super::dt_font::legacy_metrics_if(narrow, || {
-                    let (words, ink) = state(c, &view.installed, e);
+                    let (words, ink): (String, Color) = if view.updates.contains(&e.id) { (tr("Update available").into(), GOLD) } else { state(c, &view.installed, e) };
                     // Upright: the title takes the whole row and the line under it says the state
                     // (what is missing, the install's word) or else the kind, author and rating.
                     // Elsewhere the state sits at the title's end, shortened to half the row.
@@ -1198,7 +1239,41 @@ fn details(view: &mut HubView, c: &Catalog, e: &Entry, pane: Rect, lay: &Lay) {
     let busy = view.job.is_some();
     let bx = pane.x + pane.w - bw;
     if installed {
-        if button(bx, by, bw, bh, tr("Remove"), !busy && users.is_empty()) {
+        // An update sits left of Remove. A phone's row has room for «To the list» and two buttons, so there
+        // the two split the space beside it and the update's label is short; the desktop's shows the size.
+        let updating = view.updates.contains(&e.id);
+        let gap = 8.0 * s;
+        let half = (bw - gap) / 2.0;
+        let (ux, uw, rx, rw) = if !updating {
+            (bx, bw, bx, bw)
+        } else if lay.narrow {
+            (bx, half, bx + half + gap, half)
+        } else {
+            (bx - bw - gap, bw, bx, bw)
+        };
+        if updating {
+            let label = if lay.narrow {
+                tr("Update").to_string()
+            } else {
+                let code = match lang() {
+                    Lang::En => "en",
+                    Lang::Ru => "ru",
+                };
+                let bytes: u64 = e.files_for(code).iter().map(|f| f.size).sum();
+                let size = trf!("{mb} MB", mb = format!("{:.1}", bytes as f64 / 1_000_000.0));
+                trf!("Update ({size})", size = size)
+            };
+            if button(ux, by, uw, bh, &label, !busy) {
+                let id = e.id.clone();
+                let lang_code = lang();
+                if super::saves_move::busy() {
+                    super::saves_move::refuse();
+                } else {
+                    view.start(move |hub, c| Done::Updated(hub.install(&c, &id, lang_code).map(|_| id)));
+                }
+            }
+        }
+        if button(rx, by, rw, bh, tr("Remove"), !busy && users.is_empty()) {
             let id = e.id.clone();
             if super::saves_move::busy() {
                 super::saves_move::refuse();
@@ -1361,6 +1436,8 @@ mod tests {
             offline: false,
             note: None,
             changed: false,
+            updates: BTreeSet::new(),
+            updated: Vec::new(),
             preview: None,
         }
     }

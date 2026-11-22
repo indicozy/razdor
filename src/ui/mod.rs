@@ -380,6 +380,8 @@ pub struct App {
     /// The holiday update check waited for the cached catalog (`holiday_start::Start::stale`): it runs again
     /// when the launch's fresh catalog comes.
     holiday_stale: bool,
+    /// The mods updated in the Hub window (`hub_view::HubView::updated`), taken once the window closed.
+    hub_updated: Vec<String>,
     /// The switch as the App last acted on it (`holiday::edge`), and whether the welcome opens on success.
     holiday_seen: bool,
     holiday_greet: bool,
@@ -516,6 +518,7 @@ impl App {
             holiday_job: None,
             holiday_tried: false,
             holiday_stale: false,
+            hub_updated: Vec::new(),
             holiday_seen: false,
             holiday_greet: false,
             holiday_generation: 0,
@@ -1729,6 +1732,13 @@ impl App {
         if matches!(self.screen, Screen::MainMenu) {
             self.holiday_switch_tick();
         }
+        // The mods updated in the Hub while it was open: the one played is loaded again, as the holiday path does.
+        for id in std::mem::take(&mut self.hub_updated) {
+            if self.active_mod.as_deref() == Some(id.as_str()) {
+                razdor::diag!("hub: the played mod {id} is updated; it is loaded again");
+                self.choose_mod(Some(id));
+            }
+        }
         // The «Итоги» page's exit, taken after the match (it may start the next map, which needs the app).
         let mut summary_exit = None;
         // The screen's own draw and input (the frame probe's `screen_body`; the menu's stages are nested in it).
@@ -1879,9 +1889,12 @@ impl App {
             }
             (Screen::Hub(view), _) => {
                 if hub_view::frame(view) {
-                    if view.changed {
+                    let updated = std::mem::take(&mut view.updated);
+                    let changed = view.changed;
+                    if changed {
                         self.reload_hub_maps();
                     }
+                    self.hub_updated.extend(updated);
                     Some(Screen::MainMenu)
                 } else {
                     None
