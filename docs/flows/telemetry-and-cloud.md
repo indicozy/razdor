@@ -310,6 +310,12 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
   background thread. `request` only queues; `snapshot` gives the `Shared` state (phase, states, others,
   newer saves, quota, the last link code, errors); `state_of` gives one save's icon. Offline, a sync
   retries after 1 minute, doubling up to 6 hours. Without an account nothing is sent.
+  A failed sync (any error but offline or full) sets `paused`: `request` then drops the automatic
+  Sync, Pull, Push and Refresh (the start, the exit, minimising) and logs each drop. Only the player's
+  requests run, through `request_by_player` («Синхронизировать», the recovery phrase, turning the cloud on),
+  which lifts the pause; a restart lifts it too (the pause is in memory only). Each failed job is logged.
+  The state line shows the reason (`cloud_view::failure_reason`, the error cut to 80 characters).
+  An installed Hub item may have an empty version: `HubList` validates it with `opt_text`.
 - Tests: `cargo test --profile fasttest cloud::`. `e2e.rs` runs `razdor-server`'s router on a local port with
   two devices (linked by a code): a device's mirror and the other device's list (no download, same names kept
   apart), the download on demand (kept once, then it joins the mirror), a deleted save leaving the cloud while

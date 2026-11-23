@@ -13,7 +13,7 @@
 use std::sync::Mutex;
 
 use macroquad::miniquad::window::clipboard_set;
-use razdor::cloud::{account, Job, Phase};
+use razdor::cloud::{account, CloudError, Job, Phase};
 use razdor::hub::Installed;
 use razdor::i18n::tr;
 use razdor::telemetry;
@@ -66,7 +66,7 @@ pub fn view() -> View {
     }
     let on = cloud_store::on();
     let shared = cloud_store::shared();
-    let state = state_line(on, shared.as_ref().map(|s| (s.phase, s.last_sync)));
+    let state = state_line(on, shared.as_ref().map(|s| (s.phase, s.last_sync)), shared.as_ref().and_then(|s| s.last_error.as_ref()));
     let space = space_line(on, shared.as_ref().map_or(0, |s| s.used_bytes));
     View {
         on,
@@ -80,11 +80,11 @@ pub fn view() -> View {
 fn canned_view(scene: &str) -> View {
     let recent = Some(1_700_000_000);
     let (on, state, used) = match scene {
-        "off" => (false, state_line(false, None), 0),
-        "offline" => (true, state_line(true, Some((Phase::Offline, None))), 3 << 20),
-        "full" => (true, state_line(true, Some((Phase::Full, recent))), 20 << 20),
-        "working" => (true, state_line(true, Some((Phase::Working, recent))), 3 << 20),
-        _ => (true, state_line(true, Some((Phase::Idle, recent))), 3 << 20),
+        "off" => (false, state_line(false, None, None), 0),
+        "offline" => (true, state_line(true, Some((Phase::Offline, None)), None), 3 << 20),
+        "full" => (true, state_line(true, Some((Phase::Full, recent)), None), 20 << 20),
+        "working" => (true, state_line(true, Some((Phase::Working, recent)), None), 3 << 20),
+        _ => (true, state_line(true, Some((Phase::Idle, recent)), None), 3 << 20),
     };
     View {
         on,
@@ -95,9 +95,10 @@ fn canned_view(scene: &str) -> View {
     }
 }
 
-/// The state line: off, syncing, offline, full, or the time of the last sync.
-/// `shared` is (phase, last sync) from the worker; none before it starts.
-pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>) -> String {
+/// The state line: off, syncing, offline, full, a failed sync with its reason, or the time of the last
+/// sync. `shared` is (phase, last sync) from the worker, none before it starts; `error` is the last
+/// request's error, shown with a failed sync.
+pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>, error: Option<&CloudError>) -> String {
     if !on {
         return tr("Off").to_string();
     }
@@ -105,12 +106,37 @@ pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>) -> String {
     match phase {
         Phase::Full => tr("The cloud is full").to_string(),
         Phase::Offline => tr("No connection").to_string(),
-        Phase::Failed => tr("Sync failed, it will try again").to_string(),
+        Phase::Failed => {
+            let reason = failure_reason(error);
+            razdor::trf!("Sync failed: {reason}. Press «Sync now» to try again", reason = reason)
+        }
         Phase::Working => tr("Syncing…").to_string(),
         Phase::Off | Phase::Idle => match last {
             Some(t) => razdor::trf!("Synced {time}", time = hhmm(t)),
             None => tr("Not synced yet").to_string(),
         },
+    }
+}
+
+/// Why a sync failed, in a few words, with the server's own text (cut to 80 characters).
+fn failure_reason(error: Option<&CloudError>) -> String {
+    match error {
+        Some(CloudError::Unauthorized) => tr("the account key was not accepted").to_string(),
+        Some(CloudError::NotFound) => tr("the save is no longer in the cloud").to_string(),
+        Some(CloudError::Conflict(text)) => razdor::trf!("conflict ({text})", text = cut_text(text)),
+        Some(CloudError::Refused(text)) => razdor::trf!("the request was refused ({text})", text = cut_text(text)),
+        Some(CloudError::Bad(text)) => razdor::trf!("the server's answer did not check out ({text})", text = cut_text(text)),
+        _ => tr("unknown error").to_string(),
+    }
+}
+
+/// The text cut to 80 characters, with «…» when it is longer.
+fn cut_text(text: &str) -> String {
+    const MAX: usize = 80;
+    if text.chars().count() <= MAX {
+        text.to_string()
+    } else {
+        format!("{}…", text.chars().take(MAX).collect::<String>())
     }
 }
 
@@ -157,7 +183,7 @@ pub fn toggle() {
 /// «Синхронизировать сейчас».
 pub fn sync_now() {
     if cloud_store::on() {
-        cloud_store::request(Job::Sync);
+        cloud_store::request_by_player(Job::Sync);
     }
 }
 
@@ -393,7 +419,7 @@ fn restore(phrase: &str) {
     };
     if account::store_key(&dir, &key).is_ok() {
         let _ = std::fs::remove_file(dir.join("off"));
-        cloud_store::request(Job::Sync);
+        cloud_store::request_by_player(Job::Sync);
     }
 }
 
@@ -603,7 +629,18 @@ mod tests {
 
     #[test]
     fn a_cloud_without_a_worker_has_no_sync_state() {
-        assert_eq!(state_line(true, None), tr("Not synced yet"));
+        assert_eq!(state_line(true, None, None), tr("Not synced yet"));
+    }
+
+    #[test]
+    fn a_failed_sync_shows_its_reason_and_that_it_waits_for_the_player() {
+        let line = state_line(true, Some((Phase::Failed, None)), Some(&CloudError::Refused("bad field".into())));
+        assert!(line.contains(&failure_reason(Some(&CloudError::Refused("bad field".into())))));
+        assert!(line.contains("bad field"));
+        let long = "x".repeat(200);
+        let cut = failure_reason(Some(&CloudError::Bad(long)));
+        assert!(cut.contains(&format!("{}…", "x".repeat(80))) && !cut.contains(&"x".repeat(81)), "the text is cut to 80 characters");
+        assert_eq!(failure_reason(None), tr("unknown error"));
     }
 
     fn hub(items: &[(&str, &str)]) -> HubList {
