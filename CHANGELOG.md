@@ -13,6 +13,32 @@
 ## Не выпущено
 ## 1.6.0 — 2026-11-23
 
+Коммит `5f455500` (тег `v1.6.0`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+b9d49fbbe871bc2bff9088132f7b7d8f2d957333ee20bc9d2010a4f481170b3a  razdor
+fe73800d4358316a529925657966fb2d50d5a7e3b4ba331845f34240a4a98947  Razdor.exe
+d992679947b9f79879c7eb22fec9ef75e40329456ecad8116e0481d57c18fa0b  razdor-macos
+f559459439b34d3ff5fe33e30d89cb6157bebbe8cdf540e0ff1718219a698f9e  razdor-translate
+80738e66668050c0c2abedcfbb31843a90f9cdf43b1e3584796f25a336d17114  Razdor-translate.exe
+513dd83ceb9ee511afc5059f09e862db2f3b93fc44b001b4709680f1a1d456a6  razdor-translate-macos
+c6cfa3df74930997bc2fdd7c36d7a5cdfd134c1803a837c16b83de756d6f9e0f  razdor.apk
+7b82a8a958298a808fc429fc8c3305999226fc8e5c8d22ee99926941aff02f51  razdor.ipa
+b9d49fbbe871bc2bff9088132f7b7d8f2d957333ee20bc9d2010a4f481170b3a  razdor-1.6.0-linux
+fe73800d4358316a529925657966fb2d50d5a7e3b4ba331845f34240a4a98947  Razdor-1.6.0.exe
+d992679947b9f79879c7eb22fec9ef75e40329456ecad8116e0481d57c18fa0b  razdor-1.6.0-macos
+c6cfa3df74930997bc2fdd7c36d7a5cdfd134c1803a837c16b83de756d6f9e0f  razdor-1.6.0.apk
+7b82a8a958298a808fc429fc8c3305999226fc8e5c8d22ee99926941aff02f51  razdor-1.6.0.ipa
+f559459439b34d3ff5fe33e30d89cb6157bebbe8cdf540e0ff1718219a698f9e  razdor-translate-1.6.0-linux
+80738e66668050c0c2abedcfbb31843a90f9cdf43b1e3584796f25a336d17114  Razdor-translate-1.6.0.exe
+513dd83ceb9ee511afc5059f09e862db2f3b93fc44b001b4709680f1a1d456a6  razdor-translate-1.6.0-macos
+9953aeab47d3579c2bb824037a54b9b9438f0c161c6a0ec95aedb52a30f7f84c  razdor-ads-1.6.0.zip
+ea8d81431d7bff486811ce62179da98c1d7fb06e61242e1ec3d7a2092160a075  Razdor-win7.exe
+cd89a679547b12b6691dd3ec660423e0ff75812f749a847fd82073497cbc4915  razdor-1.6.0-windows7.zip
+```
+
 ### Добавлено
 
 - В «Новой игре» новый выбор языка карт: «Все языки», «Русский», «English». По умолчанию язык интерфейса; карты, в тексте которых язык не ясен, видны при любом выборе.
