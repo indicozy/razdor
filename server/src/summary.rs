@@ -2,7 +2,8 @@
 //! Raw rows and the per-day aggregates are read together, so the numbers hold across the retention
 //! cut-off. Quarantined rows never count.
 
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::params;
 use serde::Serialize;
@@ -46,6 +47,52 @@ pub struct CrashRow {
     pub count: i64,
     pub last_day: String,
     pub last_version: String,
+    /// The day of the group's first crash in the last 30 days.
+    pub first_day: String,
+    /// The razdor version of that first crash.
+    pub first_version: String,
+    /// True when the group began on the newest version seen in pings (`latest_version`).
+    pub is_new: bool,
+}
+
+/// Distinct installs per day and razdor version (raw pings only, so it is empty beyond their retention).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct VersionDay {
+    pub day: String,
+    pub version: String,
+    pub installs: i64,
+}
+
+/// A version's first day in the pings (raw rows and their daily aggregates).
+#[derive(Debug, Serialize, PartialEq)]
+pub struct Release {
+    pub version: String,
+    pub first_day: String,
+}
+
+/// The crashes of one razdor version, and the installs that pinged with it, in the last 30 days.
+#[derive(Debug, Serialize, PartialEq)]
+pub struct CrashRate {
+    pub version: String,
+    pub crashes: i64,
+    pub installs: i64,
+}
+
+/// The headline numbers: the last 7 days against the 7 days before them.
+#[derive(Debug, Serialize, Default, PartialEq)]
+pub struct Overview {
+    /// Distinct installs that pinged in the last 7 days (today and the 6 days before).
+    pub players_7d: i64,
+    /// Distinct installs that pinged in the 7 days before those.
+    pub players_prev_7d: i64,
+    /// Installs whose first ping fell in the last 7 days.
+    pub new_installs_7d: i64,
+    /// Installs whose first ping fell in the 7 days before those.
+    pub new_installs_prev_7d: i64,
+    /// Crash reports in the last 7 days.
+    pub crashes_7d: i64,
+    /// Crash reports in the 7 days before those.
+    pub crashes_prev_7d: i64,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -77,8 +124,21 @@ pub struct CloudStats {
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Summary {
     pub generated_at: i64,
-    /// Installs that pinged, per day (last 30 days).
+    /// The chart range in days: 7, 30 or 90 (anything else asked for is 30).
+    pub range_days: i64,
+    pub overview: Overview,
+    /// Installs that pinged, per day (the chart range).
     pub players_per_day: Vec<Named>,
+    /// Distinct installs per day and razdor version (the chart range).
+    pub versions_per_day: Vec<VersionDay>,
+    /// The versions whose first day is in the chart range, by day.
+    pub releases: Vec<Release>,
+    /// The newest version seen in pings in the last 30 days ("" when there is none).
+    pub latest_version: String,
+    /// The next older version in `crash_rates` ("" when there is none).
+    pub previous_version: String,
+    /// Crashes and installs per version (last 30 days), newest first.
+    pub crash_rates: Vec<CrashRate>,
     pub week_by_version: Vec<Named>,
     pub week_by_platform: Vec<Named>,
     pub week_by_game: Vec<Named>,
@@ -97,9 +157,35 @@ fn named(rows: Vec<(String, i64)>) -> Vec<Named> {
     rows.into_iter().map(|(name, value)| Named { name, value }).collect()
 }
 
-pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
+/// The chart ranges the dashboard offers; any other number of days is 30.
+pub fn clamp_range(days: i64) -> i64 {
+    match days {
+        7 | 30 | 90 => days,
+        _ => 30,
+    }
+}
+
+/// One dot-separated part of a version: a number compares as a number and sorts before any text.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Part<'a> {
+    Num(u64),
+    Text(&'a str),
+}
+
+fn version_key(s: &str) -> Vec<Part<'_>> {
+    s.split('.').map(|p| p.parse::<u64>().map_or(Part::Text(p), Part::Num)).collect()
+}
+
+/// Orders razdor versions part by part, numbers as numbers: "1.10.0" is newer than "1.9.3".
+pub fn version_cmp(a: &str, b: &str) -> Ordering {
+    version_key(a).cmp(&version_key(b)).then_with(|| a.cmp(b))
+}
+
+pub async fn build(st: &AppState, range_days: i64) -> Result<Summary, ApiError> {
     let now = st.clock.now();
     let today = day_of(now);
+    let range = clamp_range(range_days);
+    let from = today - (range - 1);
     let month = today - 29;
     let week = today - 6;
     let stats = st
@@ -113,7 +199,7 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
                        SELECT day, installs AS n FROM daily_players WHERE day >= ?1
                      ) GROUP BY day ORDER BY day",
                 )?
-                .query_map(params![month], |r| Ok((ymd(r.get(0)?), r.get::<_, i64>(1)?)))?
+                .query_map(params![from], |r| Ok((ymd(r.get(0)?), r.get::<_, i64>(1)?)))?
                 .map(|r| r.map(|(d, v)| Named { name: d, value: v }))
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -197,10 +283,45 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
             maps.sort_by(|a, b| b.starts.cmp(&a.starts).then(a.map.cmp(&b.map)));
             maps.truncate(30);
 
-            let crashes = c
+            // The 30-day figures: crashes and installs per version, and the newest version in pings.
+            let by_version = |sql: &str| -> rusqlite::Result<BTreeMap<String, i64>> {
+                c.prepare(sql)?
+                    .query_map(params![month], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+                    .collect()
+            };
+            let crash_counts = by_version(
+                "SELECT razdor, COUNT(*) FROM crashes WHERE quarantined = 0 AND day >= ?1 GROUP BY razdor",
+            )?;
+            let install_counts = by_version(
+                "SELECT razdor, COUNT(DISTINCT install_id) FROM pings WHERE quarantined = 0 AND day >= ?1 GROUP BY razdor",
+            )?;
+            let latest_version = install_counts.keys().max_by(|a, b| version_cmp(a, b)).cloned().unwrap_or_default();
+            let names: BTreeSet<&String> = crash_counts.keys().chain(install_counts.keys()).collect();
+            let mut crash_rates: Vec<CrashRate> = names
+                .into_iter()
+                .map(|v| CrashRate {
+                    version: v.clone(),
+                    crashes: crash_counts.get(v).copied().unwrap_or(0),
+                    installs: install_counts.get(v).copied().unwrap_or(0),
+                })
+                .collect();
+            crash_rates.sort_by(|a, b| version_cmp(&b.version, &a.version));
+            let previous_version = crash_rates
+                .iter()
+                .map(|r| r.version.as_str())
+                .filter(|v| !latest_version.is_empty() && version_cmp(v, &latest_version) == Ordering::Less)
+                .max_by(|a, b| version_cmp(a, b))
+                .unwrap_or("")
+                .to_string();
+
+            let mut crashes = c
                 .prepare(
-                    "SELECT panic_loc, panic_msg, COUNT(*), MAX(day), MAX(razdor) FROM crashes
-                     WHERE quarantined = 0 AND day >= ?1 GROUP BY panic_loc, panic_msg ORDER BY 3 DESC LIMIT 30",
+                    "SELECT c.panic_loc, c.panic_msg, COUNT(*), MAX(c.day), MAX(c.razdor), MIN(c.day),
+                       (SELECT e.razdor FROM crashes e WHERE e.quarantined = 0 AND e.day >= ?1
+                          AND e.panic_loc = c.panic_loc AND e.panic_msg = c.panic_msg
+                          ORDER BY e.day, e.received_at LIMIT 1)
+                     FROM crashes c WHERE c.quarantined = 0 AND c.day >= ?1
+                     GROUP BY c.panic_loc, c.panic_msg ORDER BY 3 DESC LIMIT 30",
                 )?
                 .query_map(params![month], |r| {
                     Ok(CrashRow {
@@ -209,9 +330,15 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
                         count: r.get(2)?,
                         last_day: ymd(r.get(3)?),
                         last_version: r.get(4)?,
+                        first_day: ymd(r.get(5)?),
+                        first_version: r.get(6)?,
+                        is_new: false,
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
+            for row in &mut crashes {
+                row.is_new = !latest_version.is_empty() && row.first_version == latest_version;
+            }
 
             let fps = c
                 .prepare(
@@ -264,9 +391,62 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
                 c.prepare(
                     "SELECT day, SUM(count) FROM daily_cloud WHERE day >= ?1 GROUP BY day ORDER BY day",
                 )?
-                .query_map(params![month], |r| Ok((ymd(r.get(0)?), r.get::<_, i64>(1)?)))?
+                .query_map(params![from], |r| Ok((ymd(r.get(0)?), r.get::<_, i64>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?,
             );
+
+            let players_in = |lo: i64, hi: i64| -> rusqlite::Result<i64> {
+                c.query_row(
+                    "SELECT COUNT(DISTINCT install_id) FROM pings WHERE quarantined = 0 AND day BETWEEN ?1 AND ?2",
+                    params![lo, hi],
+                    |r| r.get(0),
+                )
+            };
+            let new_in = |lo: i64, hi: i64| -> rusqlite::Result<i64> {
+                c.query_row(
+                    "WITH firsts AS (SELECT install_id, MIN(day) AS first FROM pings WHERE quarantined = 0 GROUP BY install_id)
+                     SELECT COUNT(*) FROM firsts WHERE first BETWEEN ?1 AND ?2",
+                    params![lo, hi],
+                    |r| r.get(0),
+                )
+            };
+            let crashes_in = |lo: i64, hi: i64| -> rusqlite::Result<i64> {
+                c.query_row(
+                    "SELECT COUNT(*) FROM crashes WHERE quarantined = 0 AND day BETWEEN ?1 AND ?2",
+                    params![lo, hi],
+                    |r| r.get(0),
+                )
+            };
+            let (w7, p7) = ((today - 6, today), (today - 13, today - 7));
+            let overview = Overview {
+                players_7d: players_in(w7.0, w7.1)?,
+                players_prev_7d: players_in(p7.0, p7.1)?,
+                new_installs_7d: new_in(w7.0, w7.1)?,
+                new_installs_prev_7d: new_in(p7.0, p7.1)?,
+                crashes_7d: crashes_in(w7.0, w7.1)?,
+                crashes_prev_7d: crashes_in(p7.0, p7.1)?,
+            };
+
+            let versions_per_day = c
+                .prepare(
+                    "SELECT day, razdor, COUNT(DISTINCT install_id) FROM pings
+                     WHERE quarantined = 0 AND day >= ?1 GROUP BY day, razdor ORDER BY day, razdor",
+                )?
+                .query_map(params![from], |r| {
+                    Ok(VersionDay { day: ymd(r.get(0)?), version: r.get(1)?, installs: r.get(2)? })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let releases = c
+                .prepare(
+                    "SELECT razdor, MIN(day) FROM (
+                       SELECT razdor, day FROM pings WHERE quarantined = 0
+                       UNION ALL
+                       SELECT razdor, day FROM daily_players
+                     ) GROUP BY razdor HAVING MIN(day) >= ?1 ORDER BY MIN(day), razdor",
+                )?
+                .query_map(params![from], |r| Ok(Release { version: r.get(0)?, first_day: ymd(r.get(1)?) }))?
+                .collect::<Result<Vec<_>, _>>()?;
 
             Ok((
                 players_per_day,
@@ -280,11 +460,34 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
                 experiments,
                 bans,
                 syncs_per_day,
+                overview,
+                versions_per_day,
+                releases,
+                crash_rates,
+                latest_version,
+                previous_version,
             ))
         })
         .await?;
-    let (players_per_day, week_by_version, week_by_platform, week_by_game, retention, maps, crashes, fps, experiments, bans, syncs_per_day) =
-        stats;
+    let (
+        players_per_day,
+        week_by_version,
+        week_by_platform,
+        week_by_game,
+        retention,
+        maps,
+        crashes,
+        fps,
+        experiments,
+        bans,
+        syncs_per_day,
+        overview,
+        versions_per_day,
+        releases,
+        crash_rates,
+        latest_version,
+        previous_version,
+    ) = stats;
     let cloud = st
         .cloud
         .read(move |c| {
@@ -295,7 +498,14 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
         .await?;
     Ok(Summary {
         generated_at: now,
+        range_days: range,
+        overview,
         players_per_day,
+        versions_per_day,
+        releases,
+        latest_version,
+        previous_version,
+        crash_rates,
         week_by_version,
         week_by_platform,
         week_by_game,
@@ -308,4 +518,26 @@ pub async fn build(st: &AppState) -> Result<Summary, ApiError> {
         cloud,
         storage: st.budget.figures(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_compare_numbers_as_numbers() {
+        assert_eq!(version_cmp("1.10.0", "1.9.3"), Ordering::Greater);
+        assert_ne!(version_cmp("1.5.2", "1.5.10"), Ordering::Greater);
+        assert_eq!(version_cmp("1.5.2", "1.5.10"), Ordering::Less);
+        assert_eq!(version_cmp("1.5", "1.5.0"), Ordering::Less);
+        assert_eq!(version_cmp("1.5.4", "1.5.4"), Ordering::Equal);
+    }
+
+    #[test]
+    fn range_is_one_of_three() {
+        assert_eq!(clamp_range(7), 7);
+        assert_eq!(clamp_range(90), 90);
+        assert_eq!(clamp_range(45), 30);
+        assert_eq!(clamp_range(0), 30);
+    }
 }

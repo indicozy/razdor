@@ -9,7 +9,7 @@ use std::sync::Arc;
 use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderMap, Request, StatusCode};
 use axum::Router;
-use razdor_server::civil::DAY;
+use razdor_server::civil::{day_of, ymd, DAY};
 use razdor_server::clock::Clock;
 use razdor_server::cloud;
 use razdor_server::config::{Config, Limits};
@@ -18,6 +18,7 @@ use razdor_server::abuse;
 use razdor_server::state::{sha256_hex, AppState};
 use razdor_server::{admin, retention, router, summary};
 use razdor_wire::{frame, paths};
+use rusqlite::params;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
@@ -812,11 +813,121 @@ async fn the_dashboard_escapes_player_text() {
         "log": [], "has_save": false
     });
     post_json(&h, "/v1/crash", &report).await;
-    let sm = summary::build(&h.st).await.expect("builds");
+    let sm = summary::build(&h.st, 30).await.expect("builds");
     assert_eq!(sm.crashes.len(), 1);
     let html = admin::render(&sm);
     assert!(!html.contains("<script>alert"));
     assert!(html.contains("&lt;script&gt;"));
+}
+
+/// Seeds raw rows directly (install, day, razdor, quarantined) and crash rows (location, message,
+/// day, razdor, quarantined), then reads the summary's numbers.
+#[tokio::test]
+async fn the_summary_has_overview_versions_releases_and_crash_rates() {
+    let h = harness("summary-data", Limits::default());
+    let t = day_of(NOW);
+    let pings: Vec<(String, i64, &str, i64)> = vec![
+        (install(1), t - 20, "1.5.4", 0),
+        (install(1), t - 2, "1.5.4", 0),
+        (install(2), t - 10, "1.5.4", 0),
+        (install(2), t - 1, "1.6.0", 0),
+        (install(3), t - 3, "1.6.0", 0),
+        (install(3), t, "1.6.0", 0),
+        (install(4), t - 1, "1.6.0", 0),
+        (install(5), t, "1.6.0", 1), // quarantined: counts nowhere
+        (install(6), t - 1, "1.10.0", 0),
+    ];
+    let crashes: Vec<(&str, &str, i64, &str, i64)> = vec![
+        ("a.rs:1", "boom", t - 1, "1.6.0", 0),
+        ("a.rs:1", "boom", t - 3, "1.6.0", 0),
+        ("b.rs:2", "oops", t - 10, "1.5.4", 0),
+        ("b.rs:2", "oops", t - 12, "1.5.4", 1), // quarantined
+        ("c.rs:3", "old", t - 20, "1.5.4", 0),
+        ("d.rs:4", "new", t, "1.10.0", 0),
+    ];
+    h.st.stats
+        .call(move |c| {
+            for (install_id, day, razdor, q) in &pings {
+                c.execute(
+                    "INSERT INTO pings (install_id, day, received_at, razdor, platform, game, lang, quarantined)
+                     VALUES (?1, ?2, ?3, ?4, 'linux', 'dt', 'ru', ?5)",
+                    params![install_id, day, *day * DAY, razdor, q],
+                )?;
+            }
+            for (i, (loc, msg, day, razdor, q)) in crashes.iter().enumerate() {
+                c.execute(
+                    "INSERT INTO crashes (id, install_id, received_at, day, razdor, platform, game, screen,
+                       panic_loc, panic_msg, report_file, quarantined)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'linux', 'dt', 'map', ?6, ?7, '', ?8)",
+                    params![format!("crash-{i}"), install(9), *day * DAY, day, razdor, loc, msg, q],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .expect("seeds");
+
+    let sm = summary::build(&h.st, 30).await.expect("builds");
+    assert_eq!(sm.range_days, 30);
+    assert_eq!(
+        sm.overview,
+        summary::Overview {
+            players_7d: 5,
+            players_prev_7d: 1,
+            new_installs_7d: 3,
+            new_installs_prev_7d: 1,
+            crashes_7d: 3,
+            crashes_prev_7d: 1,
+        }
+    );
+    let per_day: Vec<(String, String, i64)> =
+        sm.versions_per_day.iter().map(|v| (v.day.clone(), v.version.clone(), v.installs)).collect();
+    let expected: Vec<(String, String, i64)> = vec![
+        (ymd(t - 20), "1.5.4".into(), 1),
+        (ymd(t - 10), "1.5.4".into(), 1),
+        (ymd(t - 3), "1.6.0".into(), 1),
+        (ymd(t - 2), "1.5.4".into(), 1),
+        (ymd(t - 1), "1.10.0".into(), 1),
+        (ymd(t - 1), "1.6.0".into(), 2),
+        (ymd(t), "1.6.0".into(), 1),
+    ];
+    assert_eq!(per_day, expected);
+    let releases: Vec<(String, String)> =
+        sm.releases.iter().map(|r| (r.version.clone(), r.first_day.clone())).collect();
+    assert_eq!(
+        releases,
+        vec![
+            ("1.5.4".to_string(), ymd(t - 20)),
+            ("1.6.0".to_string(), ymd(t - 3)),
+            ("1.10.0".to_string(), ymd(t - 1)),
+        ]
+    );
+    assert_eq!(sm.latest_version, "1.10.0");
+    assert_eq!(sm.previous_version, "1.6.0");
+    let rates: Vec<(String, i64, i64)> =
+        sm.crash_rates.iter().map(|r| (r.version.clone(), r.crashes, r.installs)).collect();
+    assert_eq!(
+        rates,
+        vec![
+            ("1.10.0".to_string(), 1, 1),
+            ("1.6.0".to_string(), 2, 3),
+            ("1.5.4".to_string(), 2, 2),
+        ]
+    );
+    let row = |loc: &str| sm.crashes.iter().find(|c| c.location == loc).expect("row");
+    let group_a = row("a.rs:1");
+    assert_eq!((group_a.count, group_a.first_day.as_str(), group_a.first_version.as_str()), (2, ymd(t - 3).as_str(), "1.6.0"));
+    assert!(!group_a.is_new);
+    assert!(row("d.rs:4").is_new, "a group that began on the newest version is new");
+    assert!(!row("b.rs:2").is_new);
+    assert_eq!(row("b.rs:2").count, 1, "the quarantined crash is not counted");
+
+    // The chart range: 7 days keeps only the releases that began in the last week; 45 is clamped to 30.
+    let week = summary::build(&h.st, 7).await.expect("builds");
+    assert_eq!(week.range_days, 7);
+    assert_eq!(week.releases.iter().map(|r| r.version.as_str()).collect::<Vec<_>>(), ["1.6.0", "1.10.0"]);
+    assert_eq!(week.versions_per_day.len(), 5);
+    assert_eq!(summary::build(&h.st, 45).await.expect("builds").range_days, 30);
 }
 
 #[tokio::test]

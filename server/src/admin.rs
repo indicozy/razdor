@@ -6,7 +6,9 @@ use std::fmt::Write as _;
 
 use argon2::password_hash::SaltString;
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use axum::extract::State;
+use std::collections::HashMap;
+
+use axum::extract::{Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::Form;
@@ -294,7 +296,16 @@ pub fn render(sm: &Summary) -> String {
     b
 }
 
-pub async fn page_get(State(st): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
+/// The chart range asked for with `?days=N` (30 when absent or not a number).
+fn days_param(q: &HashMap<String, String>) -> i64 {
+    q.get("days").and_then(|v| v.parse().ok()).unwrap_or(30)
+}
+
+pub async fn page_get(
+    State(st): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
     if !session_ok(&st, &headers) {
         return Ok(page(
             StatusCode::OK,
@@ -303,7 +314,7 @@ pub async fn page_get(State(st): State<AppState>, headers: HeaderMap) -> Result<
              <label>Password <input type=\"password\" name=\"password\" autofocus></label> <button>Enter</button></form>",
         ));
     }
-    let sm = summary::build(&st).await?;
+    let sm = summary::build(&st, days_param(&q)).await?;
     Ok(page(StatusCode::OK, "Razdor stats", &render(&sm)))
 }
 
@@ -390,11 +401,15 @@ pub async fn unban(State(st): State<AppState>, headers: HeaderMap, Form(form): F
     Ok(Redirect::to("/admin").into_response())
 }
 
-pub async fn summary_json(State(st): State<AppState>, headers: HeaderMap) -> Result<Response, ApiError> {
+pub async fn summary_json(
+    State(st): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
     if !token_ok(&st, &headers) && !session_ok(&st, &headers) {
         return Err(ApiError::Unauthorized("admin token or dashboard session"));
     }
-    let sm = summary::build(&st).await?;
+    let sm = summary::build(&st, days_param(&q)).await?;
     Ok(json(&sm))
 }
 
