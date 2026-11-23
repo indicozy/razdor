@@ -102,11 +102,14 @@ The site file needs its certificate before nginx can load it. Order:
 
    Renewal needs nginx to reload: add `--deploy-hook "systemctl reload nginx"` to the renewal (in
    `/etc/letsencrypt/renewal/razdor.indicozy.dev.conf` as `renew_hook`, or `certbot renew --dry-run` to
-   test). The site's access log is off (the service keeps no addresses either); errors go to nginx's
-   error log.
+   test). The website's access log is off. The API has its own log that keeps no addresses (see
+   «Logs and privacy»). Errors go to nginx's error log.
 
-Rate limits: `/api` allows 40 requests a second per address with a burst of 120 (`limit_req`). That is
-gentle on purpose: many players share one address behind carrier NAT. The service has its own per-address
+   nginx's own 429 (the per-address limit below) carries `Retry-After: 1`. The service's 429s carry their
+   own `Retry-After`: the seconds until the window frees, or 60 when it is not known.
+
+Rate limits: `/api` allows 20 requests a second per address with a burst of 60 (`limit_req`), and the
+admin dashboard a burst of 20. That is gentle on purpose: many players share one address behind carrier NAT. The service has its own per-address
 limits (1200 a minute, `ip_per_minute`), counted on the address nginx sets.
 
 Storage and retention limits (the TOML `[limits]` table; the defaults are these):
@@ -193,6 +196,29 @@ Known gaps:
   new one has run a day.
 - The dashboard: `https://razdor.indicozy.dev/api/admin`. The API's JSON summary:
   `https://razdor.indicozy.dev/api/admin/api/summary.json` with the `x-razdor-admin` header.
+- Retries are safe. A save upload that the server already holds answers with the same row and writes
+  nothing. An account creation with a key the server already holds answers with the same account. A
+  device sends its key on a retry, so a lost answer never makes a second account.
+
+### The error alert
+
+`api-alert.sh` reads the last 10 minutes of the API's nginx log (`/var/log/nginx/razdor-api.log`). It
+counts the 5xx responses and the other 4xx responses, except 404 and 429. It raises an alert when there
+are at least 5 server errors, or at least 20 other client errors. The alert goes to the journal at
+priority crit, and the same line goes to `/root/API-ALERT` with a UTC time. The timer runs it every 10
+minutes, five minutes after boot. The script always exits 0.
+
+Install the alert and the log rotation (on the VPS, as root):
+
+    install -m 0755 server/deploy/api-alert.sh /usr/local/sbin/razdor-api-alert.sh
+    install -m 0644 server/deploy/razdor-api-alert.service server/deploy/razdor-api-alert.timer /etc/systemd/system/
+    install -m 0644 server/deploy/razdor-api.logrotate /etc/logrotate.d/razdor-api
+    systemctl daemon-reload
+    systemctl enable --now razdor-api-alert.timer
+    logrotate -d /etc/logrotate.d/razdor-api        # a dry run: prints what it would do
+
+Check it: `systemctl list-timers razdor-api-alert.timer`, `journalctl -t razdor-api-alert`, and
+`cat /root/API-ALERT`. To test the script by hand, run `systemctl start razdor-api-alert.service`.
 
 ### The dashboard's rewrite
 
@@ -318,4 +344,10 @@ Monitoring on the host (outside this folder):
 
 The service logs its own events (startup, bans with their reason, retention counts) and no client
 addresses. The IP address is used in memory for the rate limits and hashed (with a salt kept in `ip_salt`
-in the data folder) for the IP bans. nginx's access log is off for the host, so nothing keeps addresses.
+in the data folder) for the IP bans. The website has no access log.
+
+The API has its own nginx log, `/var/log/nginx/razdor-api.log`. It has one line for each request. Each
+line has these fields, in this order: the time (ISO 8601), the method, the path, the status, the request
+time, the request size, the response size, the app version and the app commit. The path has no query
+string. The log keeps no client address and no user agent. It is kept for 14 days, then rotated and
+compressed.

@@ -1,0 +1,7 @@
+[Unit]
+Description=Razdor API error alert (counts errors in the API's nginx log)
+After=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/razdor-api-alert.sh

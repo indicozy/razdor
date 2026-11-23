@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Razdor API error alert every 10 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+Unit=razdor-api-alert.service
+
+[Install]
+WantedBy=timers.target

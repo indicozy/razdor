@@ -27,7 +27,7 @@ strips `/api`, so the routes are `/v1/...` on the service) and listens on 127.0.
 | `GET /v1/battles/pending` | battles not judged yet | admin token |
 | `GET /v1/battles/{id}` | one battle's metadata and record, framed | admin token |
 | `POST /v1/install/delete` | «Удалить мои данные» | none (the install id) |
-| `POST /v1/account` | a new account; the answer carries its key | none |
+| `POST /v1/account` | a new account; the answer carries its key. A body with a `key` the device brings answers with that key's account, created only once (idempotent) | none |
 | `DELETE /v1/account` | deletes the account and its files | account key |
 | `POST /v1/link` | a link code for a second device (10 minutes, once) | account key |
 | `POST /v1/link/redeem` | the second device gives the code, gets the key | none |
@@ -64,8 +64,12 @@ A banned sender always gets `200 {}`, and nothing is stored. Bans are 24 h, then
 A ban quarantines the install's raw rows received since the offence window opened: they stay on disk
 and are not counted. The dashboard lists bans with an Unban button; unban keeps the strikes.
 
-The cloud uses the IP gate and per-account and per-redeem minute limits (429s, no bans). Body caps are
-per route (`server/src/lib.rs`); a body over its cap is refused by the framework before it is read.
+The cloud uses the IP gate and per-account, per-redeem and new-account (per day) limits (429s, no bans).
+Every 429 carries `Retry-After` in seconds: the time until its window frees (for a day's cap, the next UTC
+midnight; for a ban, the time until it ends), and 60 where the server does not know it. The IP's ban
+answer in the cloud is a 429 too, with the same header. nginx's own 429 (its per-address limit) sends
+`Retry-After: 1`. Body caps are per route (`server/src/lib.rs`); a body over its cap is refused by the
+framework before it is read.
 
 ### Storage and retention
 
@@ -88,6 +92,14 @@ per route (`server/src/lib.rs`); a body over its cap is refused by the framework
   413 «Облако заполнено, удалите старые сохранения». The server deletes nothing to make room; the client makes
   room only when it uploads a newly chosen save (its own rows whose content is gone, then its kept-but-unchosen
   rows, oldest first, only as many as needed). Rows from before device ids carry an empty id and hash.
+- Retries are idempotent. A save put whose content the account already holds for that device (the same
+  device id, raw hash and sha256) answers with the existing row's id and the account's current used bytes,
+  with 200. It writes nothing and counts nothing again, and it is checked before the device cap and the quota,
+  so a retry never hits a cap. The same content under another name or pin keeps the existing row unchanged.
+  There is no unique index on saves: rows written before this rule may be duplicates, and they stay.
+- Account creation with a brought key (`AccountNew.key`) is idempotent: a stored key answers 200 with the same
+  key and changes nothing; an unknown key creates the account. A body without a key makes a new key, as before.
+  The gates (IP, junk, the day's new-account cap, the budget) run on both paths.
 - Marks: per map, the better level wins (Green is best, then Grey, Yellow, Red); a tie takes the later
   date. Settings: per key, the newer `changed_at` wins. Hub: the list replaces the stored one when it
   is not older.
