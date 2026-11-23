@@ -90,7 +90,8 @@ impl Budget {
 pub fn analytics_gate(st: &AppState) -> Result<(), ApiError> {
     if st.budget.over() {
         st.budget.note_refusal(st.clock.now());
-        return Err(ApiError::Limited);
+        // When the budget frees is not known here: the usual minute.
+        return Err(ApiError::Limited(60));
     }
     Ok(())
 }

@@ -216,7 +216,7 @@ pub async fn ping(
                     .await?;
                 return Err(ApiError::Silent);
             }
-            Err(ApiError::Limited)
+            Err(ApiError::Limited(civil::secs_to_next_day(now)))
         }
         PingOutcome::Duplicate | PingOutcome::Stored => {
             abuse::tally(&st, &adm.install, 1, 0, false).await?;
@@ -286,7 +286,8 @@ pub async fn events(
                 .await?;
             return Err(ApiError::Silent);
         }
-        return Err(ApiError::Limited);
+        // The hour's window is rolling: its end is not known here, so the client gets the usual minute.
+        return Err(ApiError::Limited(60));
     }
     abuse::tally(&st, &adm.install, stored_n, invalid, false).await?;
 
@@ -339,7 +340,7 @@ pub async fn perf(
     release(&st, &adm.install, &p.razdor).await?;
     // Over the day's cap: 429, no strike and no ban (the client keeps the report).
     if stored_today(&st, "perf", &adm.install).await? >= i64::from(st.cfg.limits.perf_per_day) {
-        return Err(ApiError::Limited);
+        return Err(ApiError::Limited(civil::secs_to_next_day(st.clock.now())));
     }
     budget::analytics_gate(&st)?;
     let n = p.screens.len().max(1) as f32;
@@ -392,7 +393,7 @@ pub async fn crash(
     release(&st, &adm.install, &c.razdor).await?;
     // Over the day's cap: 429, no strike and no ban.
     if stored_today(&st, "crashes", &adm.install).await? >= i64::from(st.cfg.limits.crash_per_day) {
-        return Err(ApiError::Limited);
+        return Err(ApiError::Limited(civil::secs_to_next_day(st.clock.now())));
     }
     budget::analytics_gate(&st)?;
     let (loc, msg) = panic_key(&c.panic_text);
@@ -544,7 +545,7 @@ pub async fn battles(
                 .await?;
             return Err(ApiError::Silent);
         }
-        return Err(ApiError::Limited);
+        return Err(ApiError::Limited(60));
     }
     // Overlapping in time: a copied game folder (one install id on two PCs) can make two real battles
     // overlap. The later one is refused (409, dropped by the client), not banned.

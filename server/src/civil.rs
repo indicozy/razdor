@@ -11,6 +11,11 @@ pub fn day_start(day: i64) -> i64 {
     day * DAY
 }
 
+/// Seconds from `t` to the next UTC midnight: when a day's cap frees (at least one).
+pub fn secs_to_next_day(t: i64) -> u64 {
+    (DAY - t.rem_euclid(DAY)).max(1) as u64
+}
+
 /// `YYYY-MM-DD` of a day number (proleptic Gregorian; Howard Hinnant's civil_from_days).
 pub fn ymd(day: i64) -> String {
     let z = day + 719_468;

@@ -580,12 +580,13 @@ async fn a_device_keeps_its_cap_and_another_device_has_its_own() {
     let h = harness("per-device", limits);
     let key = account(&h).await;
     let app = router(h.st.clone());
+    // Each save has its own content: the same bytes on the same device are a retry, not a new save.
     for map in ["map02.dtm", "map03.dtm"] {
-        let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", map, "manual", b"s")).await;
+        let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", map, "manual", map.as_bytes())).await;
         assert_eq!(r.status, StatusCode::OK);
     }
     // No per-map window any more: the device's cap refuses the third save, whatever its map or kind.
-    let third = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", "map02.dtm", "quick", b"s")).await;
+    let third = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame_from(DEVICE_A, "dt", "map02.dtm", "quick", b"third")).await;
     assert_eq!(third.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert!(third.json()["error"].as_str().unwrap_or("").contains("Облако заполнено"));
     assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 2, "nothing was deleted");
@@ -617,12 +618,17 @@ async fn the_twenty_megabyte_quota_refuses_the_save_that_overflows_it() {
     let h = harness("quota", Limits::default());
     let key = account(&h).await;
     let app = router(h.st.clone());
-    let big = vec![7u8; 7 * 1024 * 1024];
-    for map in ["a.dtm", "b.dtm"] {
-        let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", map, "manual", &big)).await;
+    // Each save has its own content (the same bytes again would be a retry, see put_save).
+    let big = |tag: u8| {
+        let mut b = vec![7u8; 7 * 1024 * 1024];
+        b[0] = tag;
+        b
+    };
+    for (tag, map) in [(1u8, "a.dtm"), (2u8, "b.dtm")] {
+        let r = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", map, "manual", &big(tag))).await;
         assert_eq!(r.status, StatusCode::OK);
     }
-    let third = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "c.dtm", "manual", &big)).await;
+    let third = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "c.dtm", "manual", &big(3))).await;
     assert_eq!(third.status, StatusCode::PAYLOAD_TOO_LARGE);
     assert!(third.json()["error"].as_str().unwrap_or("").contains("Облако заполнено"));
     // Nothing was deleted to make room.
@@ -1144,4 +1150,94 @@ async fn the_stored_bytes_are_counted_again_at_start() {
     let cfg = Config { data_dir: h.st.root.clone(), ..Config::default() };
     let again = AppState::open(cfg, Clock::fixed(NOW)).expect("opens");
     assert_eq!(again.budget.used(), used);
+}
+
+// Retries: a lost answer is sent again, and the server answers it without a second copy.
+
+#[tokio::test]
+async fn a_retried_save_is_one_row_with_the_same_id() {
+    let h = harness("save-retry", Limits::default());
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    let bytes = b"a save retried after a lost answer".to_vec();
+    let frame = save_frame("dt", "map01.dtm", "manual", &bytes);
+    let first = call(&app, "PUT", "/v1/saves", &key_header(&key), frame.clone()).await;
+    let second = call(&app, "PUT", "/v1/saves", &key_header(&key), frame).await;
+    assert_eq!(first.status, StatusCode::OK);
+    assert_eq!(second.status, StatusCode::OK);
+    assert_eq!(first.json()["id"], second.json()["id"]);
+    assert_eq!(second.json()["used_bytes"], json!(bytes.len()), "counted once");
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 1);
+
+    // The same bytes and device under another name, pinned: the existing row, unchanged.
+    let raw = sha256_hex(&[bytes.as_slice()]);
+    let renamed_meta = json!({
+        "schema": 1, "game": "dt", "map": "map01.dtm", "kind": "quick", "device_id": DEVICE_A, "device": "PC",
+        "name": "renamed", "saved_at": NOW, "razdor": "1.5.4", "size": bytes.len(), "sha256": raw,
+        "raw_sha256": raw, "pinned": true
+    });
+    let renamed = frame::encode(&renamed_meta, &bytes).expect("frames");
+    let again = call(&app, "PUT", "/v1/saves", &key_header(&key), renamed).await;
+    assert_eq!(again.status, StatusCode::OK);
+    assert_eq!(again.json()["id"], first.json()["id"]);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves WHERE pinned = 1").await, 0, "the row keeps its own pin");
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 1);
+}
+
+#[tokio::test]
+async fn a_save_with_other_content_is_a_new_row() {
+    let h = harness("save-other", Limits::default());
+    let key = account(&h).await;
+    let app = router(h.st.clone());
+    let bytes = b"the first save".to_vec();
+    let other = b"a different save".to_vec();
+    let first = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map01.dtm", "manual", &bytes)).await;
+    let second = call(&app, "PUT", "/v1/saves", &key_header(&key), save_frame("dt", "map01.dtm", "manual", &other)).await;
+    assert_eq!(second.status, StatusCode::OK);
+    assert_ne!(first.json()["id"], second.json()["id"]);
+    assert_eq!(second.json()["used_bytes"], json!(bytes.len() + other.len()));
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM saves").await, 2);
+}
+
+#[tokio::test]
+async fn a_retried_account_creation_with_the_same_key_makes_one_account() {
+    let h = harness("account-retry", Limits::default());
+    let key = "ab".repeat(32);
+    let body = json!({ "schema": 1, "key": key });
+    let first = post_json(&h, "/v1/account", &body).await;
+    let second = post_json(&h, "/v1/account", &body).await;
+    assert_eq!(first.status, StatusCode::OK);
+    assert_eq!(second.status, StatusCode::OK);
+    assert_eq!(first.json()["key"], json!(key));
+    assert_eq!(second.json()["key"], json!(key));
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM accounts").await, 1);
+    let app = router(h.st.clone());
+    assert_eq!(call(&app, "GET", "/v1/saves", &key_header(&key), vec![]).await.status, StatusCode::OK);
+
+    // Without a key the server makes one, as before.
+    let made = account(&h).await;
+    assert_eq!(made.len(), 64);
+    assert_ne!(made, key);
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM accounts").await, 2);
+}
+
+#[tokio::test]
+async fn an_invalid_account_key_is_a_bad_request() {
+    let h = harness("account-bad-key", Limits::default());
+    for key in ["zz".repeat(32), "ab".repeat(8)] {
+        let r = post_json(&h, "/v1/account", &json!({ "schema": 1, "key": key })).await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "key {key}");
+    }
+    assert_eq!(cloud_count(&h, "SELECT COUNT(*) FROM accounts").await, 0);
+}
+
+#[tokio::test]
+async fn a_429_says_how_long_to_wait() {
+    let limits = Limits { ip_per_minute: 1, ip_flood_strikes: 5, ..Limits::default() };
+    let h = harness("retry-after", limits);
+    assert_eq!(post_json(&h, "/v1/ping", &ping_body(&install(21))).await.status, StatusCode::OK);
+    let refused = post_json(&h, "/v1/ping", &ping_body(&install(22))).await;
+    assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS);
+    // The minute window opened at NOW, so the honest wait is the whole minute.
+    assert_eq!(refused.headers.get(header::RETRY_AFTER).and_then(|v| v.to_str().ok()), Some("60"));
 }

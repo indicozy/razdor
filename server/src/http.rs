@@ -37,7 +37,8 @@ pub enum ApiError {
     TooLarge(String),
     /// The stored files are over the storage budget (507, no new uploads until space frees).
     Full(String),
-    Limited,
+    /// A 429: the seconds until the window frees (or the ban ends), sent as `Retry-After`.
+    Limited(u64),
     Internal(String),
 }
 
@@ -62,9 +63,11 @@ impl IntoResponse for ApiError {
             ApiError::Conflict(m) => error_body(409, m),
             ApiError::TooLarge(m) => error_body(413, m),
             ApiError::Full(m) => error_body(507, m),
-            ApiError::Limited => {
+            ApiError::Limited(secs) => {
                 let mut r = error_body(429, "rate limit");
-                r.headers_mut().insert(header::RETRY_AFTER, "60".parse().expect("a header value"));
+                // At least one second: a zero would say "retry now" to a client that is still refused.
+                let secs = secs.max(1);
+                r.headers_mut().insert(header::RETRY_AFTER, secs.to_string().parse().expect("a header value"));
                 r
             }
             ApiError::Internal(m) => {

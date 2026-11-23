@@ -5,6 +5,8 @@
 //! Keyed requests carry the account key in `x-razdor-key`; the server keeps only its SHA-256.
 
 
+use std::net::IpAddr;
+
 use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -31,10 +33,11 @@ use crate::state::{sha256_hex, AppState};
 const BENCH_KEPT: i64 = 50;
 
 /// A cloud request is never answered with the silent 200 that a banned analytics sender gets: the
-/// client would forget its key while the account stays. A ban is a 429 with Retry-After instead.
-pub fn cloud_refusal(e: ApiError) -> ApiError {
+/// client would forget its key while the account stays. A ban is a 429 with Retry-After instead,
+/// the seconds until the IP's ban ends.
+pub fn cloud_refusal(st: &AppState, ip: IpAddr, e: ApiError) -> ApiError {
     match e {
-        ApiError::Silent => ApiError::Limited,
+        ApiError::Silent => ApiError::Limited(abuse::ip_ban_retry(st, ip)),
         other => other,
     }
 }
@@ -47,7 +50,8 @@ async fn gate(st: &AppState, headers: &HeaderMap, peer: Peer) -> Result<(), ApiE
             return Ok(());
         }
     }
-    abuse::ip_gate(st, ip_of(st, headers, peer)).await.map_err(cloud_refusal)
+    let ip = ip_of(st, headers, peer);
+    abuse::ip_gate(st, ip).await.map_err(|e| cloud_refusal(st, ip, e))
 }
 
 /// The SHA-256 of the presented account key, when the header is a well-formed key.
@@ -158,6 +162,8 @@ fn meta_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<(String, SaveMeta)> {
 }
 
 /// `POST /v1/account`: a new account. The answer is its key: the only secret, kept by the game.
+/// A device may bring its own key (a retry after a lost answer): a stored key answers with the same
+/// account and changes nothing, so the retry creates no second account.
 pub async fn new_account(
     State(st): State<AppState>,
     peer: Peer,
@@ -165,33 +171,48 @@ pub async fn new_account(
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let ip = ip_of(&st, &headers, peer);
-    abuse::ip_gate(&st, ip).await.map_err(cloud_refusal)?;
-    let _req: AccountNew = match serde_json::from_slice::<AccountNew>(&body).map_err(|e| e.to_string()).and_then(|r| {
+    abuse::ip_gate(&st, ip).await.map_err(|e| cloud_refusal(&st, ip, e))?;
+    let req: AccountNew = match serde_json::from_slice::<AccountNew>(&body).map_err(|e| e.to_string()).and_then(|r| {
         r.validate().map(|()| r).map_err(|e| e.to_string())
     }) {
         Ok(r) => r,
-        Err(msg) => return Err(cloud_refusal(abuse::junk(&st, ip, &msg).await)),
+        Err(msg) => return Err(cloud_refusal(&st, ip, abuse::junk(&st, ip, &msg).await)),
     };
-    // Accounts per IP per day (CGNAT-tolerant: a bucket of many players, not one player).
+    // Accounts per IP per day (CGNAT-tolerant: a bucket of many players, not one player). Every
+    // request counts here, a retry too.
     abuse::account_create_gate(&st, ip).await?;
     budget::cloud_gate(&st)?;
-    let mut raw = [0u8; 32];
-    getrandom::fill(&mut raw).map_err(|e| ApiError::Internal(format!("random: {e}")))?;
-    let key_text = files::hex(&raw);
+    let key_text = match &req.key {
+        Some(key) => key.as_str().to_string(),
+        None => {
+            let mut raw = [0u8; 32];
+            getrandom::fill(&mut raw).map_err(|e| ApiError::Internal(format!("random: {e}")))?;
+            files::hex(&raw)
+        }
+    };
     let key = AccountKey::parse(&key_text).map_err(|e| ApiError::Internal(e.to_string()))?;
     let id = files::new_id()?;
     let key_hash = sha256_hex(&[key_text.as_bytes()]);
     let now = st.clock.now();
-    st.cloud
+    // The check and the insert share one transaction (the cloud writes are serialized anyway).
+    let created = st
+        .cloud
         .call(move |c| {
-            c.execute(
-                "INSERT INTO accounts (id, key_hash, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
-                params![id, key_hash, now],
-            )?;
-            Ok(())
+            let tx = c.transaction()?;
+            let known: i64 = tx.query_row("SELECT COUNT(*) FROM accounts WHERE key_hash = ?1", params![key_hash], |r| r.get(0))?;
+            if known == 0 {
+                tx.execute(
+                    "INSERT INTO accounts (id, key_hash, created_at, last_active) VALUES (?1, ?2, ?3, ?3)",
+                    params![id, key_hash, now],
+                )?;
+            }
+            tx.commit()?;
+            Ok(known == 0)
         })
         .await?;
-    count_op(&st, "account_new").await?;
+    if created {
+        count_op(&st, "account_new").await?;
+    }
     Ok(json(&AccountCreated { key }))
 }
 
@@ -291,7 +312,7 @@ pub async fn link_redeem(
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let ip = ip_of(&st, &headers, peer);
-    abuse::ip_gate(&st, ip).await.map_err(cloud_refusal)?;
+    abuse::ip_gate(&st, ip).await.map_err(|e| cloud_refusal(&st, ip, e))?;
     // Every attempt, right or wrong, is rate-limited per IP (429): a wrong code is no junk strike.
     abuse::redeem_gate(&st, ip)?;
     let req: LinkRedeem = match serde_json::from_slice::<LinkRedeem>(&body)
@@ -299,7 +320,7 @@ pub async fn link_redeem(
         .and_then(|r| r.validate().map(|()| r).map_err(|e| e.to_string()))
     {
         Ok(r) => r,
-        Err(msg) => return Err(cloud_refusal(abuse::junk(&st, ip, &msg).await)),
+        Err(msg) => return Err(cloud_refusal(&st, ip, abuse::junk(&st, ip, &msg).await)),
     };
     let code = LinkCode::parse(&req.code).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let now = st.clock.now();
@@ -385,7 +406,6 @@ pub async fn put_save(
     if meta.device_id.is_empty() || meta.raw_sha256.is_empty() {
         return Err(ApiError::BadRequest("a save needs its device id and its raw hash".into()));
     }
-    let save_id = files::new_id()?;
     let bytes = bytes.to_vec();
     let device_cap = st.cfg.limits.saves_per_device as i64;
     let account_cap = st.cfg.limits.saves_per_account as i64;
@@ -394,12 +414,30 @@ pub async fn put_save(
     let size = meta.size as i64;
     let now = st.clock.now();
     let root = st.root.clone();
-    let row_id = save_id.clone();
+    let row_id = files::new_id()?;
     let account = id.clone();
-    let used = st
+    let (saved, used) = st
         .cloud
         .call(move |c| {
             let tx = c.transaction()?;
+            // A retry of a save the server already holds (its answer was lost): the same row answers, and
+            // nothing is written or counted again. Checked before the caps, so a retry never hits one.
+            let held: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM saves WHERE account_id = ?1 AND device_id = ?2 AND raw_sha256 = ?3 AND sha256 = ?4
+                     ORDER BY saved_at, id LIMIT 1",
+                    params![account, meta.device_id, meta.raw_sha256, meta.sha256],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(held) = held {
+                let used: i64 = tx.query_row(
+                    "SELECT COALESCE(SUM(size), 0) FROM saves WHERE account_id = ?1",
+                    params![account],
+                    |r| r.get(0),
+                )?;
+                return Ok((held, used as u64));
+            }
             // The device's cap and the account's (a safety net): the same refusal as a full cloud, so
             // the client shows it alike. The client deletes its own stale rows before it uploads.
             let on_device: i64 = tx.query_row(
@@ -447,11 +485,11 @@ pub async fn put_save(
                 budget::remove(&counted.budget, &path);
                 return Err(e.into());
             }
-            Ok((used + size) as u64)
+            Ok((row_id, (used + size) as u64))
         })
         .await?;
     count_op(&st, "save_put").await?;
-    Ok(json(&SavePut { id: save_id, used_bytes: used }))
+    Ok(json(&SavePut { id: saved, used_bytes: used }))
 }
 
 /// `GET /v1/saves/{id}`: one save, framed (its metadata, then the file).

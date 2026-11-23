@@ -71,6 +71,22 @@ fn bump(w: &mut (i64, u32), now: i64, window: i64) -> u32 {
     w.1
 }
 
+/// Seconds until a fixed window that began at `start` frees: at least one, at most the window.
+fn left(start: i64, window: i64, now: i64) -> u64 {
+    (start + window - now).clamp(1, window) as u64
+}
+
+/// Seconds until an IP's ban ends (the `Retry-After` of a cloud request a ban refused). Sixty when no
+/// ban is held (the caller then has no better number).
+pub fn ip_ban_retry(st: &AppState, ip: IpAddr) -> u64 {
+    let now = st.clock.now();
+    let key = ip_key(st, ip);
+    match st.abuse().ban_of("ip", &key) {
+        Some(b) if b.until > now => (b.until - now).clamp(1, i64::from(u32::MAX)) as u64,
+        _ => 60,
+    }
+}
+
 #[derive(Default)]
 pub struct IpWin {
     minute: (i64, u32),
@@ -225,13 +241,13 @@ pub async fn ip_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
                 }
                 w.strikes += 1;
             }
-            Some(w.strikes >= strikes_to_ban)
+            Some((w.strikes >= strikes_to_ban, left(w.minute.0, 60, now)))
         }
     };
     match flood {
         None => Ok(()),
-        Some(false) => Err(ApiError::Limited),
-        Some(true) => {
+        Some((false, secs)) => Err(ApiError::Limited(secs)),
+        Some((true, _)) => {
             ban_ip(st, key, "request flood", now).await?;
             Err(ApiError::Silent)
         }
@@ -275,14 +291,14 @@ pub async fn install_gate(st: &AppState, install: &str, allow_banned: bool) -> R
     }
     let now = st.clock.now();
     let limit = st.cfg.limits.install_per_minute;
-    let n = {
+    let (n, start) = {
         let mut a = st.abuse();
         a.maybe_prune(now);
         let w = a.installs.entry(install.to_string()).or_default();
-        bump(&mut w.minute, now, 60)
+        (bump(&mut w.minute, now, 60), w.minute.0)
     };
     if n > limit {
-        Err(ApiError::Limited)
+        Err(ApiError::Limited(left(start, 60, now)))
     } else {
         Ok(())
     }
@@ -342,14 +358,14 @@ pub async fn reject(st: &AppState, install: &str, items: u32, msg: String) -> Ap
 pub fn account_gate(st: &AppState, key_hash: &str) -> Result<(), ApiError> {
     let now = st.clock.now();
     let limit = st.cfg.limits.account_per_minute;
-    let n = {
+    let (n, start) = {
         let mut a = st.abuse();
         a.maybe_prune(now);
         let w = a.accounts.entry(key_hash.to_string()).or_insert((0, 0));
-        bump(w, now, 60)
+        (bump(w, now, 60), w.0)
     };
     if n > limit {
-        Err(ApiError::Limited)
+        Err(ApiError::Limited(left(start, 60, now)))
     } else {
         Ok(())
     }
@@ -360,14 +376,14 @@ pub fn account_gate(st: &AppState, key_hash: &str) -> Result<(), ApiError> {
 pub async fn account_create_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let now = st.clock.now();
     let limit = st.cfg.limits.accounts_per_ip_per_day;
-    let n = {
+    let (n, start) = {
         let mut a = st.abuse();
         a.maybe_prune(now);
         let w = a.creates.entry(window_ip(ip)).or_insert((0, 0));
-        bump(w, now, DAY)
+        (bump(w, now, DAY), w.0)
     };
     if n > limit {
-        Err(ApiError::Limited)
+        Err(ApiError::Limited(left(start, DAY, now)))
     } else {
         Ok(())
     }
@@ -391,14 +407,14 @@ pub fn gross_refusals(st: &AppState, install: &str, items: u32, gross: u32) -> b
 pub fn redeem_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let now = st.clock.now();
     let limit = st.cfg.limits.redeem_per_ip_per_minute;
-    let n = {
+    let (n, start) = {
         let mut a = st.abuse();
         a.maybe_prune(now);
         let w = a.redeems.entry(window_ip(ip)).or_insert((0, 0));
-        bump(w, now, 60)
+        (bump(w, now, 60), w.0)
     };
     if n > limit {
-        Err(ApiError::Limited)
+        Err(ApiError::Limited(left(start, 60, now)))
     } else {
         Ok(())
     }
@@ -407,14 +423,14 @@ pub fn redeem_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
 pub fn login_gate(st: &AppState, ip: IpAddr) -> Result<(), ApiError> {
     let now = st.clock.now();
     let limit = st.cfg.limits.login_per_ip_per_ten_minutes;
-    let n = {
+    let (n, start) = {
         let mut a = st.abuse();
         a.maybe_prune(now);
         let w = a.logins.entry(window_ip(ip)).or_insert((0, 0));
-        bump(w, now, 600)
+        (bump(w, now, 600), w.0)
     };
     if n > limit {
-        Err(ApiError::Limited)
+        Err(ApiError::Limited(left(start, 600, now)))
     } else {
         Ok(())
     }
