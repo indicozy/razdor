@@ -38,7 +38,8 @@ The result is a static binary (about 7 MB stripped) in an image of about 7 MB.
 - Podman 4.4 or newer, with the quadlet generator (`/usr/libexec/podman/quadlet`). Rootful: the units
   live in `/etc/containers/systemd/` and run as root; the container itself runs as UID 10001.
 - nginx (the host's), certbot (Let's Encrypt, webroot mode), `sqlite3` and `rsync` (for the backups).
-- cgroup v2 (the default on current distributions), for the memory and CPU caps.
+- cgroup v2, for the memory and CPU caps. Quadlet does not work without it. It is the default on current
+  distributions but not on EL8: see "AlmaLinux 8" below.
 
 ## 3. Ship the image
 
@@ -251,6 +252,67 @@ only if the logs or `podman stats` show the service held back.
 
 Data growth: the stats database grew to about 145 MB for 640 000 events (about 220 bytes an event), with
 the events and pings kept at their retention (see the analytics spec).
+
+## AlmaLinux 8 (the current VPS)
+
+The VPS runs AlmaLinux 8. Its hoster's image was 8.3 (kernel 4.18.0-240). The steps above work there
+with the changes below. They were tested on 2026-11-23, and the host passed a reboot check after each
+step.
+
+Order: make one risky change per reboot, and check the network after each one (`ping -c 50` from home and
+a ping from several countries on check-host.net). If a reboot breaks the network, you then know which
+change did it.
+
+1. Upgrade the image first. The AlmaLinux 8 signing key changed in 2024, so import it before `dnf`:
+
+       rpm --import https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux
+       dnf -y upgrade        # 8.3 to 8.10, kernel 4.18.0-553; then reboot and check
+
+2. Turn on cgroup v2. EL8 boots with cgroup v1, and quadlet needs v2 (`man podman-systemd.unit` says so):
+
+       grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=1"
+       # reboot, then:
+       podman info --format '{{.Host.CgroupsVersion}}'   # prints v2
+
+3. Packages. Podman 4.9 comes from AppStream and has every quadlet key that `razdor-api.container` uses.
+   nginx comes from a module stream (the default stream is 1.14). certbot comes from EPEL.
+
+       dnf -y install epel-release
+       dnf -y module enable nginx:1.24
+       dnf -y install podman nginx certbot sqlite rsync cronie tar
+       firewall-cmd --permanent --add-service=http --add-service=https && firewall-cmd --reload
+
+   sqlite 3.26 is new enough for `backup.sh` (it uses `.backup` and `VACUUM`). The image has no `tar`.
+
+4. sshd: AlmaLinux 8 has no `/etc/ssh/sshd_config.d/`. Edit `/etc/ssh/sshd_config` itself
+   (`PermitRootLogin prohibit-password`, `PasswordAuthentication no`, `ChallengeResponseAuthentication no`),
+   then run `sshd -t` and reload sshd.
+
+5. The certificate: EPEL's certbot 1.22 enables `certbot-renew.timer` itself. Give it the nginx reload
+   with `--deploy-hook "systemctl reload nginx"`, which certbot saves as `renew_hook` in the renewal file.
+
+Known quirks of this host:
+
+- SELinux is disabled in the hoster's image, so the `:Z` on the quadlet's volume does nothing. If SELinux
+  is turned on later, check that nginx can still reach 127.0.0.1:8080.
+- After the 8.3 to 8.10 upgrade, `useradd` prints `sss_cache` warnings ("DB version too old"). SSSD does
+  not run on the host, and the warnings are harmless.
+- The hoster's network drops port 22 from one address after about four SSH connections in a minute. The
+  block lasts about 15 minutes. Ping and the web ports still work, so the host looks up while ssh times
+  out. Use one shared connection for a deploy (`ControlMaster auto`, `ControlPersist 10m` in
+  `~/.ssh/config`), and never retry ssh in a tight loop.
+- A reboot can take two minutes to shut down. sshd stops first, so port 22 refuses connections while ping
+  still answers. Wait about three minutes before you decide that a reboot went wrong.
+
+Monitoring on the host (outside this folder):
+
+- vnstat (EPEL) records the traffic per interface.
+- `txwatch.timer` runs `/usr/local/sbin/txwatch` every hour. If eth0 sent more than 1 GB in the last
+  hour, it logs at crit and writes `/root/TX-ALERT` with the open connections and the top processes.
+- `netsnap.timer` runs `/usr/local/sbin/netsnap` every minute. It appends the eth0 counters and the open
+  connections to `/var/log/netsnap.log` (logrotate keeps 14 days).
+- The journal is persistent (`Storage=persistent`), so the logs from before a reboot are kept.
+- `dnf-automatic.timer` installs security updates only (`upgrade_type = security`). It never reboots.
 
 ## Logs and privacy
 
