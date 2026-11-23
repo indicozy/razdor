@@ -10,7 +10,7 @@ sidebar:
 In the game menu on the map, press the "Photo" button. It is in the row of buttons: "Quit the game", "Exit to menu", "Restart", "Photo", "Cancel".
 
 :::note
-On a computer, the P key turns the mode on too. You can change that key in "Settings" → "Controls" → "Keys…".
+On a computer, the P key turns the mode on too. You can change that key in "Settings" → "Other" → "Keys…".
 :::
 
 On a phone, the mode is turned on by the "Photo" button in the game menu (in the row of six buttons).

@@ -15,11 +15,10 @@ Marks progress from worst to best:
 
 *   **Red**: cheats were used. The tooltip names the command of the first cheat used.
 *   **Yellow**: a cheat from the "Cheats" group of the "Experimental rules" window was enabled. The tooltip names the first cheat on.
-*   **Grey**: gameplay settings differ from the originals. The tooltip indicates the first modified setting.
-*   **Green with an "R"**: completed under Razdor's rules, meaning only fixes from the "Fixes" group were on. A fix is not a cheat, so the mark stays green. The tooltip names the first fix on.
+*   **Green with an "R"**: completed under Razdor's rules. That means fixes from the "Fixes" group of the "Experimental rules" window, or "Maximum" in "Battle AI strength". A fix is not a cheat, so the mark stays green. The tooltip names the first Razdor rule that was on.
 *   **Green**: "Completed honestly." No cheats, fixes, or setting changes were used.
 
-If you are playing from a save file created before the marks appeared, the completion history is unknown. Such a game counts as completed honestly: the mark is green, unless the save itself contains cheats (red), a cheat from the Cheats group (yellow) or changed gameplay settings (grey). The tooltip then says that the game's history is unknown.
+If you are playing from a save file created before the marks appeared, the completion history is unknown. Such a game counts as completed honestly: the mark is green, unless the save itself contains cheats (red) or a cheat from the Cheats group (yellow). The tooltip then says that the game's history is unknown.
 
 :::note
 If you lose a card, no mark is placed.
@@ -31,19 +30,18 @@ Hover your cursor over the checkmark (on a phone, press and hold) to read the re
 
 ## What Affects the Mark
 
-Only gameplay settings affect the color. If one differs from the original game (for the front row, the difficulty and the pursuit, from the install's own setting), the mark becomes grey.
+Only cheats and Razdor's rules change the color: the fixes in the "Experimental rules" window and "Maximum" in "Battle AI strength". The settings that also exist in the original game do not change the mark, at any value.
 
-**The following changes are counted:**
-*   "Battle AI strength";
-*   "Experience on promotion", when it is kept (the original resets it);
-*   "Wide front row in battle (for new games)";
-*   "Impossible difficulty (needs a restart)";
-*   "Automatically pursue the chosen army".
+**These give the green mark with an "R":**
+*   any fix from the "Fixes" group, including "Experience on promotion kept";
+*   "Battle AI strength" set to "Maximum (Razdor)".
 
-Special condition: "Max guards casters" counts only together with the "Maximum" battle AI. "Keep formation after battle" is a convenience and does not count: a default game stays green.
+**These do not affect the mark:**
+*   the game's own settings: "Battle AI strength" set to "Original" or "Improved", "Impossible difficulty", "Wide front row" and "Automatically pursue the chosen army";
+*   "Keep formation after battle" and "Max guards casters";
+*   interface settings: screen, scale, font, minimap, sounds, hints, language, input modes, and keys.
 
-**Do not affect the mark (interface settings):**
-Screen, scale, font, minimap, sounds, hints, language, input modes, and keys.
+There are no grey marks any more. Old grey marks are recounted when they are opened: a mark earned only from the game's own settings becomes green; one earned from "Maximum" or kept experience becomes green with an "R". Yellow and red marks do not change.
 
 ## Best Mark
 
@@ -57,4 +55,4 @@ The campaign line displays the worst mark among all its cards. This mark will on
 
 ## Saving Progress
 
-The mark is stored within the save file itself. Loading a save from the same session does not remove an already obtained mark: if cheats or modified settings were used in that session, it will remain red or grey.
+The mark is stored within the save file itself. Loading a save from the same session does not remove an already obtained mark: if cheats or modified settings were used in that session, it will remain red.

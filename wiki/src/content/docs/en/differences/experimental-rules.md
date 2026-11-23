@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-On the scenario screen, next to the "Next" button, there is a "..." button. It opens the "Experimental rules" window with seventeen switches that change the game rules. They are in two groups: **"Fixes"** and **"Cheats"**.
+On the scenario screen, next to the "Next" button, there is a "..." button. It opens the "Experimental rules" window with eighteen switches that change the game rules. They are in two groups: **"Fixes"** and **"Cheats"**.
 
 The original game has none of these switches. For a new game all of them are off by default, so the game follows the original's rules.
 
@@ -38,6 +38,7 @@ Fixes change behaviour that the original shows as a bug or as something that doe
 * **Death curse on counter blows:** if a counter blow kills a unit with the death curse, the attacker dies too. In the original, the attacker survives.
 * **No corpses in garrisons:** a fallen unit cannot enter a castle or fort garrison, and cannot be swapped with one. In the original, it can.
 * **Strict initiative order:** the next to act is always the group with the highest initiative, even if it rose during the battle. In the original, a group whose initiative rose after its place in the queue had passed waits for its turn.
+* **Experience kept on promotion** ("Experience on promotion kept", off by default): after a unit is promoted, it keeps its experience. In the original, the experience is reset. Part of the "Razdor's rules" preset.
 
 ## Cheats
 
@@ -79,4 +80,4 @@ On the settings tabs, there are two additional Razdor parameters:
 
 ## "Maximum" Protects Mages
 
-On the "Battle and army" tab, there is a parameter called **"Protects mages"**, which is on by default. When enabled, "Maximum" will not place their mage or healer where a single enemy strike would kill them, if a move exists that avoids this. The original AI does not do this; disable the parameter to make "Maximum" play as before.
+On the "Game and battle" tab, there is a parameter called **"Protects mages"**, which is on by default. When enabled, "Maximum" will not place their mage or healer where a single enemy strike would kill them, if a move exists that avoids this. The original AI does not do this; disable the parameter to make "Maximum" play as before.

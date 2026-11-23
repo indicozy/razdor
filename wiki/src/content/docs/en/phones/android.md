@@ -40,7 +40,7 @@ The "Sound, graphics and gameplay settings" window scrolls with a finger or the 
 
 ### Touchpad Mode
 
-Touchpad mode is disabled by default. It is enabled by checking the **"Touchpad mode"** box in the "Sound, graphics and gameplay settings" window (the last item in the list). The screen works like a laptop touchpad, and the game itself draws the cursor:
+Touchpad mode is disabled by default. It is enabled by checking the **"Touchpad mode"** box on the **"General"** tab of the "Sound, graphics and gameplay settings" window (under the checkboxes). The screen works like a laptop touchpad, and the game itself draws the cursor:
 
 * Dragging one finger moves the cursor wherever your finger is;
 * A tap performs a left-click at the cursor's position;

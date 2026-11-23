@@ -13,7 +13,7 @@ Cloud saves are off for now. Their rows will appear in the game when the server 
 
 ## Turning it on
 
-Open **Settings**, the **Other** tab, and turn on **Cloud saves**. If there is no account yet, turning it on creates one.
+Open **Settings**, the **Cloud** tab, and turn on **Cloud saves**. If there is no account yet, turning it on creates one.
 
 Without an account nothing is sent. The same switch turns the cloud off. The account key stays on the device.
 

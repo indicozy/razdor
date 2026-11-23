@@ -41,9 +41,9 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Quick Battle:** autobattle via `Q` or `Enter`; battle replay (`W`) with 1×, 2×, or 4× speed.
 * **Restart and Retreat** in the leave-battle window: start the battle again, or leave it at any moment the game allows. The battle is undone, as if it had not been fought, but the chronicle counts it lost ([more](/razdor/wiki/en/tutorials/quick-battle/)).
 * **New Game:** campaigns are grouped into a single line; the list can be filtered and sorted; "Add map..." button.
-* **Experimental Scenario Rules:** sixteen toggles for new games; selections are remembered between games (see [Experimental Rules](/razdor/wiki/en/differences/experimental-rules/)).
+* **Experimental Scenario Rules:** eighteen toggles for new games; selections are remembered between games (see [Experimental Rules](/razdor/wiki/en/differences/experimental-rules/)).
 * **Save formation** in additional settings.
-* **Experience on promotion** in additional settings: as in the original, a unit's experience is dropped when it is promoted to a new class; "Kept" keeps it.
+* **Experience kept on promotion** in the "Experimental rules" window (the "Fixes" group): as in the original, a unit's experience is dropped when it is promoted to a new class; with this switch on, it is kept.
 * **Leader's name under the event picture:** when an event fires on meeting an army, its window writes the army's leader name under the picture; turn it off in the additional settings ("Leader's name").
 * **Minimap corner** in additional settings: the minimap can be placed in any corner, and the "Reset" button will return it to its default size and position.
 * **2.5D map view** in additional settings ("Map view", off by default): the map is tilted, and the figures stand on the ground, and the buildings stand as whole pictures, as in the flat view. Q and E turn the map 45°; on a phone, the two-finger turn is switched on by the "Two-finger turn" setting. A compass button next to the bottom bar appears while the map is turned, and brings it back to north up. "Sprite size" (1×, 1.5× or 2×) is 1.5× by default.
@@ -56,7 +56,7 @@ Razdor plays the original game's scenarios using its original rules. Below is wh
 * **Cloud shadows** in additional settings (off by default): soft shadows drift slowly over the map, faster while the hero walks. Only the view changes: [details](/razdor/wiki/en/differences/map-look/).
 * **Map decorations** in additional settings (off by default): grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites, "Few" or "Normal". Only the view changes: they do not affect movement and never lie on roads or buildings.
 * **Natural ground** in additional settings (off by default): the edges of fields, shores and roads bend in smooth curves. "Strong" adds tints to the meadows. Only the view changes. It works with "Ground blending".
-* **Hit shake** in the additional settings on the "Battle and army" tab (off by default): the battle field shakes briefly on a hit, more on a hard hit and when a unit falls. View only.
+* **Hit shake** in the additional settings on the "Game and battle" tab (off by default): the battle field shakes briefly on a hit, more on a hard hit and when a unit falls. View only.
 * **Living map** in additional settings (off by default): smoke rises from the chimneys, flags wave and birds cross the map. Only the view changes.
 * **Extend the map past its edges** in additional settings (off, as in the original, where the area past the edges is black): a short stretch of ground goes on past the map's edges, then the same black fog as the unexplored map. Only the view changes: rules and paths stay as they are.
 * **Map resolution** on the "Map" tab (100%, 75% or 50%, 100% by default): the map is drawn at a lower resolution and stretched over the screen, so a weak phone draws it faster; the bottom bar, minimap, windows and text stay sharp.
@@ -90,7 +90,7 @@ For automatic updates on Windows, macOS, and Linux, the `curl` program is requir
 ## Game AI
 
 * **Improved enemy intelligence** in combat, as found in the original settings.
-* **"Maximum (Razdor)"** — an experimental mode: the enemy calculates moves and responses several actions ahead. Selected on the "Battle and army" tab → "Battle AI strength".
+* **"Maximum (Razdor)"** — an experimental mode: the enemy calculates moves and responses several actions ahead. Selected on the "Game and battle" tab → "Battle AI strength".
 
 :::caution
 After using the cheat console, a save file will be marked with "(cheats)" in the load list.
