@@ -43,8 +43,13 @@ check_one() {
   fi
   case "$code" in
     200|206) ;;
-    403|429)
-      echo "check-game-link: $url refuses the archive for now (HTTP $code): too many downloads, or not public" >&2
+    429)
+      # A throttle (GitVerse limits release downloads), not a dead link: a warning, as long as another
+      # address serves the file (the owner's decision, 2026-11-23).
+      echo "check-game-link: warning: $url throttles downloads for now (HTTP 429); not counted as dead" >&2
+      return 3 ;;
+    403)
+      echo "check-game-link: $url refuses the archive (HTTP $code): not public" >&2
       return 1 ;;
     *)
       echo "check-game-link: $url returned HTTP $code: the link is dead or not public" >&2
@@ -79,15 +84,22 @@ check_one() {
 
 worst=0
 n=0
+alive=0
 while IFS= read -r url; do
   n=$((n + 1))
   rc=0
   check_one "$url" "$n" || rc=$?
-  # A dead link (1) outranks a network error on this machine (2).
+  [ "$rc" -eq 0 ] && alive=$((alive + 1))
+  # A dead link (1) outranks a network error on this machine (2); a throttle (3) counts as neither.
   if [ "$rc" -eq 1 ] || { [ "$rc" -eq 2 ] && [ "$worst" -eq 0 ]; }; then
     worst=$rc
   fi
 done <<< "$urls"
+
+# Throttled everywhere: no address served the file, so nothing shows the link is alive.
+if [ "$worst" -eq 0 ] && [ "$alive" -eq 0 ]; then
+  fail "no game address served the file (every one throttled)"
+fi
 
 if [ "$worst" -eq 0 ]; then
   echo "check-game-link: all $n game addresses are alive"
