@@ -11,6 +11,7 @@ use web_time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use super::save;
+use crate::i18n::n_;
 
 /// A level name this build does not know (one from a newer build, in a file or a cloud payload)
 /// reads as yellow, the safe «not clean» level, so one unknown mark never drops the other marks.
@@ -129,14 +130,14 @@ impl RunMark {
 /// before 2026-11-23, by their catalog names): DT's own options, the convenience «Сохранять расстановку»
 /// and the retired «Unit battle participation». DT's options never count, so these re-grade to green.
 const DT_SETTINGS: [&str; 5] = [
-    "Wide front row in battle (for new games)",
-    "Impossible difficulty (needs a restart)",
+    n_("Wide front row in battle (for new games)"),
+    n_("Impossible difficulty (needs a restart)"),
     "Automatically pursue the chosen army",
     "Unit battle participation",
     "Keep formation after battle",
 ];
 /// Kept XP on promotion: the setting's catalog name, and the name an older build saved. It is a fix now.
-const KEPT_XP_SETTINGS: [&str; 2] = ["Experience on promotion", "Experience on promotion: kept"];
+const KEPT_XP_SETTINGS: [&str; 2] = [n_("Experience on promotion"), "Experience on promotion: kept"];
 /// The battle AI's strength, and «Максимум» (Razdor's; a fix, so green with a «Р»).
 const AI_SETTING: &str = "Battle AI strength";
 const MAXIMUM: &str = "Maximum (Razdor)";
@@ -330,7 +331,7 @@ mod tests {
 
     #[test]
     fn a_grey_mark_of_dt_s_own_settings_is_green_when_re_graded() {
-        let list = [("Wide front row in battle (for new games)", "on (setting value)"), ("Impossible difficulty (needs a restart)", "on (setting value)"), ("Battle AI strength", "As in the original")];
+        let list = [("Wide front row in battle (for new games)", n_("on (setting value)")), ("Impossible difficulty (needs a restart)", n_("on (setting value)")), ("Battle AI strength", "As in the original")];
         assert_eq!(regraded(grey(Reason::Setting("Wide front row in battle (for new games)".into()), &list)), (Level::Green, Reason::Honest));
         // Without a list (a record from before it): the reason's name decides.
         assert_eq!(regraded(grey(Reason::Setting("Unit battle participation".into()), &[])), (Level::Green, Reason::Honest));
@@ -341,7 +342,7 @@ mod tests {
     fn a_grey_mark_that_names_maximum_or_kept_xp_is_a_fix() {
         let max = grey(Reason::Setting("Wide front row in battle (for new games)".into()), &[("Wide front row in battle (for new games)", "off (setting value)"), ("Battle AI strength", "Maximum (Razdor)")]);
         assert_eq!(regraded(max), (Level::Fixes, Reason::Setting("Battle AI strength".into())));
-        let xp = grey(Reason::Setting("Experience on promotion".into()), &[("Impossible difficulty (needs a restart)", "on (setting value)"), ("Experience on promotion", "Kept (Razdor)")]);
+        let xp = grey(Reason::Setting("Experience on promotion".into()), &[("Impossible difficulty (needs a restart)", n_("on (setting value)")), ("Experience on promotion", "Kept (Razdor)")]);
         assert_eq!(regraded(xp), (Level::Fixes, Reason::Setting("Experience on promotion".into())));
     }
 

@@ -297,7 +297,9 @@ pub fn telemetry_allowed() -> bool {
 
 /// Whether the cloud saves show and run (the `cloud` switch; `false` unless the config turns it on).
 pub fn cloud_allowed() -> bool {
-    current().cloud
+    // A snapshot scene can switch it on (`RAZDOR_SCENE_CLOUD_ALLOWED`, for the «Облако» tab's shots); no
+    // player's run sets it.
+    std::env::var_os("RAZDOR_SCENE_CLOUD_ALLOWED").is_some() || current().cloud
 }
 
 /// The cloud saves this device mirrors (`cloud_saves_per_device`, clamped to what the server takes).

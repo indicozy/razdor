@@ -477,12 +477,9 @@ Elemental magic power = Сила магии стихий
 Immunity to magic = Иммунитет к магии
 {name} wears {n} item(s): they will be lost with it. Take them off first to keep them. = У «{name}» надето предметов: {n}, они пропадут вместе с ним. Чтобы сохранить, сначала снимите их.
 Experience on promotion = Опыт при повышении
-Reset (original) = Сбрасывается (оригинал)
-Kept (Razdor) = Сохраняется (Раздор)
 Experience on promotion: kept = Опыт при повышении: сохраняется
 on (setting value) = включено
 off (setting value) = выключено
-As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way. = Как в оригинале, опыт юнита сбрасывается при повышении; «Сохраняется» оставляет его. Опыт, оставшийся после уровня, сохраняется в любом случае.
 # Advanced settings: the hit shake (Razdor's, off by default)
 Hit shake = Тряска от ударов
 Razdor's: a short shake of the battlefield when a unit takes a hit. Stronger on a heavy hit and when a unit dies. Style only. = Раздора: короткая тряска поля боя, когда отряд получает удар. Сильнее при сильном ударе и при гибели отряда. Только вид.
@@ -533,8 +530,10 @@ Attention!\n\nYou cannot go back to the map without finishing the battle!\nTo st
 
 # The settings window's tabs on the left (backlog 1559; one window with tabs, the owner's design 2026-11-09)
 General settings = Основное
-Battle and army = Бой и армия
-Controls = Управление
+Game and battle = Игра и бой
+Impossible difficulty = Невозможная сложность
+Wide front row = Широкий первый ряд
+A setting of DT itself. It does not affect the run's mark. = Настройка самой DT. На отметку прохождения не влияет.
 
 # Advanced settings: the map's zoom
 Map zoom = Масштаб карты

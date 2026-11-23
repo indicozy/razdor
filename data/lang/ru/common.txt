@@ -142,7 +142,6 @@ Sound effects volume = Громкость звуков
 Battle animation speed = Скорость анимаций в битве
 OK = Ок
 Sound, graphics and gameplay settings = Настройки звука, графики и игры
-Improved enemy AI in battle = Улучшенный интеллект противника в бою
 Screen = Экран
 Screen (Alt+Enter) = Экран (Alt+Enter)
 Windowed = В окне
@@ -176,7 +175,7 @@ Bar large = Крупная
 Battle AI strength = Сила ИИ в бою
 Improved = Улучшенный
 Maximum (Razdor) = Максимум (Раздор)
-Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle. = Максимум: перед каждым ходом враг в ваших битвах перебирает ходы и ответы на несколько действий вперёд и доигрывает каждый вариант до конца битвы.
+Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle. Maximum is a Razdor rule: the mark will carry the letter R. = Максимум: перед каждым ходом враг в ваших битвах перебирает ходы и ответы на несколько действий вперёд и доигрывает каждый вариант до конца битвы. Максимум — правило Раздора: отметка будет с буквой Р.
 Auto = Авто
 
 # Unit panel: a negative vampirism is blood loss, Razdor's deviation (ui/unit_sheet.rs)

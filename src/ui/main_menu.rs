@@ -1816,13 +1816,6 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     }
 }
 
-/// The improved AI's checkbox clicked: on gives the improved level, off the original's (and
-/// so ends «Максимум»).
-fn toggle_expert_ai(audio: &mut super::audio::Settings) {
-    let on = expert_ai(audio);
-    set_ai_strength(audio, if on { AiStrength::Original } else { AiStrength::Improved });
-}
-
 /// The battle animation speed (percent): the player's choice, else the install's
 /// `[Options] AnimationSpeed` (the Community's); `None` without either (the vanilla game).
 pub fn anim_speed(audio: &super::audio::Settings) -> Option<f32> {
@@ -1994,7 +1987,7 @@ pub fn open_group(group: Group) {
 
 /// Opens the keys window over the advanced settings (a snapshot scene, and the keys row).
 pub fn open_keys() {
-    open_group(Group::Controls);
+    open_group(Group::Other);
     KEYS_OPEN.with(|o| o.set(true));
     KEYS_FROM_HELP.with(|f| f.set(false));
 }
@@ -2052,22 +2045,23 @@ pub enum Group {
     Map,
     Battle,
     Screen,
-    Controls,
     Other,
+    /// «Облако»: the cloud saves' rows; its tab shows only while `remote_config::cloud_allowed`.
+    Cloud,
 }
 
 impl Group {
     /// The groups, in the settings window's tab order (after the General tab).
-    pub const ALL: [Group; 5] = [Group::Map, Group::Battle, Group::Screen, Group::Controls, Group::Other];
+    pub const ALL: [Group; 5] = [Group::Map, Group::Battle, Group::Screen, Group::Other, Group::Cloud];
 
     /// The group's tab label.
     fn tab(self) -> &'static str {
         match self {
             Group::Map => tr("Map"),
-            Group::Battle => tr("Battle and army"),
+            Group::Battle => tr("Game and battle"),
             Group::Screen => tr("Screen"),
-            Group::Controls => tr("Controls"),
             Group::Other => tr("Other"),
+            Group::Cloud => tr("Cloud"),
         }
     }
 
@@ -2082,8 +2076,8 @@ impl Group {
             Group::Map => "map",
             Group::Battle => "battle",
             Group::Screen => "screen",
-            Group::Controls => "controls",
             Group::Other => "other",
+            Group::Cloud => "cloud",
         }
     }
 
@@ -2091,10 +2085,10 @@ impl Group {
     pub fn rows(self) -> &'static [Row] {
         match self {
             Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
-            Group::Battle => &[Row::WalkSpeed, Row::AnimSpeed, Row::AiStrength, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::Experience, Row::HitShake],
+            Group::Battle => &[Row::AiStrength, Row::Impossible, Row::WideFront, Row::WalkSpeed, Row::AnimSpeed, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::MenuFrame, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation],
-            Group::Controls => &[Row::Keys],
-            Group::Other => &[Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId, Row::CloudSaves, Row::CloudState, Row::CloudSpace, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
+            Group::Other => &[Row::Keys, Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId],
+            Group::Cloud => &[Row::CloudSaves, Row::CloudState, Row::CloudSpace, Row::CloudSync, Row::CloudLink, Row::CloudEnter, Row::CloudPhrase, Row::CloudDelete],
         }
     }
 }
@@ -2147,10 +2141,13 @@ pub enum Row {
     WalkSpeed,
     AnimSpeed,
     AiStrength,
+    /// Razdor's «Невозможная сложность» (`audio::Settings::impossible`, DT's option, read at the next start).
+    Impossible,
+    /// Razdor's «Широкий первый ряд» (`audio::Settings::wide_row`, DT's option, from the next battle).
+    WideFront,
     KeepFormation,
     MaxGuard,
     ArmyArrangement,
-    Experience,
     HitShake,
     Screen,
     InterfaceScale,
@@ -2208,7 +2205,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 83] = [
+pub const ALL: [Row; 84] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -2253,10 +2250,11 @@ pub const ALL: [Row; 83] = [
         Row::WalkSpeed,
         Row::AnimSpeed,
         Row::AiStrength,
+        Row::Impossible,
+        Row::WideFront,
         Row::KeepFormation,
         Row::MaxGuard,
         Row::ArmyArrangement,
-        Row::Experience,
         Row::HitShake,
         Row::Screen,
         Row::InterfaceScale,
@@ -2326,9 +2324,9 @@ pub const ALL: [Row; 83] = [
             Row::LivingMap => Some(tr("Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only.")),
             Row::Holiday => Some(tr("Razdor's: snow on the land, roofs and trees, frozen water, snowfall, garlands and festive hats on the heroes, and a Christmas menu theme from the Hub. Style only.")),
             Row::DepthModel => Some(tr("Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device.")),
-            Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle.")),
+            Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle. Maximum is a Razdor rule: the mark will carry the letter R.")),
+            Row::Impossible | Row::WideFront => Some(tr("A setting of DT itself. It does not affect the run's mark.")),
             Row::ArmyArrangement => Some(tr("Clicks: the first click picks a unit or an item, the second places it. Dragging: a click selects a unit, and a click on an empty cell places the selected one; units and items are also moved by dragging. Both: clicks and dragging at once.")),
-            Row::Experience => Some(tr("As in the original, a unit's experience is dropped when it is promoted; Kept keeps it. Experience left over after a level is kept either way.")),
             Row::HitShake => Some(tr("Razdor's: a short shake of the battlefield when a unit takes a hit. Stronger on a heavy hit and when a unit dies. Style only.")),
             Row::Language => Some(super::language::hint()),
             Row::ChronicleSummary => Some(tr("Razdor's: after a map ends or the hero falls, a page sums up the map: the route, battles, highlights and totals.")),
@@ -2398,8 +2396,15 @@ const PANE_R: f32 = 10.0;
 const GROUP_LABEL: f32 = 14.0;
 
 /// The settings window's tabs, top to bottom: the General one (`None`, the original's rows), then
-/// the five groups.
-const TABS: [Option<Group>; 6] = [None, Some(Group::Map), Some(Group::Battle), Some(Group::Screen), Some(Group::Controls), Some(Group::Other)];
+/// the groups. The «Облако» tab is there only while the remote config's cloud switch is on, so the
+/// bar has no empty tab (`tabs().len()` is what the layouts count).
+fn tabs() -> Vec<Option<Group>> {
+    let mut tabs = vec![None, Some(Group::Map), Some(Group::Battle), Some(Group::Screen), Some(Group::Other)];
+    if razdor::remote_config::cloud_allowed() {
+        tabs.push(Some(Group::Cloud));
+    }
+    tabs
+}
 
 /// A tab's label: the General tab is «Основное».
 fn tab_label(tab: Option<Group>) -> &'static str {
@@ -2423,11 +2428,11 @@ fn bottom_bar_row_shown(phone: bool, portrait: bool) -> bool {
     phone && !portrait
 }
 
-/// The phone's tab column in `col` (dp at `u` px per dp): six tabs of 44 dp with 6 dp gaps. When
-/// they do not fit the column's height the gaps shrink first (2 dp at least), then the tabs, never
-/// under 40 dp; the column does not scroll.
-fn tab_column_rects(col: Rect, u: f32) -> Vec<Rect> {
-    let n = TABS.len() as f32;
+/// The phone's tab column in `col` (dp at `u` px per dp) of `count` tabs: 44 dp tabs with 6 dp gaps.
+/// When they do not fit the column's height the gaps shrink first (2 dp at least), then the tabs,
+/// never under 40 dp; the column does not scroll.
+fn tab_column_rects(col: Rect, u: f32, count: usize) -> Vec<Rect> {
+    let n = count as f32;
     let (mut h, mut gap) = (44.0 * u, 6.0 * u);
     if n * h + (n - 1.0) * gap > col.h {
         gap = ((col.h - n * h) / (n - 1.0)).max(2.0 * u);
@@ -2435,7 +2440,7 @@ fn tab_column_rects(col: Rect, u: f32) -> Vec<Rect> {
             h = ((col.h - (n - 1.0) * gap) / n).max(40.0 * u);
         }
     }
-    (0..TABS.len()).map(|i| Rect::new(col.x, col.y + i as f32 * (h + gap), col.w, h)).collect()
+    (0..count).map(|i| Rect::new(col.x, col.y + i as f32 * (h + gap), col.w, h)).collect()
 }
 
 /// The tab buttons, the selected one drawn pressed (the marble's «down» art). A tab pressed that
@@ -2443,7 +2448,7 @@ fn tab_column_rects(col: Rect, u: f32) -> Vec<Rect> {
 /// that changed the selection.
 fn tab_buttons(rects: &[Rect], size: f32, clip: Option<Rect>) -> bool {
     let mut switched = false;
-    for (tab, r) in TABS.into_iter().zip(rects.iter().copied()) {
+    for (tab, r) in tabs().into_iter().zip(rects.iter().copied()) {
         // A tab of a scrolled column only partly in it is neither drawn nor pressed (as the scroll views' rows).
         if clip.is_some_and(|c| !inside(r, c)) {
             continue;
@@ -2693,7 +2698,7 @@ fn language_row(c: &mut RowCol, geo: &RowGeo) {
 }
 
 /// One row of a settings pane (the same widgets the settings window had them in).
-fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings, over_map: bool) {
+fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings, over_map: bool, install_wide: bool) {
     let yes_no = |on: bool| -> &'static str {
         if on {
             tr("On")
@@ -3121,11 +3126,18 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
                 audio.formation_controls = audio.formation_controls.next();
             }
         }
-        Row::Experience => {
-            // Razdor's deviation (backlog 1529): a promoted unit's XP is dropped as in the original, or kept.
-            let label = if audio.keep_xp_on_promotion { tr("Kept (Razdor)") } else { tr("Reset (original)") };
-            if labelled_row_help(c, geo, tr("Experience on promotion"), label, Row::Experience.help_text()).0 {
-                audio.keep_xp_on_promotion = !audio.keep_xp_on_promotion;
+        Row::Impossible => {
+            // DT's own option («Невозможный уровень сложности»), read at the next start: None follows the install.
+            let on = impossible(audio);
+            if labelled_row_help(c, geo, tr("Impossible difficulty"), if on { tr("Yes") } else { tr("No") }, Row::Impossible.help_text()).0 {
+                audio.impossible = Some(!on);
+            }
+        }
+        Row::WideFront => {
+            // DT's own option («Широкий первый ряд»), from the next battle: None follows the install.
+            let on = wide_row(audio, install_wide);
+            if labelled_row_help(c, geo, tr("Wide front row"), if on { tr("Yes") } else { tr("No") }, Row::WideFront.help_text()).0 {
+                audio.wide_row = Some(!on);
             }
         }
         Row::HitShake => {
@@ -3414,7 +3426,8 @@ fn draw_help_pop(k: f32, phone: bool) {
 }
 
 /// A group's rows in the pane `view`: one column, scrolling when they run past the view.
-fn group_pane(audio: &mut super::audio::Settings, over_map: bool, group: Group, view: Rect, geo: &RowGeo, step: f32, list_k: f32) {
+#[allow(clippy::too_many_arguments)]
+fn group_pane(audio: &mut super::audio::Settings, over_map: bool, group: Group, view: Rect, geo: &RowGeo, step: f32, list_k: f32, install_wide: bool) {
     let top = pane_begin(view, step, list_k);
     let pad = 12.0 * geo.k;
     let mut c = RowCol { x: view.x + pad, w: view.w - 2.0 * pad - 28.0 * list_k, y: top + pad };
@@ -3422,7 +3435,7 @@ fn group_pane(audio: &mut super::audio::Settings, over_map: bool, group: Group, 
     super::dt_font::legacy_metrics_if(geo.btn_size.is_some(), || {
         for row in group.rows() {
             if row.shown(audio) {
-                draw_row(*row, &mut c, geo, audio, over_map);
+                draw_row(*row, &mut c, geo, audio, over_map, install_wide);
             }
         }
     });
@@ -3495,15 +3508,12 @@ fn slider_draw(c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Settings,
 /// The checkboxes of the General tab, top to bottom, as (key, label, on, ink): the original's seven
 /// (`Option5`…`Option11`; the original's `Option4`, «Не загружать музыку и звуки», is removed, the
 /// owner's decision, 2026-11-10), and on a phone the touchpad mode after them.
-fn general_checks(audio: &super::audio::Settings, install_wide: bool) -> Vec<(&'static str, String, bool, Color)> {
+fn general_checks(audio: &super::audio::Settings) -> Vec<(&'static str, String, bool, Color)> {
     let mut checks = vec![
         ("Option5", own("Options", "Option5", n_("Show FPS")), audio.show_fps, CHECK_INK),
         ("Option6", own("Options", "Option6", n_("Turn off hints")), hints_off(audio), CHECK_INK),
         ("Option7", own("Options", "Option7", n_("Automatically pursue the chosen army")), pursue(audio), CHECK_INK),
         ("Option8", own("Options", "Option8", n_("Automatically save the current game")), autosave(audio), CHECK_INK),
-        ("Option9", own("Options", "Option9", n_("Improved enemy AI in battle")), expert_ai(audio), CHECK_INK),
-        ("Option10", own("Options", "Option10", n_("Impossible difficulty (needs a restart)")), impossible(audio), CHECK_INK),
-        ("Option11", own("Options", "Option11", n_("Wide front row in battle (for new games)")), wide_row(audio, install_wide), CHECK_INK),
     ];
     if super::touchpad::MOBILE {
         checks.push(("Touchpad", own("Options", "RazdorTouchpad", n_("Touchpad mode (the screen moves a cursor)")), audio.touchpad.unwrap_or(false), CHECK_INK));
@@ -3519,9 +3529,6 @@ fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
         "Option6" => audio.hints_off = Some(!on),
         "Option7" => audio.pursue = Some(!on),
         "Option8" => audio.autosave = Some(!on),
-        "Option9" => toggle_expert_ai(audio),
-        "Option10" => audio.impossible = Some(!on),
-        "Option11" => audio.wide_row = Some(!on),
         "Touchpad" => audio.touchpad = Some(!on),
         _ => {}
     }
@@ -3530,7 +3537,7 @@ fn toggle_check(audio: &mut super::audio::Settings, key: &str, on: bool) {
 /// The General tab on the desktop: the original's two volume rows and seven checkboxes at their
 /// places in `pane` (they fit it, so it does not scroll), then Razdor's language picker below them.
 /// The speed sliders are on their tabs now.
-fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane: Rect, k: f32) {
+fn general_desktop(audio: &mut super::audio::Settings, pane: Rect, k: f32) {
     let row = |i: usize| Rect::new(pane.x + 10.0 * k, pane.y + i as f32 * 37.5 * k, pane.w - 20.0 * k, 30.0 * k);
     for i in 0..2 {
         let (label, value) = slider_row(audio, i);
@@ -3539,10 +3546,8 @@ fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane:
         }
     }
     let cx = pane.x + 14.0 * k;
-    // The gap sits before the battle group: its first checkbox, «Улучшенный интеллект противника в
-    // битве» (`Option9`), is the fifth of the seven (index 4).
-    let cy = |i: usize| row(2).y + 4.0 * k + i as f32 * 27.0 * k + if i >= 4 { 11.0 * k } else { 0.0 };
-    let checks = general_checks(audio, install_wide);
+    let cy = |i: usize| row(2).y + 4.0 * k + i as f32 * 27.0 * k;
+    let checks = general_checks(audio);
     let n = checks.len();
     for (i, (key, label, on, ink)) in checks.into_iter().enumerate() {
         if option_check(cx, cy(i), &label, on, ink) {
@@ -3559,7 +3564,7 @@ fn general_desktop(audio: &mut super::audio::Settings, install_wide: bool, pane:
 /// The General tab on a phone (dp at `u`): each slider on one line (its label, then its track),
 /// 40 dp high at a 44 dp pitch; each checkbox 34 dp for one line of its label, more when it wraps.
 /// The pane scrolls, and a row only partly in the view is drawn and clicked where it shows.
-fn general_phone(audio: &mut super::audio::Settings, install_wide: bool, view: Rect, u: f32, list_k: f32) {
+fn general_phone(audio: &mut super::audio::Settings, view: Rect, u: f32, list_k: f32) {
     let first = pane_begin(view, 24.0 * u, list_k);
     let x0 = view.x + 4.0 * u;
     let cw = view.w - 28.0 * list_k - 8.0 * u;
@@ -3570,7 +3575,7 @@ fn general_phone(audio: &mut super::audio::Settings, install_wide: bool, view: R
     let top = lang.y;
     let (slider_h, pitch) = (40.0 * u, 44.0 * u);
     let rows: Vec<(String, f32)> = (0..2).map(|i| slider_row(audio, i)).collect();
-    let checks = general_checks(audio, install_wide);
+    let checks = general_checks(audio);
     let lines: Vec<Vec<String>> = checks.iter().map(|c| wrap_label(&c.1, cw - 34.0 * u, 14.0 * u)).collect();
     let check_h: Vec<f32> = lines.iter().map(|l| (10.0 + l.len() as f32 * 18.0).max(34.0) * u).collect();
     let mut y = rows.len() as f32 * pitch + 6.0 * u;
@@ -4188,11 +4193,14 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         let by = inner.y + inner.h - 12.0 * u - bh;
         let (tab_rects, pane, tab_clip) = if window_layout::portrait() {
             let cw = inner.w - 2.0 * pad;
-            let tw = (cw - 2.0 * 6.0 * u) / 3.0;
-            let rects: Vec<Rect> = (0..TABS.len())
+            // Three tabs a row; a last row with fewer (no «Облако») takes the row's width, so no empty tab shows.
+            let count = tabs().len();
+            let rects: Vec<Rect> = (0..count)
                 .map(|i| {
-                    let (col, row) = ((i % 3) as f32, (i / 3) as f32);
-                    Rect::new(inner.x + pad + col * (tw + 6.0 * u), inner.y + 8.0 * u + row * (44.0 * u + 6.0 * u), tw, 44.0 * u)
+                    let (col, row) = (i % 3, i / 3);
+                    let in_row = (count - row * 3).min(3) as f32;
+                    let tw = (cw - (in_row - 1.0) * 6.0 * u) / in_row;
+                    Rect::new(inner.x + pad + col as f32 * (tw + 6.0 * u), inner.y + 8.0 * u + row as f32 * (44.0 * u + 6.0 * u), tw, 44.0 * u)
                 })
                 .collect();
             let pane_top = inner.y + 8.0 * u + 2.0 * 44.0 * u + 6.0 * u + 10.0 * u;
@@ -4205,7 +4213,7 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
             let pane = Rect::new(x, col_top, (inner.x + inner.w - pad - x).max(40.0 * u), col.h);
             // A short window (over the map, a phone held sideways) may not hold six tabs of 40 dp: the
             // column then scrolls, the tabs past its foot neither drawn nor pressed.
-            let mut rects = tab_column_rects(col, u);
+            let mut rects = tab_column_rects(col, u, tabs().len());
             let foot = rects.last().map_or(col.y, |r| r.y + r.h);
             let scroll = tab_column_scroll(col, foot - (col.y + col.h), u);
             for r in rects.iter_mut() {
@@ -4215,8 +4223,8 @@ fn phone_options(audio: &mut super::audio::Settings, install_wide: bool, over_ma
         };
         let switched = tab_buttons(&tab_rects, 14.0 * u, tab_clip);
         match GROUP.with(|g| g.get()) {
-            None => general_phone(audio, install_wide, pane, u, list_k),
-            Some(group) => group_pane(audio, over_map, group, pane, &RowGeo::phone_compact(u), 24.0 * u, list_k),
+            None => general_phone(audio, pane, u, list_k),
+            Some(group) => group_pane(audio, over_map, group, pane, &RowGeo::phone_compact(u), 24.0 * u, list_k, install_wide),
         }
         // The two scale down together when their widths would overlap (`bottom_row_widths`).
         let w = bottom_row_widths(inner.w - 2.0 * pad, &[110.0 * u, 110.0 * u], 8.0 * u);
@@ -4261,14 +4269,14 @@ fn desktop_options(audio: &mut super::audio::Settings, install_wide: bool, over_
     // A window with 0x48d710's inner frames (the options window is c2953a, 634×556, 4d2f48).
     chrome::window_inner_frames(outer, chrome::opx());
     let tab_h = 28.0 * g * k;
-    let tab_rects: Vec<Rect> = (0..TABS.len()).map(|i| Rect::new(outer.x + TAB_X * k, outer.y + 35.0 * k + i as f32 * (tab_h + 6.0 * k), TAB_W * k, tab_h)).collect();
+    let tab_rects: Vec<Rect> = (0..tabs().len()).map(|i| Rect::new(outer.x + TAB_X * k, outer.y + 35.0 * k + i as f32 * (tab_h + 6.0 * k), TAB_W * k, tab_h)).collect();
     // The pane's top is the original's first row (8 px under the frame's top); its foot stops 60 px
     // above the window's foot, above the rule over the buttons.
     let pane = Rect::new(outer.x + PANE_X * k, outer.y + 35.0 * k, (w - PANE_X - PANE_R) * k, (h - 95.0) * k);
     let switched = tab_buttons(&tab_rects, GROUP_LABEL * k * g, None);
     match GROUP.with(|c| c.get()) {
-        None => general_desktop(audio, install_wide, pane, k),
-        Some(group) => group_pane(audio, over_map, group, pane, &RowGeo::desktop(k, g), 40.0 * k, k),
+        None => general_desktop(audio, pane, k),
+        Some(group) => group_pane(audio, over_map, group, pane, &RowGeo::desktop(k, g), 40.0 * k, k, install_wide),
     }
     // «Принять» keeps what was changed, «Отмена» (the close box and Esc too) puts it back.
     let bh = 32.0 * g;
@@ -4297,7 +4305,7 @@ fn desktop_options(audio: &mut super::audio::Settings, install_wide: bool, over_
 /// with «Принять» and «Отмена» at the bottom, as the one window of the settings: its tabs on the
 /// left choose the pane. The keys window stands over it while open. Returns true when closed.
 pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, over_map: bool) -> bool {
-    // The keys window (the Controls tab's «Клавиши…») stands alone while it is open.
+    // The keys window (the Other tab's «Клавиши…») stands alone while it is open.
     if KEYS_OPEN.with(|o| o.get()) {
         if keys_window(audio, over_map) && after_keys_closed() {
             return true;
@@ -4877,9 +4885,9 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::ArmyArrangement, Row::Experience, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
-        scene_help("Experience");
-        assert_eq!(HELP_PINNED.with(|p| p.get()), Row::Experience.help_text());
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::Impossible, Row::WideFront, Row::ArmyArrangement, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
+        scene_help("AiStrength");
+        assert_eq!(HELP_PINNED.with(|p| p.get()), Row::AiStrength.help_text());
         HELP_PINNED.with(|p| p.set(None));
     }
 
@@ -4900,23 +4908,33 @@ mod tests {
         depth::set_unknown(0);
     }
 
-    /// The settings tabs: the General one first (`None`), then the five groups in their order.
+    /// The settings tabs: the General one first (`None`), then the groups in their order; the «Облако»
+    /// tab only while the cloud switch is on (the built-in config keeps it off).
     #[test]
-    fn the_settings_tabs_are_the_general_one_then_the_five_groups() {
-        assert_eq!(TABS.len(), 6);
-        assert_eq!(TABS[0], None);
-        assert_eq!(TABS[1..].iter().map(|t| t.expect("a group")).collect::<Vec<_>>(), Group::ALL.to_vec());
+    fn the_settings_tabs_are_the_general_one_then_the_groups() {
+        assert!(!razdor::remote_config::cloud_allowed());
+        let tabs = tabs();
+        assert_eq!(tabs[0], None);
+        assert_eq!(tabs[1..].iter().map(|t| t.expect("a group")).collect::<Vec<_>>(), Group::ALL[..4].to_vec());
+        assert_eq!(Group::ALL[4], Group::Cloud, "the cloud group is the last one");
         assert_eq!(tab_label(None), tr("General settings"));
+    }
+
+    /// The keys row is the first row of «Прочее» (the owner's request, 2026-11-23).
+    #[test]
+    fn the_keys_row_heads_the_other_tab() {
+        assert_eq!(Group::Other.rows()[0], Row::Keys);
+        assert!(Group::Cloud.rows().iter().all(|r| format!("{r:?}").starts_with("Cloud")));
     }
 
     /// The phone's tab column: six 44 dp tabs with 6 dp gaps when they fit; else the gaps shrink
     /// (2 dp at least), then the tabs, never under 40 dp, and all six stay in the column.
     #[test]
     fn the_tab_column_shrinks_its_gaps_then_its_tabs_to_fit() {
-        let fit = tab_column_rects(Rect::new(0.0, 0.0, 150.0, 294.0), 1.0);
+        let fit = tab_column_rects(Rect::new(0.0, 0.0, 150.0, 294.0), 1.0, 6);
         assert!(fit.iter().all(|r| (r.h - 44.0).abs() < 1e-3), "{fit:?}");
         assert!(fit.windows(2).all(|p| (p[1].y - p[0].y - 50.0).abs() < 1e-3), "{fit:?}");
-        let short = tab_column_rects(Rect::new(0.0, 0.0, 150.0, 250.0), 1.0);
+        let short = tab_column_rects(Rect::new(0.0, 0.0, 150.0, 250.0), 1.0, 6);
         assert_eq!(short.len(), 6);
         assert!(short.iter().all(|r| r.h >= 40.0 - 1e-3), "{short:?}");
         let last = short[5];

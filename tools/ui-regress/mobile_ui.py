@@ -104,7 +104,7 @@ SCREENS = [
     ("options-group-map", "options:map", {}),
     ("options-group-battle", "options:battle", {}),
     ("options-group-screen", "options:screen", {}),
-    ("options-group-controls", "options:controls", {}),
+    ("options-group-cloud", "options:cloud", {"RAZDOR_SCENE_CLOUD": "synced", "RAZDOR_SCENE_CLOUD_ALLOWED": "1"}),
     ("options-group-other", "options:other", {}),
     # The debug mode's strip (Settings → «Прочее», «Режим отладки»): over the main menu and over a map.
     ("title-debug", "title", {"RAZDOR_CASE_AUDIO": '{"debug_mode": true}'}),

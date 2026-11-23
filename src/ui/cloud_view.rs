@@ -1,9 +1,10 @@
-//! The cloud saves' settings (`razdor::cloud`, `ui::cloud_store`): the state line of the «Прочее»
-//! rows and the four windows they open (the link code, the code from another device, the recovery
+//! The cloud saves' settings (`razdor::cloud`, `ui::cloud_store`): the state line of the «Облако»
+//! tab's rows and the four windows they open (the link code, the code from another device, the recovery
 //! phrase, the delete question). The windows use the map import's frame and buttons, as the
 //! analytics' panels do. Off-screen, `RAZDOR_SNAPSHOT` with `RAZDOR_SCENE_CLOUD=off|synced|offline|
 //! full|working|link|enter|phrase|delete` shows a made-up state instead of the worker's, and
-//! `hub-offer` the «Установить то же самое?» window with made-up items.
+//! `hub-offer` the «Установить то же самое?» window with made-up items. `RAZDOR_SCENE_CLOUD_ALLOWED=1`
+//! turns the cloud switch on for a snapshot (the «Облако» tab shows; no player's run sets it).
 //!
 //! The Hub offer: the account's installed Hub items (the worker's `HUB_OFFER`) that this device lacks
 //! are offered once per set, in a window with «Установить» and «Нет». The answered set's fingerprint

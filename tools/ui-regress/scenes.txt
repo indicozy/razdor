@@ -18,7 +18,7 @@ options-1280 | options | 1280x800 |
 options-map-1280 | options:map | 1280x800 |
 options-battle-1280 | options:battle | 1280x800 |
 options-screen-1280 | options:screen | 1280x800 |
-options-controls-1280 | options:controls | 1280x800 |
+options-cloud-1280 | options:cloud | 1280x800 | RAZDOR_SCENE_CLOUD=synced;RAZDOR_SCENE_CLOUD_ALLOWED=1
 options-other-1280 | options:other | 1280x800 |
 scenarios-1280 | scenarios:РК1-Начало пути | 1280x800 |
 rules-menu-1280 | scenarios:РК1-Начало пути | 1280x800 | RAZDOR_SCENE_RULES=1

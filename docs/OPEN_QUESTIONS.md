@@ -8,6 +8,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Wide front row: when it applies** (2026-11-23, the gameplay settings). The original applies the «Широкий первый ряд»
+  option only after a restart; Razdor applies the setting from the next battle (`App::follow_row_setting`). Kept as it is; the
+  row's «?» does not say so. To settle: the owner's call on whether Razdor should wait for a restart as well.
+
 - **Main menu: Direct3D 7 defaults the menu's blending relies on** (2026-11-22, E7.S8). The original never sets
   `ALPHAARG1`/`ALPHAARG2` or stage 0's `COLOROP` around the menu (0x4c7774, 0x4c7d40), so Razdor takes the
   defaults (`TEXTURE`, `CURRENT`, `MODULATE`): the oval buttons keep what is below by one minus texture alpha
