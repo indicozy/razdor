@@ -38,8 +38,8 @@ strips `/api`, so the routes are `/v1/...` on the service) and listens on 127.0.
 | `GET /v1/hub`, `PUT /v1/hub` | installed Hub items | account key |
 | `GET /v1/bench`, `POST /v1/bench` | performance test reports (last 50) | account key |
 | `GET /healthz` | `ok` | none |
-| `GET /admin`, `POST /admin/login`, `POST /admin/unban` | the dashboard (password, cookie session) | password |
-| `GET /admin/api/summary.json` | the dashboard's numbers as JSON | admin token or session |
+| `GET /admin`, `POST /admin/login`, `POST /admin/unban` | the dashboard (password, cookie session): overview cards with week-over-week changes, health badges, charts with release marks (`?days=7\|30\|90`), sortable maps and FPS tables, crash groups with a "new" tag and crashes per 100 players; works on phones and in dark mode | password |
+| `GET /admin/api/summary.json` | the dashboard's numbers as JSON (`?days=` as above) | admin token or session |
 
 Framed bodies (`razdor_wire::frame`): a `u32` length, a JSON header, the raw bytes.
 
