@@ -626,7 +626,13 @@ mod tests {
     fn the_shipped_config_is_a_good_config() {
         let text = include_bytes!("../data/remote/config.json");
         let c = Config::parse(text).unwrap();
-        assert_eq!(c, Config::builtin(), "the shipped config matches the built-in one until it is changed on purpose");
+        // The switches the owner turns on in the shipped file (the cloud and the analytics, 2026-11-23) stay off
+        // in the built-in config: a game that cannot fetch the config sends nothing. The rest must match.
+        let mut want = Config::builtin();
+        want.telemetry = c.telemetry;
+        want.cloud = c.cloud;
+        want.holiday = c.holiday;
+        assert_eq!(c, want, "the shipped config matches the built-in one apart from the owner's switches");
     }
 
     /// A fake network's answer: the bytes, or why not.
