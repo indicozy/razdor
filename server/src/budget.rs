@@ -177,6 +177,10 @@ pub fn disk_free(path: &Path) -> FreeFn {
             }
             s.assume_init()
         };
-        s.f_bavail.saturating_mul(s.f_frsize)
+        // The field types differ by system (macOS: `f_bavail` is u32), so both are widened to u64; on Linux
+        // they already are, which clippy calls a useless conversion.
+        #[allow(clippy::useless_conversion)]
+        let (blocks, size) = (u64::from(s.f_bavail), u64::from(s.f_frsize));
+        blocks.saturating_mul(size)
     })
 }
