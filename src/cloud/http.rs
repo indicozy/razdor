@@ -9,6 +9,17 @@ use std::sync::Arc;
 /// The header that carries the account key ([`razdor_wire::paths::KEY_HEADER`]).
 pub const KEY_HEADER: &str = razdor_wire::paths::KEY_HEADER;
 
+/// The headers of every request to Razdor's own API (cloud saves, telemetry, the server's health):
+/// the app version ([`razdor_wire::paths::VERSION_HEADER`]) and the commit it was built from
+/// ([`razdor_wire::paths::COMMIT_HEADER`], `unknown` without git). The server filters clients by build.
+/// Only the API's transports send them: the downloads and the update feed do not.
+pub fn build_headers() -> [(&'static str, String); 2] {
+    [
+        (razdor_wire::paths::VERSION_HEADER, env!("CARGO_PKG_VERSION").to_string()),
+        (razdor_wire::paths::COMMIT_HEADER, option_env!("RAZDOR_GIT").unwrap_or("unknown").to_string()),
+    ]
+}
+
 /// An HTTP answer: its status and body.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reply {
@@ -68,6 +79,9 @@ impl Net for Curl {
         cmd.args(["-sS", "-X", method, "--max-time"])
             .arg(self.seconds.to_string())
             .args(["-H", "Content-Type: application/octet-stream"]);
+        for (name, value) in build_headers() {
+            cmd.args(["-H", &format!("{name}: {value}")]);
+        }
         // The key goes to curl through a private file (`-H @file`, curl 7.55+), never on the command
         // line, where other local users could read it from the process list. Removed when `_header` drops.
         let _header = match key {
@@ -119,7 +133,8 @@ pub struct Phone {
 #[cfg(target_os = "android")]
 impl Net for Phone {
     fn send(&self, method: &str, url: &str, key: Option<&str>, body: Option<&[u8]>) -> Result<Reply, String> {
-        let (status, body) = crate::update::phone_request(method, url, key, body, self.seconds)?;
+        let [(_, version), (_, commit)] = build_headers();
+        let (status, body) = crate::update::phone_request(method, url, key, body, self.seconds, &version, &commit)?;
         Ok(Reply { status, body })
     }
 }
@@ -166,9 +181,49 @@ fn split_reply(out: &[u8]) -> Result<Reply, String> {
     Ok(Reply { status, body: out[..cut].to_vec() })
 }
 
+/// A one-shot local HTTP server for the transports' tests: it answers the first request with 200
+/// and `ok`, and the thread returns the request's head (its request line and headers) when done.
+#[cfg(test)]
+pub(crate) fn one_request_server() -> (u16, std::thread::JoinHandle<String>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let thread = std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().expect("accept");
+        let mut seen = Vec::new();
+        let mut buf = [0u8; 4096];
+        while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = conn.read(&mut buf).expect("read");
+            if n == 0 {
+                break;
+            }
+            seen.extend_from_slice(&buf[..n]);
+        }
+        conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok").expect("write");
+        String::from_utf8_lossy(&seen).into_owned()
+    });
+    (port, thread)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_api_requests_carry_the_version_and_the_commit() {
+        let (port, server) = one_request_server();
+        let url = format!("http://127.0.0.1:{port}/v1/saves");
+        let key = "k".repeat(32);
+        let reply = Curl { seconds: 10 }.send("GET", &url, Some(&key), None).expect("curl answers");
+        assert_eq!(reply.status, 200);
+        let head = server.join().expect("server");
+        assert!(head.contains(&format!("{KEY_HEADER}: ")), "the key header: {head}");
+        assert!(head.contains(&format!("x-razdor-version: {}", env!("CARGO_PKG_VERSION"))), "the version header: {head}");
+        let commit = option_env!("RAZDOR_GIT").unwrap_or("unknown");
+        assert!(head.contains(&format!("x-razdor-commit: {commit}")), "the commit header: {head}");
+        let names: Vec<&str> = build_headers().iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, ["x-razdor-version", "x-razdor-commit"]);
+    }
 
     #[test]
     fn the_status_comes_after_the_body() {

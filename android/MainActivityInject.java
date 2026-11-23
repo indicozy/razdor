@@ -500,11 +500,12 @@ public String razdorDownload(String url, String path, int stallSeconds, int tota
     }
 }
 
-// POSTs the file `bodyPath` (JSON, or a framed body) to `url` for the analytics (`telemetry`). Returns
+// POSTs the file `bodyPath` (JSON, or a framed body) to `url` for the analytics (`telemetry`). `version` and
+// `commit` go in the x-razdor-version and x-razdor-commit headers (`razdor_wire::paths`). Returns
 // "HTTP <code>" and a newline, then the reply's body, whatever the status; a failure returns its text
 // (the Rust side reads the first line: `update::parse_post_reply`). The stall and total limits are as
 // razdorDownload's. Not compiled here: the first device run tests it.
-public String razdorPost(String url, String bodyPath, int stallSeconds, int totalSeconds) {
+public String razdorPost(String url, String bodyPath, String version, String commit, int stallSeconds, int totalSeconds) {
     HttpURLConnection connection = null;
     try {
         connection = (HttpURLConnection) new URL(url).openConnection();
@@ -514,6 +515,8 @@ public String razdorPost(String url, String bodyPath, int stallSeconds, int tota
         connection.setReadTimeout(stallSeconds * 1000);
         connection.setRequestProperty("User-Agent", "razdor");
         connection.setRequestProperty("Content-Type", "application/json");
+        connection.setRequestProperty("x-razdor-version", version);
+        connection.setRequestProperty("x-razdor-commit", commit);
         connection.setFixedLengthStreamingMode(new java.io.File(bodyPath).length());
         try (java.io.InputStream in = new java.io.FileInputStream(bodyPath); java.io.OutputStream out = connection.getOutputStream()) {
             byte[] buffer = new byte[65536];
@@ -548,11 +551,12 @@ public String razdorPost(String url, String bodyPath, int stallSeconds, int tota
 
 // One cloud request (`cloud::http`, the Rust side's `Net`): `method` is GET, POST, PUT or DELETE; `key` is the
 // account key, sent as the x-razdor-key header (`razdor_wire::paths::KEY_HEADER`), "" for none; `bodyPath` is the
-// request body's file ("" for no body). The reply's body is written to `replyPath` as bytes (a save is binary,
+// request body's file ("" for no body). `version` and `commit` go in the x-razdor-version and x-razdor-commit
+// headers (`razdor_wire::paths::VERSION_HEADER`, `COMMIT_HEADER`). The reply's body is written to `replyPath` as bytes (a save is binary,
 // so it never goes through a String). Returns "HTTP <code>", with " retry-after <seconds>" after it when the
 // server sent a Retry-After; "stalled: <why>" for a stall, "timeout: ..." at the cap, or the error's text.
 // The stall and total limits are as razdorDownload's. Called from the cloud worker's thread, never the UI's.
-public String razdorRequest(String method, String url, String key, String bodyPath, String replyPath, int stallSeconds, int totalSeconds) {
+public String razdorRequest(String method, String url, String key, String bodyPath, String replyPath, String version, String commit, int stallSeconds, int totalSeconds) {
     long deadline = System.currentTimeMillis() + totalSeconds * 1000L;
     HttpURLConnection connection = null;
     try {
@@ -562,6 +566,8 @@ public String razdorRequest(String method, String url, String key, String bodyPa
         connection.setReadTimeout(stallSeconds * 1000);
         connection.setRequestProperty("User-Agent", "razdor");
         connection.setRequestProperty("Content-Type", "application/octet-stream");
+        connection.setRequestProperty("x-razdor-version", version);
+        connection.setRequestProperty("x-razdor-commit", commit);
         if (key != null && !key.isEmpty()) {
             connection.setRequestProperty("x-razdor-key", key);
         }

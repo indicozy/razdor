@@ -284,7 +284,9 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
 - `pack.rs`: zstd (level 9) on the client, the SHA-256 of the packed bytes (the hash the server checks), and
   the limits in both directions.
 - `http.rs`: the `Net` transport. Desktop runs `curl` (the key in the `x-razdor-key` header, the body on
-  stdin). Android and iOS have no transport yet: their requests fail as offline.
+  stdin). Android and iOS have no transport yet: their requests fail as offline. Every API request (cloud,
+  telemetry, the health probe) also sends `x-razdor-version` (the app version) and `x-razdor-commit` (the
+  build's commit, `unknown` without git): `build_headers`, on desktop and Android alike; the downloads do not.
 - `api.rs`: the typed calls over `Net`, every body validated both ways. A status maps onto `CloudError`:
   409 `Conflict`, 413 `Full`, 404 `NotFound`, 401 and 403 `Unauthorized`, 408, 429 and 5xx `Offline`, any other
   4xx `Refused`, a bad answer `Bad`.

@@ -466,13 +466,16 @@ fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
 
 /// One POST of `body` to `url` (the analytics' requests, `telemetry`): the status and the reply's
 /// body. A transport failure is `Err`; any HTTP answer is `Ok`, whatever its status. Not retried here.
+/// `version` and `commit` are the build's headers for the API (`cloud::http::build_headers`).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(crate) fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>), String> {
+pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
     use std::io::Write;
     use std::process::Stdio;
     // The body goes on stdin, never on the command line (it can be a few megabytes).
     let mut cmd = curl_base();
     cmd.args(["--max-time", &seconds.to_string(), "-X", "POST", "-H", "Content-Type: application/json"])
+        .args(["-H", &format!("{}: {version}", razdor_wire::paths::VERSION_HEADER)])
+        .args(["-H", &format!("{}: {commit}", razdor_wire::paths::COMMIT_HEADER)])
         .args(["--data-binary", "@-", "-w", "\n%{http_code}", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -491,14 +494,14 @@ pub(crate) fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>
 
 /// One POST (see the desktop's); on the phones it is the phones' own request.
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub(crate) fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>), String> {
-    phone::post(url, body, seconds)
+pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+    phone::post(url, body, seconds, version, commit)
 }
 
 /// One cloud request on Android (`cloud::http::Phone`): the phone's own `HttpURLConnection` (`phone::request`).
 #[cfg(target_os = "android")]
-pub(crate) fn phone_request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32) -> Result<(u16, Vec<u8>), String> {
-    phone::request(verb, url, key, body, seconds)
+pub(crate) fn phone_request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+    phone::request(verb, url, key, body, seconds, version, commit)
 }
 
 /// The desktop's reply: the body, then a line with the status code (`curl -w "\n%{http_code}"`).

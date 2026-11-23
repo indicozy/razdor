@@ -195,19 +195,21 @@ mod android {
 
     /// One POST of `body` to `url` (the analytics' requests). The body goes through a file in the cache
     /// folder, read by the Java side (`razdorPost`), which answers `HTTP <code>` and the reply's body.
-    pub fn post(url: &str, body: &[u8], seconds: u32) -> Result<(u16, Vec<u8>), String> {
+    /// `version` and `commit` are the API headers of the build.
+    pub fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
         secure(url)?;
         let path = cache_dir()?.join(crate::update::fetch_temp_name());
         std::fs::write(&path, body).map_err(|e| format!("post: {e}"))?;
-        let text = java_post(url, &path, seconds);
+        let text = java_post(url, &path, seconds, version, commit);
         let _ = std::fs::remove_file(&path);
         crate::update::parse_post_reply(&text?)
     }
 
     /// One cloud request (`cloud::http::Phone`): `verb` to `url` with the account `key` (its header) and
     /// the `body` (written to a file in the cache folder, read by the Java side's `razdorRequest`). The
-    /// reply's body comes back as bytes, from a file the Java side writes. Any status is `Ok`.
-    pub fn request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32) -> Result<(u16, Vec<u8>), String> {
+    /// reply's body comes back as bytes, from a file the Java side writes. Any status is `Ok`. `version`
+    /// and `commit` are the API headers of the build.
+    pub fn request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
         secure(url)?;
         let dir = cache_dir()?;
         let stem = crate::update::fetch_temp_name();
@@ -216,7 +218,7 @@ mod android {
         if let (Some(path), Some(bytes)) = (&body_path, body) {
             std::fs::write(path, bytes).map_err(|e| format!("request: {e}"))?;
         }
-        let text = java_request(verb, url, key.unwrap_or(""), body_path.as_deref(), &reply, seconds);
+        let text = java_request(verb, url, key.unwrap_or(""), body_path.as_deref(), &reply, seconds, version, commit);
         let result = text.and_then(|text| {
             let code = text.strip_prefix("HTTP ").and_then(|rest| rest.split_whitespace().next()).and_then(|c| c.parse::<u16>().ok());
             match code {
@@ -232,7 +234,7 @@ mod android {
     }
 
     /// The Java side's `razdorRequest`: its reply text (see there); the body is in the `reply` file.
-    fn java_request(verb: &str, url: &str, key: &str, body: Option<&Path>, reply: &Path, seconds: u32) -> Result<String, String> {
+    fn java_request(verb: &str, url: &str, key: &str, body: Option<&Path>, reply: &Path, seconds: u32, version: &str, commit: &str) -> Result<String, String> {
         let reply = reply.to_str().ok_or("the file's path is not text")?;
         let body = match body {
             Some(path) => path.to_str().ok_or("the file's path is not text")?,
@@ -241,16 +243,30 @@ mod android {
         // SAFETY: as in `cache_dir`.
         unsafe {
             let env = attach_jni_env();
-            let sig = "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
+            let sig = "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
             let mid = method(env, activity_class(env).obj, "razdorRequest", sig, false);
             if mid.is_null() || cleared(env) {
                 return Err("razdorRequest is missing".into());
             }
             let (verb, url, key, body, reply) = (string(env, verb), string(env, url), string(env, key), string(env, body), string(env, reply));
+            let (version, commit) = (string(env, version), string(env, commit));
             let stall = crate::update::STALL_SECONDS as i32;
             let answer = Local::new(
                 env,
-                ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, verb.obj, url.obj, key.obj, body.obj, reply.obj, stall, seconds as i32),
+                ((**env).CallObjectMethod.unwrap())(
+                    env,
+                    ACTIVITY,
+                    mid,
+                    verb.obj,
+                    url.obj,
+                    key.obj,
+                    body.obj,
+                    reply.obj,
+                    version.obj,
+                    commit.obj,
+                    stall,
+                    seconds as i32,
+                ),
             );
             if cleared(env) {
                 return Err("the request failed".into());
@@ -260,19 +276,23 @@ mod android {
     }
 
     /// The Java side's `razdorPost`: the file `path` POSTed to `url` (see there for its reply).
-    fn java_post(url: &str, path: &Path, seconds: u32) -> Result<String, String> {
+    fn java_post(url: &str, path: &Path, seconds: u32, version: &str, commit: &str) -> Result<String, String> {
         let path = path.to_str().ok_or("the file's path is not text")?;
         // SAFETY: as in `cache_dir`.
         unsafe {
             let env = attach_jni_env();
-            let sig = "(Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
+            let sig = "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;II)Ljava/lang/String;";
             let mid = method(env, activity_class(env).obj, "razdorPost", sig, false);
             if mid.is_null() || cleared(env) {
                 return Err("razdorPost is missing".into());
             }
             let (url, path) = (string(env, url), string(env, path));
+            let (version, commit) = (string(env, version), string(env, commit));
             let stall = crate::update::STALL_SECONDS as i32;
-            let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32));
+            let reply = Local::new(
+                env,
+                ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, version.obj, commit.obj, stall, seconds as i32),
+            );
             if cleared(env) {
                 return Err("the post failed".into());
             }
@@ -339,7 +359,7 @@ pub use android::{cache_dir, download, download_cancel, download_range, get, get
 
 /// iOS: no POST yet (the analytics stay queued there; `telemetry` retries later).
 #[cfg(target_os = "ios")]
-pub fn post(_url: &str, _body: &[u8], _seconds: u32) -> Result<(u16, Vec<u8>), String> {
+pub fn post(_url: &str, _body: &[u8], _seconds: u32, _version: &str, _commit: &str) -> Result<(u16, Vec<u8>), String> {
     Err("post: not on iOS yet".into())
 }
 

@@ -36,5 +36,11 @@ pub fn save(id: &str) -> String {
 
 /// The account key of a keyed request.
 pub const KEY_HEADER: &str = "x-razdor-key";
+/// The app version (`CARGO_PKG_VERSION`, e.g. `1.5.4`) of every request to the API, so the server
+/// and nginx can tell the builds apart.
+pub const VERSION_HEADER: &str = "x-razdor-version";
+/// The commit the app was built from (its short hash, with `-dirty` on an edited tree; `unknown`
+/// when the build had no git), sent with every request to the API like [`VERSION_HEADER`].
+pub const COMMIT_HEADER: &str = "x-razdor-commit";
 /// The admin token of the verifier and the dashboard's API.
 pub const ADMIN_HEADER: &str = "x-razdor-admin";
