@@ -6,20 +6,13 @@
 //! shows its progress in a window («Moving the saves»); the import runs on a thread behind the same
 //! window, and the screen under it takes no input until the move ends.
 //!
-//! Who is offered the popup (an existing player): decided once, at the process's start, before
-//! anything writes to the cache ([`decide_at_start`]). A private cache that already holds files
-//! is an older install (older releases kept their picture cache and their update files there);
-//! an empty one is a fresh install, which never sees the popup. The decision is kept in the app's
-//! folder (`saves-move`: "existing", "offered", "fresh" or "done"). The popup is offered once: the
-//! start that shows it writes "offered", so no later start shows it again, whatever the player
-//! answered; a successful import writes "done". The settings' «Перенести сохранения из старой папки
-//! Razdor…» is always there.
+//! The popup is no longer offered at start (the owner's decision, 2026-11-23). The old release's
+//! saves come in only from the settings' «Перенести сохранения из старой папки Razdor…», which
+//! opens this window ([`open_from_settings`]). [`offer_if_due`] serves only the snapshot scene
+//! `RAZDOR_SCENE_SAVES_MOVE`; it writes nothing.
 
 use std::cell::{Cell, RefCell};
 use std::fs;
-use std::path::PathBuf;
-#[cfg(target_os = "android")]
-use std::path::Path;
 use std::thread::JoinHandle;
 
 use razdor::i18n::tr;
@@ -32,21 +25,6 @@ use super::dt_font;
 use super::map_import;
 use super::widgets;
 use macroquad::prelude::*;
-
-/// The file in the app's folder that keeps the decision (see the module doc).
-const MARKER: &str = "saves-move";
-
-/// What the marker says once the start popup is shown: no later start shows it again.
-const OFFERED: &str = "offered";
-
-/// What the marker says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Decision {
-    Fresh,
-    Existing,
-    Offered,
-    Done,
-}
 
 /// The copy's progress from the picker's poll (`razdorOldSavesProgress`): the files copied so far,
 /// and the total once the folder is counted (None while it is being counted).
@@ -85,49 +63,11 @@ local! {
     static FINISHED: Cell<bool> = const { Cell::new(false) };
 }
 
-fn marker() -> Option<PathBuf> {
-    platform::app_dir().map(|dir| dir.join(MARKER))
-}
-
-/// The decision a marker's text says; None for anything else.
-fn parse(text: &str) -> Option<Decision> {
-    match text.trim() {
-        "existing" => Some(Decision::Existing),
-        "fresh" => Some(Decision::Fresh),
-        OFFERED => Some(Decision::Offered),
-        "done" => Some(Decision::Done),
-        _ => None,
-    }
-}
-
-fn decision() -> Option<Decision> {
-    parse(&fs::read_to_string(marker()?).ok()?)
-}
-
-fn write_decision(text: &str) {
-    let Some(path) = marker() else { return };
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let _ = fs::write(path, text);
-}
-
-/// The start of the process, before anything writes to the cache (Android): records whether this
-/// is an older install (`cache` holds files) or a fresh one. A decision already made stands.
-#[cfg(target_os = "android")]
-pub fn decide_at_start(cache: Option<&Path>) {
-    if decision().is_some() {
-        return;
-    }
-    let had_files = cache.and_then(|dir| fs::read_dir(dir).ok()).is_some_and(|mut entries| entries.next().is_some());
-    write_decision(if had_files { "existing" } else { "fresh" });
-}
-
-/// Whether the popup at start is due: only once a usable game install is loaded (never over the
-/// no-install screen or a download), and only for an older install (the decision says existing).
-/// `snapshot` is the snapshot's `RAZDOR_SCENE_SAVES_MOVE` fake, which stands in for the decision.
-fn due(loaded: bool, snapshot: bool, decision: Option<Decision>) -> bool {
-    loaded && (snapshot || decision == Some(Decision::Existing))
+/// Whether the popup is due: never at start any more (the owner's decision, 2026-11-23). Only the
+/// snapshot's `RAZDOR_SCENE_SAVES_MOVE` fake, and only once a usable game install is loaded (never
+/// over the no-install screen or a download).
+fn due(loaded: bool, snapshot: bool) -> bool {
+    loaded && snapshot
 }
 
 /// The snapshot's popup fake: `RAZDOR_SCENE_SAVES_MOVE` with `RAZDOR_SNAPSHOT` (a copy's fake is
@@ -136,19 +76,14 @@ fn snapshot_popup() -> bool {
     std::env::var_os("RAZDOR_SNAPSHOT").is_some() && std::env::var("RAZDOR_SCENE_SAVES_MOVE").is_ok_and(|scene| copy_fake(&scene).is_none())
 }
 
-/// Offers the popup once in this run, when [`due`] says so (`loaded`: a usable install is loaded).
-/// Showing it writes [`OFFERED`] at once, so the popup is not due at the next start, whatever the
-/// player answers (and even if the process ends while the picker is open). The snapshot writes nothing.
+/// Offers the popup once in this run, when [`due`] says so: only the snapshot scene
+/// `RAZDOR_SCENE_SAVES_MOVE` gets it (`loaded`: a usable install is loaded). Writes nothing.
 pub fn offer_if_due(loaded: bool) {
     if SHOWN.get() || STATE.with_borrow(|s| !matches!(s, State::Hidden)) {
         return;
     }
-    let snapshot = snapshot_popup();
-    if due(loaded, snapshot, decision()) {
+    if due(loaded, snapshot_popup()) {
         SHOWN.set(true);
-        if !snapshot {
-            write_decision(OFFERED);
-        }
         STATE.with_borrow_mut(|s| *s = State::Offer(true, None));
     }
 }
@@ -283,12 +218,11 @@ fn start_import(popup: bool) -> State {
     }
 }
 
-/// The import's end, on the main thread: a success records the move as done (the popup is gone for
-/// good); a failure is offered again with its reason.
+/// The import's end, on the main thread: a success is shown and the App reads the hub again; a
+/// failure is offered again with its reason.
 fn finish_import(popup: bool, joined: std::thread::Result<Import>) -> State {
     match joined {
         Ok(Ok(release)) => {
-            write_decision("done");
             FINISHED.set(true);
             State::Done(outcome_text(&release))
         }
@@ -449,49 +383,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_popup_at_start_waits_for_a_loaded_game_and_an_older_install() {
-        // Never over the no-install screen or a download: only once a usable install is loaded.
-        assert!(!due(false, false, Some(Decision::Existing)));
-        assert!(!due(false, true, None), "the snapshot's fake needs a loaded game too");
-        // An older install's saves not yet moved: due, with the game loaded.
-        assert!(due(true, false, Some(Decision::Existing)));
-        // A fresh install, or a move already done, never sees it.
-        assert!(!due(true, false, Some(Decision::Fresh)));
-        assert!(!due(true, false, Some(Decision::Done)));
-        assert!(!due(true, false, None));
+    fn the_popup_is_never_due_at_start_only_for_the_snapshot_fake() {
+        // A real player never sees the popup at start, whatever the install holds.
+        assert!(!due(true, false));
+        // The snapshot's fake needs a loaded game too.
+        assert!(due(true, true));
+        assert!(!due(false, true));
     }
 
     #[test]
-    fn the_popup_at_start_is_shown_once_then_never_again() {
-        // First start of an older install: due. The start that shows it writes OFFERED.
-        assert!(due(true, false, Some(Decision::Existing)));
-        let written = parse(OFFERED);
-        assert_eq!(written, Some(Decision::Offered));
-        // Every later start, whatever the player answered («Не сейчас», closed, a cancelled or wrong
-        // folder, or the process ended): the marker no longer makes the popup due.
-        assert!(!due(true, false, written));
-        assert!(!due(true, false, parse("offered\n")));
-        // A successful move writes done: never due again either.
-        assert!(!due(true, false, parse("done")));
-    }
-
-    #[test]
-    fn the_settings_row_opens_the_window_whatever_the_marker_says() {
-        // The settings' button does not read the marker: the window opens for any decision.
+    fn the_settings_row_opens_the_window() {
         assert!(!open());
         open_from_settings();
         assert!(open());
         STATE.with_borrow_mut(|s| *s = State::Hidden);
-    }
-
-    #[test]
-    fn the_marker_says_existing_offered_fresh_or_done() {
-        assert_eq!(parse("existing\n"), Some(Decision::Existing));
-        assert_eq!(parse("offered"), Some(Decision::Offered));
-        assert_eq!(parse("fresh"), Some(Decision::Fresh));
-        assert_eq!(parse(" done "), Some(Decision::Done));
-        assert_eq!(parse("moved by hand"), None, "anything else is no decision");
-        assert_eq!(parse(""), None);
     }
 
     #[test]

@@ -102,16 +102,10 @@ into the app's saves folder with the saves import's rules: an identical save is 
 number, a settings file that is there is kept, pins are merged; files the saves folder does not hold are ignored. The copy's `hub` folder merges into the app's hub
 (`hub::import_old`): each entry of its `installed.json` comes in with its files when the local hub does not have that id and
 no file of it exists locally (no duplicate entries, no overwritten file).
-The popup «Сохранения старой версии» is offered once per run on the main menu (`saves_move::offer_if_due(loaded)`: only once a
-usable install is loaded, never over the no-install screen or a download) while the
-decision says existing. `saves_move::decide_at_start` (in `main`, before the threads write to the cache) takes it: files
-in the private cache (`getCacheDir`, where older releases kept their picture cache and update files) mean an older
-install, an empty one a fresh install. The decision is kept in `<files>/Razdor/saves-move` ("existing", "offered", "fresh", "done").
-Showing the popup writes "offered" at once, so the popup is shown only once: «Не сейчас», closing it, a cancelled picker
-or a wrong folder never bring it back at a start. A successful import writes "done". The
-settings' «Перенести сохранения из старой папки Razdor…» (Прочее, Android only, `Row::OldSaves`) is always there.
-Blind spot: an older install whose private cache was cleared (Android's «Clear cache», low storage) reads as fresh, so
-no popup; the settings row still works.
+The popup «Сохранения старой версии» is no longer offered at start (the owner's decision, 2026-11-23): no marker file,
+no decision at start. `saves_move::offer_if_due(loaded)` serves only the snapshot scene `RAZDOR_SCENE_SAVES_MOVE`
+(once a usable install is loaded) and writes nothing. The move is only from Настройки → «Перенести сохранения из старой
+папки Razdor…» (Прочее, Android only, `Row::OldSaves`, opens `saves_move::open_from_settings`).
 
 The scenario-select screen's not-found block
 (`screens::android_not_found`, scaled to the screen) offers only «Проверить снова» and points to the main menu.

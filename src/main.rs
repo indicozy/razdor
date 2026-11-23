@@ -233,10 +233,6 @@ async fn main() {
     // The picture cache's folder on Android (the app's private cache, not the shared storage).
     #[cfg(target_os = "android")]
     razdor::platform::set_private_cache_dir(ui::android::private_cache_dir());
-    // Whether this install is an older one (its private cache holds files already), before the
-    // threads below write to the cache: the popup of the saves of an older release depends on it.
-    #[cfg(target_os = "android")]
-    ui::saves_move::decide_at_start(razdor::platform::cache_dir().as_deref());
     // The phones' folders are tidied off the main thread (the old picture cache goes, `.nomedia`).
     razdor::remote_config::start();
     // The analytics (`telemetry`) open here; the day's ping and the last run's crash report are queued
