@@ -39,6 +39,8 @@ local! {
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The rules window's scroll (px) on an upright phone, reset when it closes.
     static RULES_SCROLL: Cell<f32> = const { Cell::new(0.0) };
+    /// The rules window's finger drag of its scroll (`drag_frame`), reset when it closes.
+    static RULES_DRAG: Cell<Option<Drag>> = const { Cell::new(None) };
     /// The scenario group picked (index into the list shown), the list's scroll in pixels
     /// at k = 1, and the hero picked.
     static PICKED: Cell<usize> = const { Cell::new(0) };
@@ -1688,6 +1690,13 @@ fn slots_hint(six_cells: bool) -> &'static str {
     }
 }
 
+/// A row or choice button's press counts only when the press was no drag of the window's scroll
+/// (Razdor's phone input, the owner's report of 2026-11-23): a finger drag that ends on a row toggles
+/// nothing.
+fn row_press(pressed: bool, dragging: bool) -> bool {
+    pressed && !dragging
+}
+
 /// The touch target's least side in dp (Razdor's phone rule; the mobile-ui check's limit).
 const TOUCH_DP: f32 = 40.0;
 
@@ -1807,12 +1816,20 @@ fn experimental_menu() {
     let content_h = top_h(cols) + grid_h(cols) + 8.0 * big + lines.len() as f32 * hint_pitch;
     let most = (content_h - view.h).max(0.0);
     let mut scroll = RULES_SCROLL.with(|s| s.get()).clamp(0.0, most);
+    // A finger drag scrolls the window too (Razdor's phone input: the owner's report of 2026-11-23;
+    // a flick alone only moved it). The bar keeps its own drag, so the drag's area stops short of it.
+    // `dragging` is read before `drag_frame` ends the press, so the frame it lifts is a drag too.
+    let mut rules_drag = RULES_DRAG.with(Cell::get);
+    let dragging = rules_drag.is_some_and(|d| d.moved());
     if most > 0.0 {
         swipe_rows(view, 40.0 * big);
         if !input_blocked() && view.contains(crate::ui::widgets::pointer().into()) {
             scroll = wheel_scroll(scroll, wheel()).clamp(0.0, most);
         }
+        let drag_area = Rect::new(view.x, view.y, view.w - bar_w, view.h);
+        scroll = clamp_scroll(drag_frame(&mut rules_drag, drag_area, scroll, 1.0, most, drag_slop()).0, most);
     }
+    RULES_DRAG.with(|d| d.set(rules_drag));
     let content_top = view.y - scroll;
     let grid_top = content_top + top_h(cols);
     // A phone's frame (its title and close cross) is drawn at the phone's dp scale, as the other phone
@@ -1844,7 +1861,7 @@ fn experimental_menu() {
         // A row toggles on a press of its own, only where the pointer is in the visible view (a
         // swipe is no press), so a row scrolled out of view cannot toggle.
         let (_, _, pressed) = if in_view(row) { button_state(row, true) } else { (false, false, false) };
-        if pressed && view.contains(crate::ui::widgets::pointer().into()) { *value = !*value; }
+        if row_press(pressed, dragging) && view.contains(crate::ui::widgets::pointer().into()) { *value = !*value; }
     };
     let clip = super::widgets::Clip::new(view);
     // The «Правила» choice: DT (every fix off) or Razdor's rules (every fix on), each drawn pressed
@@ -1857,7 +1874,7 @@ fn experimental_menu() {
     let mut chosen = None;
     for (rect, label, choice) in choice_rects {
         let (_, _, pressed) = if in_view(rect) { button_state(rect, true) } else { (false, false, false) };
-        if pressed && view.contains(crate::ui::widgets::pointer().into()) {
+        if row_press(pressed, dragging) && view.contains(crate::ui::widgets::pointer().into()) {
             chosen = Some(choice);
         }
         let size = match dp { Some(d) => 17.0 * d, None => normal };
@@ -1925,6 +1942,7 @@ fn experimental_menu() {
     }
     if close || pressed || key(KeyCode::Escape) || key(KeyCode::Enter) {
         RULES_OPEN.with(|p| p.set(false));
+        RULES_DRAG.with(|d| d.set(None));
         keep_rules(rules);
     }
 }
@@ -2462,6 +2480,16 @@ mod tests {
         assert_eq!(scroll, 30.0, "the lines follow the finger");
         let (far, _) = drag_step(&mut drag, false, true, (50.0, -2000.0), 30.0, 2.0, most, 12.0);
         assert_eq!(far, most, "a drag past the end stops at the last line");
+    }
+
+    /// A drag of the rules window that ends on a row or a choice button toggles nothing; a press
+    /// with no drag still does.
+    #[test]
+    fn a_drag_that_ends_on_a_row_presses_nothing() {
+        assert!(row_press(true, false), "a tap toggles the row");
+        assert!(!row_press(true, true), "a drag ending on the row is no press");
+        assert!(!row_press(false, true));
+        assert!(!row_press(false, false));
     }
 
     #[test]

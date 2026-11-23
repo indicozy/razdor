@@ -100,6 +100,13 @@ pub(super) struct Drag {
     moved: bool,
 }
 
+impl Drag {
+    /// Whether the press has moved past the slop since it began (it is a drag, not a tap).
+    pub(super) fn moved(&self) -> bool {
+        self.moved
+    }
+}
+
 /// The most a preview is drawn tall (window units); a phone held upright draws it up to 45% of
 /// the pane instead, the full width.
 const PREVIEW_H: f32 = 150.0;
