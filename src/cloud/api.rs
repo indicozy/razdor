@@ -92,7 +92,7 @@ impl Api {
 
     /// A new account: its key (the game keeps it; the server keeps only its hash).
     pub fn create_account(&self) -> Result<String, CloudError> {
-        let body = Self::json_body(&AccountNew { schema: SCHEMA })?;
+        let body = Self::json_body(&AccountNew { schema: SCHEMA, key: None })?;
         let answer = self.send("POST", paths::ACCOUNT, Some(&body), false)?;
         let created: AccountCreated = Self::decode(&answer)?;
         Ok(created.key.as_str().to_string())

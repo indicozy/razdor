@@ -15,14 +15,24 @@ use crate::limits;
 use crate::{Validate, WireError, WireResult};
 
 /// Creates an account; the answer carries its key (the only secret; no login, no e-mail).
+///
+/// `key`: the key the device made itself and stored before sending, so a retry after a lost answer
+/// creates nothing new: the server answers a known key with the same account (idempotent). Without
+/// it (older builds) the server makes the key, and a retry makes a second account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountNew {
     pub schema: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<AccountKey>,
 }
 
 impl Validate for AccountNew {
     fn validate(&self) -> WireResult {
-        check::schema(self.schema)
+        check::schema(self.schema)?;
+        match &self.key {
+            Some(key) => key.validate(),
+            None => Ok(()),
+        }
     }
 }
 
