@@ -10,7 +10,7 @@ Wants=network-online.target
 [Container]
 # Built on this machine by server/deploy/build.sh and copied to the host with `podman save | ssh ... podman load`.
 # Pin the version here: `podman load` gives the tag it was built with.
-Image=localhost/razdor-api:0.1.0
+Image=localhost/razdor-api:0.1.1
 ContainerName=razdor-api
 
 # The process runs as the image's fixed UID/GID (10001). The data folder on the host must be owned by it.
