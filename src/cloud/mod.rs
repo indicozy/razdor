@@ -123,6 +123,9 @@ pub struct Shared {
     pub download_failed: Option<String>,
     /// How many lists have been read: the «Облако» tab knows its list is new when this moves.
     pub listed: u64,
+    /// A sync failed (not offline, not full): the automatic syncs wait until the player asks again
+    /// («Синхронизировать», turning the cloud on) or the app restarts. Never hammer the server.
+    pub paused: bool,
 }
 
 /// The handle the UI keeps. Cheap to call: requests are queued, state is read from a copy.
@@ -162,8 +165,25 @@ impl Cloud {
         Cloud { tx, shared, queued }
     }
 
-    /// Queues a request. Never waits.
+    /// Queues an automatic request (the start, the exit, minimising). Never waits. While the syncs are
+    /// paused after a failure, a sync, pull, push or refresh is dropped; the player's own jobs are not.
     pub fn request(&self, job: Job) {
+        let paused = lock(&self.shared).paused;
+        if paused && matches!(job, Job::Sync | Job::Pull | Job::Push | Job::Refresh) {
+            crate::diag!("cloud: {job:?} skipped: paused after a failed sync");
+            return;
+        }
+        self.enqueue(job);
+    }
+
+    /// Queues a request the player made («Синхронизировать», turning the cloud on): it also lifts the
+    /// pause after a failed sync. Never waits.
+    pub fn request_by_player(&self, job: Job) {
+        lock(&self.shared).paused = false;
+        self.enqueue(job);
+    }
+
+    fn enqueue(&self, job: Job) {
         self.queued.fetch_add(1, Ordering::SeqCst);
         if self.tx.send(job).is_err() {
             self.queued.fetch_sub(1, Ordering::SeqCst);
@@ -276,6 +296,7 @@ impl Worker {
                 self.backoff_secs = 0;
             }
             Err(e) => {
+                crate::diag!("cloud: {job:?} failed: {e}");
                 let mut sh = lock(&self.shared);
                 if download.is_some() {
                     sh.download_failed = download.clone();
@@ -285,6 +306,9 @@ impl Worker {
                     CloudError::Full => Phase::Full,
                     _ => Phase::Failed,
                 };
+                if sh.phase == Phase::Failed {
+                    sh.paused = true;
+                }
                 let offline = matches!(e, CloudError::Offline(_));
                 sh.last_error = Some(e);
                 drop(sh);
@@ -395,6 +419,7 @@ mod tests {
     use super::*;
     use crate::cloud::http::Reply;
     use crate::cloud::testing::MemLocal;
+    use std::sync::atomic::AtomicUsize;
 
     /// A transport that never answers in time: each call sleeps, then fails like no network.
     struct Slow;
@@ -447,6 +472,57 @@ mod tests {
         }
         assert_eq!(phase, Phase::Offline);
         assert_eq!(cloud.state_of("anything"), SaveState::LocalOnly, "the game still shows its saves");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A transport that answers every call with `status` and counts the calls.
+    struct Refusing {
+        status: u16,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Net for Refusing {
+        fn send(&self, _: &str, _: &str, _: Option<&str>, _: Option<&[u8]>) -> Result<Reply, String> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(Reply { status: self.status, body: b"{\"error\":\"bad\"}".to_vec() })
+        }
+    }
+
+    fn wait_for_phase(cloud: &Cloud, want: Phase) -> bool {
+        for _ in 0..100 {
+            if cloud.snapshot().phase == want {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[test]
+    fn a_failed_sync_pauses_the_automatic_ones_until_the_player_asks() {
+        let d = dir("paused");
+        account::store_key(&d, &"ab".repeat(32)).expect("stores a key");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let net = Refusing { status: 400, calls: calls.clone() };
+        let cloud = Cloud::start(Box::new(MemLocal::new("ПК")), Arc::new(net), "http://127.0.0.1:9", d.clone());
+        cloud.request(Job::Sync);
+        assert!(wait_for_phase(&cloud, Phase::Failed), "a 400 is a failed sync");
+        assert!(cloud.snapshot().paused);
+        assert!(cloud.finish(Duration::from_secs(5)));
+        let after_failure = calls.load(Ordering::SeqCst);
+        assert!(after_failure > 0);
+
+        // The automatic path sends nothing while paused.
+        cloud.request(Job::Push);
+        cloud.request(Job::Pull);
+        assert!(cloud.finish(Duration::from_secs(5)));
+        assert_eq!(calls.load(Ordering::SeqCst), after_failure, "no automatic request after a failure");
+
+        // The player's own sync runs again and lifts the pause.
+        cloud.request_by_player(Job::Sync);
+        assert!(cloud.finish(Duration::from_secs(5)));
+        assert!(calls.load(Ordering::SeqCst) > after_failure, "the player's sync is sent");
+        assert!(cloud.snapshot().paused, "it failed again, so the pause is back");
         let _ = std::fs::remove_dir_all(&d);
     }
 

@@ -102,6 +102,16 @@ pub fn mark_of(id: &str) -> (Option<razdor::cloud::SaveState>, razdor::cloud::Ph
 /// Queues a request. Nothing is sent without an account: only `CreateAccount` starts the worker
 /// then. A switched-off cloud takes no sync or push. Never waits.
 pub fn request(job: Job) {
+    submit(job, false);
+}
+
+/// Queues a request the player made («Синхронизировать», the recovery phrase, turning the cloud on):
+/// unlike [`request`], it runs even after a failed sync paused the automatic ones.
+pub fn request_by_player(job: Job) {
+    submit(job, true);
+}
+
+fn submit(job: Job, by_player: bool) {
     if !active() {
         return;
     }
@@ -110,7 +120,11 @@ pub fn request(job: Job) {
     }
     let mut queue = QUEUE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(c) = CLOUD.get() {
-        c.request(job);
+        if by_player {
+            c.request_by_player(job);
+        } else {
+            c.request(job);
+        }
         return;
     }
     queue.push(job);
@@ -175,9 +189,9 @@ pub fn turn_on() {
     let Some(dir) = cloud_dir() else { return };
     let _ = std::fs::remove_file(dir.join(OFF_FILE));
     if has_account() {
-        request(Job::Sync);
+        request_by_player(Job::Sync);
     } else {
-        request(Job::CreateAccount);
+        request_by_player(Job::CreateAccount);
     }
 }
 
