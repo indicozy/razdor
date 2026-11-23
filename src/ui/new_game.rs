@@ -841,6 +841,10 @@ const MARK_RED: Color = Color::new(1.0, 0.38, 0.34, 1.0);
 /// «Пройдено честно». A grey mark with its settings list (backlog 1678) is a header line and one line
 /// per setting: «Пройдено с настройками не как в оригинале:» then «Сила ИИ в бою — Максимум (Раздор)».
 /// An old mark without the list names only its first setting on one line.
+/// The value «Опыт при повышении» had before it became a fix (2026-11-23): old marks still carry it, so it
+/// keeps its catalog line («Сохраняется (Раздор)»).
+const OLD_KEPT_XP: &str = n_("Kept (Razdor)");
+
 fn mark_lines_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> Vec<String> {
     let one = |s: String| vec![s];
     match &mark.reason {
@@ -855,7 +859,7 @@ fn mark_lines_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> Vec<String>
             let parts: Vec<String> = mark
                 .settings
                 .iter()
-                .filter(|(_, value)| matches!(value.as_str(), "Maximum (Razdor)" | "Kept (Razdor)"))
+                .filter(|(_, value)| value == "Maximum (Razdor)" || value == OLD_KEPT_XP)
                 .map(|(name, value)| format!("{} — {}", t(name), t(value)))
                 .collect();
             let what = if parts.is_empty() { t(setting).to_string() } else { parts.join(", ") };

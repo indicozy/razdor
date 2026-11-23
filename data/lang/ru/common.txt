@@ -175,6 +175,7 @@ Bar large = Крупная
 Battle AI strength = Сила ИИ в бою
 Improved = Улучшенный
 Maximum (Razdor) = Максимум (Раздор)
+Kept (Razdor) = Сохраняется (Раздор)
 Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle. Maximum is a Razdor rule: the mark will carry the letter R. = Максимум: перед каждым ходом враг в ваших битвах перебирает ходы и ответы на несколько действий вперёд и доигрывает каждый вариант до конца битвы. Максимум — правило Раздора: отметка будет с буквой Р.
 Auto = Авто
 
