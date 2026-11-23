@@ -1,7 +1,7 @@
 //! The run's mark (Razdor's, backlog 1532, the owner's decisions): the worst thing a run has used,
 //! shown as a coloured checkmark on the scenario list. A run is a game from the map's start; its
 //! mark rises and never falls: a console cheat (red), a «Читы» switch (yellow), a gameplay setting
-//! that is not the original's (grey), a «Исправления» switch (green with a «Р»), else green. The run keeps it in its save (`Game::run_mark`),
+//! a «Исправления» switch or «Максимум» (green with a «Р»), else green. Grey is retired (2026-11-23): an old grey mark is re-graded on read (`regrade`). The run keeps it in its save (`Game::run_mark`),
 //! and a victory writes the map's best mark ever into the player's `marks.json` (`Records`).
 
 use std::collections::BTreeMap;
@@ -38,7 +38,8 @@ pub enum Level {
     /// Only Razdor's fixes are on (the «Исправления» group, any subset): the run is green with a
     /// «Р» and counts as completed. Added 2026-11-22; a run with a cheat is yellow, not this.
     Fixes,
-    /// A gameplay setting that is not the original's.
+    /// Retired (2026-11-23): nothing produces it. An old grey mark is re-graded on read by
+    /// [`regrade`]; the level stays in the code and on the wire for old files and clients.
     Grey,
     /// A cheat (an experimental «Читы» switch) is on. Also what an unknown level name reads as
     /// (see the `Deserialize` impl above).
@@ -124,6 +125,55 @@ impl RunMark {
     }
 }
 
+/// The gameplay settings a grey mark may name (`ui::audio::Settings::gameplay_differs_from_original`
+/// before 2026-11-23, by their catalog names): DT's own options, the convenience «Сохранять расстановку»
+/// and the retired «Unit battle participation». DT's options never count, so these re-grade to green.
+const DT_SETTINGS: [&str; 5] = [
+    "Wide front row in battle (for new games)",
+    "Impossible difficulty (needs a restart)",
+    "Automatically pursue the chosen army",
+    "Unit battle participation",
+    "Keep formation after battle",
+];
+/// Kept XP on promotion: the setting's catalog name, and the name an older build saved. It is a fix now.
+const KEPT_XP_SETTINGS: [&str; 2] = ["Experience on promotion", "Experience on promotion: kept"];
+/// The battle AI's strength, and «Максимум» (Razdor's; a fix, so green with a «Р»).
+const AI_SETTING: &str = "Battle AI strength";
+const MAXIMUM: &str = "Maximum (Razdor)";
+
+/// Re-grades a grey mark of a run or of a record (grey is retired, 2026-11-23; nothing new produces it).
+/// Pure, so the saves and `marks.json` read the same. Only grey changes; the dates are the caller's.
+///
+/// With the list of settings (`RunMark::settings`): «Максимум» or kept XP makes it `Fixes`, named by that
+/// setting; a list of DT's own settings only (and the AI at «Улучшенный» or «Как в оригинале») makes it
+/// green, `Honest`. Without a list (a record from before it) the reason's name decides: kept XP and the
+/// AI (its value unknown: the cautious reading, «Максимум» may have been used) are `Fixes`, DT's names
+/// are green, and an unknown history stays green. A name nothing knows is `Fixes`, never green.
+pub fn regrade(mut mark: RunMark) -> RunMark {
+    if mark.level != Level::Grey {
+        return mark;
+    }
+    let kept_xp = |name: &str| KEPT_XP_SETTINGS.contains(&name);
+    let dt = |name: &str| DT_SETTINGS.contains(&name) || name == AI_SETTING;
+    let (level, reason) = if mark.settings.is_empty() {
+        match &mark.reason {
+            Reason::Setting(name) if kept_xp(name) || name == AI_SETTING => (Level::Fixes, mark.reason.clone()),
+            Reason::Setting(name) if dt(name) => (Level::Green, Reason::Honest),
+            Reason::Unknown => (Level::Green, Reason::Unknown),
+            _ => (Level::Fixes, mark.reason.clone()),
+        }
+    } else if let Some((name, _)) = mark.settings.iter().find(|(name, value)| (name == AI_SETTING && value == MAXIMUM) || kept_xp(name)) {
+        (Level::Fixes, Reason::Setting(name.clone()))
+    } else if mark.settings.iter().all(|(name, _)| dt(name)) {
+        (Level::Green, Reason::Honest)
+    } else {
+        (Level::Fixes, mark.reason.clone())
+    };
+    mark.level = level;
+    mark.reason = reason;
+    mark
+}
+
 /// A map's best mark ever (`Records`) and the date it was reached (`YYYY-MM-DD`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Record {
@@ -192,9 +242,7 @@ impl Records {
     pub fn from_json(text: &str) -> Records {
         let mut records: Records = serde_json::from_str(text).unwrap_or_default();
         for record in records.maps.values_mut() {
-            if record.mark.reason == Reason::Unknown && record.mark.level == Level::Grey {
-                record.mark.level = Level::Green;
-            }
+            record.mark = regrade(record.mark.clone());
         }
         records
     }
@@ -260,13 +308,72 @@ mod tests {
         RunMark { level, reason, settings: Vec::new() }
     }
 
-    /// A grey mark of the run that noted «Unit battle participation» off (as the tests note it).
-    fn unit_battle_off(level: Level) -> RunMark {
+    /// A mark of the run that noted «Максимум» (Razdor's, a fix: green with a «Р»).
+    fn max_ai(level: Level) -> RunMark {
         RunMark {
             level,
-            reason: Reason::Setting("Unit battle participation".into()),
-            settings: vec![("Unit battle participation".into(), "Off".into())],
+            reason: Reason::Setting("Battle AI strength".into()),
+            settings: vec![("Battle AI strength".into(), "Maximum (Razdor)".into())],
         }
+    }
+
+    /// A mark as an old build or the regrade reads it: the grey level with its reason and list.
+    fn grey(reason: Reason, settings: &[(&str, &str)]) -> RunMark {
+        RunMark { level: Level::Grey, reason, settings: settings.iter().map(|(n, v)| (n.to_string(), v.to_string())).collect() }
+    }
+
+    /// The level and reason `regrade` gives a mark.
+    fn regraded(m: RunMark) -> (Level, Reason) {
+        let r = regrade(m);
+        (r.level, r.reason)
+    }
+
+    #[test]
+    fn a_grey_mark_of_dt_s_own_settings_is_green_when_re_graded() {
+        let list = [("Wide front row in battle (for new games)", "on (setting value)"), ("Impossible difficulty (needs a restart)", "on (setting value)"), ("Battle AI strength", "As in the original")];
+        assert_eq!(regraded(grey(Reason::Setting("Wide front row in battle (for new games)".into()), &list)), (Level::Green, Reason::Honest));
+        // Without a list (a record from before it): the reason's name decides.
+        assert_eq!(regraded(grey(Reason::Setting("Unit battle participation".into()), &[])), (Level::Green, Reason::Honest));
+        assert_eq!(regraded(grey(Reason::Setting("Automatically pursue the chosen army".into()), &[])), (Level::Green, Reason::Honest));
+    }
+
+    #[test]
+    fn a_grey_mark_that_names_maximum_or_kept_xp_is_a_fix() {
+        let max = grey(Reason::Setting("Wide front row in battle (for new games)".into()), &[("Wide front row in battle (for new games)", "off (setting value)"), ("Battle AI strength", "Maximum (Razdor)")]);
+        assert_eq!(regraded(max), (Level::Fixes, Reason::Setting("Battle AI strength".into())));
+        let xp = grey(Reason::Setting("Experience on promotion".into()), &[("Impossible difficulty (needs a restart)", "on (setting value)"), ("Experience on promotion", "Kept (Razdor)")]);
+        assert_eq!(regraded(xp), (Level::Fixes, Reason::Setting("Experience on promotion".into())));
+    }
+
+    #[test]
+    fn an_old_record_without_its_list_is_read_by_its_reason_name() {
+        assert_eq!(regraded(grey(Reason::Setting("Experience on promotion".into()), &[])), (Level::Fixes, Reason::Setting("Experience on promotion".into())));
+        assert_eq!(regraded(grey(Reason::Setting("Battle AI strength".into()), &[])), (Level::Fixes, Reason::Setting("Battle AI strength".into())), "no value: the cautious reading");
+        assert_eq!(regraded(grey(Reason::Unknown, &[])), (Level::Green, Reason::Unknown));
+        assert_eq!(regraded(grey(Reason::Setting("A name nothing knows".into()), &[])), (Level::Fixes, Reason::Setting("A name nothing knows".into())), "never green");
+    }
+
+    #[test]
+    fn only_grey_changes_and_a_regraded_mark_stays() {
+        let yellow = mark(Level::Yellow, Reason::Rule("Six equipment cells".into()));
+        assert_eq!(regrade(yellow.clone()), yellow);
+        let red = mark(Level::Red, Reason::Cheat("god".into()));
+        assert_eq!(regrade(red.clone()), red);
+        let fixes = max_ai(Level::Fixes);
+        assert_eq!(regrade(fixes.clone()), fixes);
+        assert_eq!(regrade(RunMark::start()), RunMark::start());
+        let once = regrade(grey(Reason::Setting("Unit battle participation".into()), &[]));
+        assert_eq!(regrade(once.clone()), once, "idempotent");
+    }
+
+    #[test]
+    fn a_record_on_disk_is_re_graded_and_keeps_its_date() {
+        let text = r#"{"maps":{"one":{"mark":{"level":"grey","reason":{"Setting":"Battle AI strength"},"settings":[["Battle AI strength","Maximum (Razdor)"]]},"date":"2026-11-02"},"two":{"mark":{"level":"grey","reason":{"Setting":"Automatically pursue the chosen army"}},"date":"2026-11-03"}}}"#;
+        let records = Records::from_json(text);
+        let one = records.get("one").unwrap();
+        assert_eq!((one.mark.level, one.date.as_str()), (Level::Fixes, "2026-11-02"));
+        let two = records.get("two").unwrap();
+        assert_eq!((two.mark.level, two.mark.reason.clone(), two.date.as_str()), (Level::Green, Reason::Honest, "2026-11-03"));
     }
 
     /// The order: green, then green with a «Р» (fixes only), grey, yellow, red; a fixes run is
@@ -293,7 +400,7 @@ mod tests {
         let records = Records::from_json(old);
         assert_eq!(records.get("one").unwrap().mark.level, Level::Green);
         assert_eq!(records.get("two").unwrap().mark.level, Level::Yellow, "a stored yellow stays yellow");
-        assert_eq!(records.get("three").unwrap().mark.level, Level::Grey);
+        assert_eq!(records.get("three").unwrap().mark.level, Level::Green, "a grey record re-grades on read: Unit battle participation is DT's");
         assert_eq!(records.get("four").unwrap().mark.level, Level::Red);
         let mut records = records;
         records.record_victory("one", &mark(Level::Fixes, Reason::Rule("Bless once a turn".into())), "2026-11-22");
@@ -411,7 +518,7 @@ mod tests {
         let back = Records::from_json(&r.to_json());
         assert_eq!(back.get("РК1-Начало пути").map(|r| r.mark.level), Some(Level::Green));
         let mut kept = Records::default();
-        kept.record_victory("РК2-Дикие пустоши", &mark(Level::Grey, Reason::Setting("Unit battle participation".into())), "2026-11-02");
+        kept.record_victory("РК2-Дикие пустоши", &mark(Level::Fixes, Reason::Setting("Battle AI strength".into())), "2026-11-02");
         assert_eq!(Records::from_json(&kept.to_json()), kept, "other records are kept as they are");
     }
 
@@ -458,12 +565,12 @@ mod tests {
         assert_eq!(g.run_mark(), RunMark::start(), "a run starts green");
         g.note_settings(&[]);
         assert_eq!(g.run_mark().level, Level::Green, "the original's settings: still green");
-        g.note_settings(&[("Unit battle participation", "Off")]);
-        assert_eq!(g.run_mark(), unit_battle_off(Level::Grey));
+        g.note_settings(&[("Battle AI strength", "Maximum (Razdor)")]);
+        assert_eq!(g.run_mark(), max_ai(Level::Fixes));
         g.note_settings(&[]);
-        assert_eq!(g.run_mark().level, Level::Grey, "a setting changed back does not clean the run");
+        assert_eq!(g.run_mark().level, Level::Fixes, "a setting changed back does not clean the run");
         g.note_cheat("god");
-        assert_eq!(g.run_mark(), RunMark { settings: unit_battle_off(Level::Grey).settings, ..mark(Level::Red, Reason::Cheat("god".into())) });
+        assert_eq!(g.run_mark(), RunMark { settings: max_ai(Level::Fixes).settings, ..mark(Level::Red, Reason::Cheat("god".into())) });
         g.note_settings(&[("Keep formation after battle", "Off")]);
         assert_eq!(g.run_mark().level, Level::Red, "red stays red");
     }
@@ -477,8 +584,8 @@ mod tests {
         };
         assert_eq!(g.run_mark(), mark(Level::Yellow, Reason::Rule("Six equipment cells".into())));
         let mut g2 = game(ExperimentalRules { free_units: true, two_potions: true, ..Default::default() });
-        g2.note_settings(&[("Unit battle participation", "Off")]);
-        assert_eq!(g2.run_mark(), RunMark { settings: unit_battle_off(Level::Grey).settings, ..mark(Level::Yellow, Reason::Rule("At most two potions per character".into())) }, "the first rule on in the panel's order names it; yellow beats grey");
+        g2.note_settings(&[("Battle AI strength", "Maximum (Razdor)")]);
+        assert_eq!(g2.run_mark(), RunMark { settings: max_ai(Level::Fixes).settings, ..mark(Level::Yellow, Reason::Rule("At most two potions per character".into())) }, "the first rule on in the panel's order names it; yellow beats grey");
     }
 
     #[test]
@@ -492,8 +599,8 @@ mod tests {
         loaded.note_settings(&[]);
         assert_eq!(loaded.run_mark().level, Level::Green, "unknown history alone is green");
         let mut changed: Game = serde_json::from_value(old.clone()).unwrap();
-        changed.note_settings(&[("Unit battle participation", "Off")]);
-        assert_eq!(changed.run_mark(), unit_battle_off(Level::Grey), "a changed setting still makes it grey");
+        changed.note_settings(&[("Battle AI strength", "Maximum (Razdor)")]);
+        assert_eq!(changed.run_mark(), max_ai(Level::Fixes), "a changed setting still makes it a fix");
         // A save that records a cheat or a rule keeps that, as its history is known.
         let mut cheated = old.clone();
         cheated["cheats"]["used"] = serde_json::json!(true);

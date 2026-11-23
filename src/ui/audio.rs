@@ -249,8 +249,9 @@ pub struct Settings {
     pub minimap_corner: super::minimap::Corner,
     /// The bottom bar's size on a phone held sideways (`display::BarSize`, the default: largest).
     pub bottom_bar_size: super::display::BarSize,
-    /// Advanced, Razdor's deviation: «Опыт при повышении». Off (the default) is the original's
-    /// reset: a promoted unit's XP is dropped (0x4b1df0); on, it is kept (`Game::keep_xp_on_promotion`).
+    /// The old «Опыт при повышении» setting (2026-11-23 it moved to the «...» window as the rules switch
+    /// `keep_xp`, and its row is gone). Read only to seed the remembered rules once (`ui::language`) and
+    /// to give a save from before the switch its rule at load (`Game::take_old_keep_xp`).
     pub keep_xp_on_promotion: bool,
     /// Advanced, Razdor's deviation: «Сохранять расстановку после боя». On (the default), every
     /// unit goes back after a battle to the cell it had before it (`Game::keep_formation`); off,
@@ -518,28 +519,6 @@ impl Default for Settings {
     }
 }
 
-/// What the install's own `[Options]` say the original does: the values a gameplay setting is
-/// compared with (`Settings::gameplay_differs_from_original`). Read from the install, never the
-/// player's choice (`main_menu::install_originals`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Originals {
-    /// `OptValue9`: the improved enemy AI in battle.
-    pub improved_ai: bool,
-    /// `OptValue11`: the wide front row (6 per row).
-    pub wide_row: bool,
-    /// `OptValue10`: the «impossible» difficulty.
-    pub impossible: bool,
-    /// `OptValue7`: automatically pursue the chosen army.
-    pub pursue: bool,
-}
-
-impl Default for Originals {
-    /// The install's values when it sets none: the improved AI, the impossible level and the
-    /// pursuit as the original shipped them (off, off, on), the wide row on (Razdor's default).
-    fn default() -> Originals {
-        Originals { improved_ai: false, wide_row: true, impossible: false, pursue: true }
-    }
-}
 
 /// The world map's views, in the order the view row cycles them: flat, the 2.5D view, the first-person
 /// view from behind the hero («От третьего лица»), and from the hero's eyes («От первого лица»).
@@ -587,50 +566,24 @@ impl Settings {
         };
     }
 
-    /// The gameplay settings that differ from the original's (empty when none does), which make a
-    /// grey mark (`rules::marks`). The one place that says
-    /// what counts as gameplay (the owner's decisions, 1532). A setting counts when it changes
-    /// how the game plays, judged from its help text and code; interface-only ones never do.
+    /// The gameplay settings that make a run's mark (`rules::marks`), the one place that says what
+    /// counts as gameplay for it (the owner's decisions, 1532 and 2026-11-23). Only «Максимум» (Razdor's
+    /// AI, not the original's, a fix: green with a «Р»). DT's own options (the improved AI, the wide front
+    /// row, the impossible difficulty, the pursuit) never count, at any value: they are DT. «Опыт при
+    /// повышении» is a rules switch of the «...» window now (`ExperimentalRules::keep_xp`), not a setting.
     ///
-    /// Counted: the battle AI's strength; «Отключение бойцов» (noncombatants); «Опыт при повышении» kept (the original resets it); the front row's width, the
-    /// difficulty and the pursuit when they are not the install's. «Бережёт магов» (max_guard)
-    /// changes play only under «Максимум», which is already counted, so it adds no mark of its own.
-    /// «Сохранять расстановку» (keep_formation) is a convenience and does not count: a default
-    /// run is green.
+    /// Not counted: the battle AI's levels other than «Максимум», the «Сохранять расстановку» and the
+    /// «Бережёт магов» (`max_guard`, which acts only under «Максимум»), and every interface, sound or
+    /// presentation setting (the screen, the scale, the font, the minimap, the army list, the battle
+    /// animation speed, the walk's pace, the hints, the autosave, the language, the keys).
     ///
-    /// Not counted (interface, sound or a presentation of the same play): the screen, the scale,
-    /// the font, the minimap, the leader's name under a picture, the army list, the battle
-    /// animation speed, the walk's real-time pace (`walk_speed`), «Battles on the map» (a
-    /// notice and a mark only: no rule reads `battle_marks`), the input modes, the sounds, the
-    /// hints, the autosave, the language, the update checks and the keys.
-    ///
-    /// Returns every such setting in the settings window's order, as (its catalog name, its
-    /// value's catalog key: the label the window shows for the value, backlog 1678).
-    pub fn gameplay_differs_from_original(&self, original: &Originals) -> Vec<(&'static str, &'static str)> {
+    /// Returns each counted setting as (its catalog name, its value's catalog key: the label the window
+    /// shows for the value, backlog 1678).
+    pub fn gameplay_differs_from_original(&self) -> Vec<(&'static str, &'static str)> {
         use razdor::i18n::n_;
-        let on_off = |on: bool| if on { n_("on (setting value)") } else { n_("off (setting value)") };
         let mut differs = Vec::new();
-        if self.max_ai || self.expert_ai.is_some_and(|on| on != original.improved_ai) {
-            let value = if self.max_ai {
-                n_("Maximum (Razdor)")
-            } else if self.expert_ai == Some(true) {
-                n_("Improved")
-            } else {
-                n_("As in the original")
-            };
-            differs.push((n_("Battle AI strength"), value));
-        }
-        if self.keep_xp_on_promotion {
-            differs.push((n_("Experience on promotion"), n_("Kept (Razdor)")));
-        }
-        if let Some(on) = self.wide_row.filter(|&on| on != original.wide_row) {
-            differs.push((n_("Wide front row in battle (for new games)"), on_off(on)));
-        }
-        if let Some(on) = self.impossible.filter(|&on| on != original.impossible) {
-            differs.push((n_("Impossible difficulty (needs a restart)"), on_off(on)));
-        }
-        if let Some(on) = self.pursue.filter(|&on| on != original.pursue) {
-            differs.push((n_("Automatically pursue the chosen army"), on_off(on)));
+        if self.max_ai {
+            differs.push((n_("Battle AI strength"), n_("Maximum (Razdor)")));
         }
         differs
     }
@@ -2017,74 +1970,44 @@ mod gameplay_mark_tests {
 
     #[test]
     fn a_default_run_is_green_and_keep_formation_is_only_a_convenience() {
-        assert_eq!(Settings::default().gameplay_differs_from_original(&Originals::default()), Vec::new());
+        assert_eq!(Settings::default().gameplay_differs_from_original(), Vec::new());
         let off = Settings { keep_formation: false, ..Settings::default() };
-        assert_eq!(off.gameplay_differs_from_original(&Originals::default()), Vec::new(), "keep formation counts for nothing either way");
+        assert_eq!(off.gameplay_differs_from_original(), Vec::new(), "keep formation counts for nothing either way");
     }
 
     #[test]
-    fn each_counted_setting_names_itself() {
-        let o = Originals::default();
-        let cases: Vec<(Settings, (&str, &str))> = vec![
-            (Settings { max_ai: true, ..clean() }, ("Battle AI strength", "Maximum (Razdor)")),
-            (Settings { expert_ai: Some(true), ..clean() }, ("Battle AI strength", "Improved")),
-            (Settings { keep_xp_on_promotion: true, ..clean() }, ("Experience on promotion", "Kept (Razdor)")),
-            (Settings { wide_row: Some(false), ..clean() }, ("Wide front row in battle (for new games)", "off (setting value)")),
-            (Settings { impossible: Some(true), ..clean() }, ("Impossible difficulty (needs a restart)", "on (setting value)")),
-            (Settings { pursue: Some(false), ..clean() }, ("Automatically pursue the chosen army", "off (setting value)")),
-        ];
-        for (settings, (name, value)) in cases {
-            assert_eq!(settings.gameplay_differs_from_original(&o), vec![(name, value)], "{settings:?}");
+    fn only_maximum_counts_and_it_is_named() {
+        let max = Settings { max_ai: true, ..clean() };
+        assert_eq!(max.gameplay_differs_from_original(), vec![("Battle AI strength", "Maximum (Razdor)")]);
+    }
+
+    #[test]
+    fn dt_s_own_options_never_count_at_any_value() {
+        for s in [
+            Settings { expert_ai: Some(true), ..clean() },
+            Settings { expert_ai: Some(false), ..clean() },
+            Settings { wide_row: Some(false), impossible: Some(true), pursue: Some(false), ..clean() },
+            Settings { wide_row: Some(true), impossible: Some(false), pursue: Some(true), ..clean() },
+        ] {
+            assert_eq!(s.gameplay_differs_from_original(), Vec::new(), "{s:?}");
         }
     }
 
     #[test]
-    fn every_counted_setting_is_listed_with_its_value() {
-        let o = Originals::default();
-        let all = Settings {
-            expert_ai: Some(true),
-            keep_xp_on_promotion: true,
-            wide_row: Some(false),
-            pursue: Some(false),
-            ..clean()
-        };
-        assert_eq!(
-            all.gameplay_differs_from_original(&o),
-            vec![
-                ("Battle AI strength", "Improved"),
-                ("Experience on promotion", "Kept (Razdor)"),
-                ("Wide front row in battle (for new games)", "off (setting value)"),
-                ("Automatically pursue the chosen army", "off (setting value)"),
-            ],
-            "every changed setting, in the settings window's order"
-        );
-        let back = Settings { expert_ai: Some(false), ..clean() };
-        let install_improved = Originals { improved_ai: true, ..Originals::default() };
-        assert_eq!(back.gameplay_differs_from_original(&install_improved), vec![("Battle AI strength", "As in the original")], "the install's improved AI turned off");
-    }
-
-    #[test]
-    fn a_setting_the_install_already_has_is_the_original() {
-        let install = Originals { improved_ai: true, wide_row: false, impossible: true, pursue: false };
-        let same = Settings { expert_ai: Some(true), wide_row: Some(false), impossible: Some(true), pursue: Some(false), ..clean() };
-        assert_eq!(same.gameplay_differs_from_original(&install), Vec::new(), "the install's own value is not a change");
-        let other = Settings { expert_ai: Some(false), ..clean() };
-        assert_eq!(other.gameplay_differs_from_original(&install), vec![("Battle AI strength", "As in the original")], "turning off the install's improved AI is");
-        assert_eq!(clean().gameplay_differs_from_original(&install), Vec::new(), "unchosen (None) follows the install");
+    fn kept_xp_is_a_rules_switch_now_not_a_setting() {
+        assert_eq!(Settings { keep_xp_on_promotion: true, ..clean() }.gameplay_differs_from_original(), Vec::new());
     }
 
     #[test]
     fn max_guard_counts_only_under_maximum_and_adds_no_mark_of_its_own() {
-        let o = Originals::default();
-        assert_eq!(Settings { max_guard: false, ..clean() }.gameplay_differs_from_original(&o), Vec::new());
-        assert_eq!(Settings { max_guard: true, ..clean() }.gameplay_differs_from_original(&o), Vec::new());
+        assert_eq!(Settings { max_guard: false, ..clean() }.gameplay_differs_from_original(), Vec::new());
+        assert_eq!(Settings { max_guard: true, ..clean() }.gameplay_differs_from_original(), Vec::new());
         let max = Settings { max_ai: true, max_guard: true, ..clean() };
-        assert_eq!(max.gameplay_differs_from_original(&o), vec![("Battle AI strength", "Maximum (Razdor)")]);
+        assert_eq!(max.gameplay_differs_from_original(), vec![("Battle AI strength", "Maximum (Razdor)")]);
     }
 
     #[test]
     fn interface_settings_never_count() {
-        let o = Originals::default();
         let interface = Settings {
             hit_shake: true,
             battle_marks: false,
@@ -2102,7 +2025,7 @@ mod gameplay_mark_tests {
             map_zoom: 1.5,
             ..clean()
         };
-        assert_eq!(interface.gameplay_differs_from_original(&o), Vec::new());
+        assert_eq!(interface.gameplay_differs_from_original(), Vec::new());
     }
 }
 

@@ -872,6 +872,8 @@ impl App {
             Ok(mut game) => {
                 // A battle's restart is the same run: it keeps what the run has used (1532).
                 game.keep_run_mark(self.run_mark_of_same_map(&game).as_ref());
+                // A save from before the «Опыт при повышении» rule takes the player's old setting (2026-11-23).
+                game.take_old_keep_xp(self.audio.settings.keep_xp_on_promotion);
                 main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;
@@ -888,6 +890,7 @@ impl App {
             Ok(mut game) => {
                 // Loading a save made earlier in the same run does not clear what the run has used (1532).
                 game.keep_run_mark(self.run_mark_of_same_map(&game).as_ref());
+                game.take_old_keep_xp(self.audio.settings.keep_xp_on_promotion);
                 main_menu::follow_settings(&self.audio.settings, &mut game);
                 self.dialogs.clear();
                 self.message = None;

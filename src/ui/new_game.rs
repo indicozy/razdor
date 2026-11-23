@@ -34,7 +34,7 @@ local! {
         simultaneous_bonuses: false, two_potions: false, six_cells: false, unlimited_items: false,
         free_units: false, auto_promotion: false, undying_units: false, fast_ai: false,
         bless_once: false, undead_poison_immune: false, unlimited_spells: false, merchant_item: false, rear_service_flat: false,
-        building_store: false, death_curse_counter: false, no_corpse_garrison: false, strict_initiative: false, inherited: 0,
+        building_store: false, death_curse_counter: false, no_corpse_garrison: false, strict_initiative: false, keep_xp: false, inherited: 0,
     }) };
     static RULES_OPEN: Cell<bool> = const { Cell::new(false) };
     /// The rules window's scroll (px) on an upright phone, reset when it closes.
@@ -849,6 +849,18 @@ fn mark_lines_in(mark: &marks::RunMark, t: impl Fn(&str) -> &str) -> Vec<String>
         marks::Reason::Cheat(command) => one(format!("{} ({command})", t(n_("Completed with cheats")))),
         marks::Reason::Rule(rule) if mark.level == marks::Level::Fixes => one(format!("{}: {}", t(n_("Completed with Razdor's rules")), t(rule))),
         marks::Reason::Rule(rule) => one(format!("{}: {}", t(n_("Completed with experimental rules")), t(rule))),
+        // Razdor's fix from a setting (2026-11-23: «Максимум»): one line with its value; only Razdor's own
+        // settings of the list are named, a DT setting in an old list is not.
+        marks::Reason::Setting(setting) if mark.level == marks::Level::Fixes => {
+            let parts: Vec<String> = mark
+                .settings
+                .iter()
+                .filter(|(_, value)| matches!(value.as_str(), "Maximum (Razdor)" | "Kept (Razdor)"))
+                .map(|(name, value)| format!("{} — {}", t(name), t(value)))
+                .collect();
+            let what = if parts.is_empty() { t(setting).to_string() } else { parts.join(", ") };
+            one(format!("{}: {}", t(n_("Completed with Razdor's rules")), what))
+        }
         // An old mark: its one setting name, which may be a name an older Razdor saved (see the tests).
         marks::Reason::Setting(setting) if mark.settings.is_empty() => one(format!("{}: {}", t(n_("Completed with settings not as in the original")), t(setting))),
         marks::Reason::Setting(_) => {
@@ -2644,6 +2656,9 @@ mod tests {
         // Razdor saved still read in Russian (the catalog keeps them; this is the list of them).
         let old = mark(Level::Grey, Reason::Setting(razdor::i18n::n_("Experience on promotion: kept").into()));
         assert_eq!(ru(&old), "Пройдено с настройками не как в оригинале: Опыт при повышении: сохраняется", "the legacy name reads in Russian");
+        // 2026-11-23: «Максимум» is Razdor's fix (green with a «Р»): its one line names the setting and value.
+        let max = RunMark { level: Level::Fixes, reason: Reason::Setting(razdor::i18n::n_("Battle AI strength").into()), settings: vec![("Battle AI strength".into(), "Maximum (Razdor)".into())] };
+        assert_eq!(ru(&max), "Пройдено по правилам Раздора: Сила ИИ в бою — Максимум (Раздор)");
         assert_eq!(ru(&RunMark::start()), "Пройдено честно");
         assert_eq!(en(&RunMark::start()), "Completed honestly");
         assert_eq!(ru(&mark(Level::Red, Reason::Cheat(String::new()))), "Пройдено с читами", "an old save: no cheat named");

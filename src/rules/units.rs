@@ -481,7 +481,7 @@ impl Unit {
 
     /// Switch to class `to` from the upgrade tree, free of charge. The unit starts the new
     /// class at level 1 (experience.md §4, 0x4b1df0), with its XP dropped as the original drops
-    /// it. `keep_xp` (Razdor's «Опыт при повышении», `Game::keep_xp_on_promotion`) keeps the XP,
+    /// it. `keep_xp` (Razdor's «Опыт при повышении сохраняется», `ExperimentalRules::keep_xp`) keeps the XP,
     /// banked into the new class by the gain rule, as the hero keeps what is left over a level.
     /// Its worn items stay worn, whether the new class could put them on or not (the original
     /// never checks), and the stat rebuild after it rescales a wounded unit's HP to the new maximum.

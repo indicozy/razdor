@@ -183,6 +183,12 @@ pub struct ExperimentalRules {
     /// its list place was passed wait for the next threshold. Off: the original's rule. Razdor's
     /// deviation.
     pub strict_initiative: bool,
+    /// «Опыт при повышении сохраняется» («Experience kept on promotion», `keep_xp`; the owner's
+    /// decision 2026-11-23, moved from the settings window): on, a promoted unit keeps its XP
+    /// (`Unit::promote`); off, the original's reset (0x4b1df0). Razdor's deviation, a «Исправления»
+    /// switch: a run with only the fixes on is green with a «Р». A save from before the switch has
+    /// no key: it takes the player's old «Опыт при повышении» setting at load (`Game::take_old_keep_xp`).
+    pub keep_xp: bool,
     /// The `INHERITABLE` switches that read ON only because the save predates them: Razdor's own
     /// old rule, kept for that save, not chosen by the player. One bit per switch (fixed numbers).
     /// Rules play is the same as for a chosen switch; the run's mark skips them (`first_on`).
@@ -235,7 +241,7 @@ pub struct Switch {
 
 /// Every experimental switch, in the rules window's order: the fixes, then the cheats. The order
 /// inside a group is the order a run's mark names its reason by.
-pub const SWITCHES: [Switch; 17] = [
+pub const SWITCHES: [Switch; 18] = [
     Switch { key: "fast_ai", name: crate::i18n::n_("Faster AI"), group: Group::Fixes, inherited_bit: 0, get: |r| r.fast_ai, set: |r, v| r.fast_ai = v },
     Switch { key: "bless_once", name: crate::i18n::n_("Bless once a turn"), group: Group::Fixes, inherited_bit: BLESS_ONCE, get: |r| r.bless_once, set: |r, v| r.bless_once = v },
     Switch { key: "undead_poison_immune", name: crate::i18n::n_("Poison spares the Undead"), group: Group::Fixes, inherited_bit: UNDEAD_POISON_IMMUNE, get: |r| r.undead_poison_immune, set: |r, v| r.undead_poison_immune = v },
@@ -246,6 +252,7 @@ pub const SWITCHES: [Switch; 17] = [
     Switch { key: "death_curse_counter", name: crate::i18n::n_("Death curse on counter blows"), group: Group::Fixes, inherited_bit: 0, get: |r| r.death_curse_counter, set: |r, v| r.death_curse_counter = v },
     Switch { key: "no_corpse_garrison", name: crate::i18n::n_("No corpses in garrisons"), group: Group::Fixes, inherited_bit: 0, get: |r| r.no_corpse_garrison, set: |r, v| r.no_corpse_garrison = v },
     Switch { key: "strict_initiative", name: crate::i18n::n_("Strict initiative order"), group: Group::Fixes, inherited_bit: 0, get: |r| r.strict_initiative, set: |r, v| r.strict_initiative = v },
+    Switch { key: "keep_xp", name: crate::i18n::n_("Experience kept on promotion"), group: Group::Fixes, inherited_bit: 0, get: |r| r.keep_xp, set: |r, v| r.keep_xp = v },
     Switch { key: "simultaneous_bonuses", name: crate::i18n::n_("All special bonuses simultaneously"), group: Group::Cheats, inherited_bit: 0, get: |r| r.simultaneous_bonuses, set: |r, v| r.simultaneous_bonuses = v },
     Switch { key: "unlimited_items", name: crate::i18n::n_("No item limits"), group: Group::Cheats, inherited_bit: 0, get: |r| r.unlimited_items, set: |r, v| r.unlimited_items = v },
     Switch { key: "two_potions", name: crate::i18n::n_("At most two potions per character"), group: Group::Cheats, inherited_bit: 0, get: |r| r.two_potions, set: |r, v| r.two_potions = v },
@@ -378,6 +385,11 @@ struct RulesWire {
     /// when on, so the serialised rules of every other game stay as they were (see `no_corpse_garrison`).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     strict_initiative: bool,
+    /// Missing in a save from before the switch (`None`): the player's old settings decide at load
+    /// (`Game::take_old_keep_xp`). Written only when on, as the games with it off keep their serialised
+    /// state; saves write `false` explicitly (`save::encode_json`), and the remembered rules too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    keep_xp: Option<bool>,
     /// The wire keys of the `INHERITABLE` switches that are inherited (`ExperimentalRules::inherited`).
     /// Written, so a save that was re-saved keeps saying so; unknown names are ignored.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -449,6 +461,7 @@ impl From<RulesWire> for ExperimentalRules {
             death_curse_counter: w.death_curse_counter,
             no_corpse_garrison: w.no_corpse_garrison,
             strict_initiative: w.strict_initiative,
+            keep_xp: w.keep_xp.unwrap_or(false),
             inherited,
         }
     }
@@ -474,6 +487,7 @@ impl From<ExperimentalRules> for RulesWire {
             death_curse_counter: r.death_curse_counter,
             no_corpse_garrison: r.no_corpse_garrison,
             strict_initiative: r.strict_initiative,
+            keep_xp: r.keep_xp.then_some(true),
             inherited: INHERITABLE.iter().filter(|(bit, _)| r.inherited & bit != 0).map(|(_, key)| key.to_string()).collect(),
             multiple_rings: false,
             multiple_amulets: false,
@@ -1158,7 +1172,7 @@ mod experimental_rules_save_tests {
         assert!(!rules.is_razdor_preset_on());
         rules.razdor_preset();
         assert!(rules.is_razdor_preset_on());
-        assert_eq!(rules, ExperimentalRules { free_units: true, fast_ai: true, death_curse_counter: true, no_corpse_garrison: true, strict_initiative: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
+        assert_eq!(rules, ExperimentalRules { free_units: true, fast_ai: true, death_curse_counter: true, no_corpse_garrison: true, strict_initiative: true, keep_xp: true, inherited: 0, ..ExperimentalRules::before_the_rules_were_saved() });
         rules.set_razdor_preset(false);
         assert_eq!(rules, ExperimentalRules { free_units: true, ..Default::default() });
         assert!(!rules.is_razdor_preset_on());
@@ -1192,7 +1206,7 @@ mod experimental_rules_save_tests {
         let table: BTreeSet<String> = SWITCHES.iter().map(|s| s.key.to_string()).collect();
         assert_eq!(table.len(), SWITCHES.len(), "no switch is listed twice");
         assert_eq!(table, saved, "the table lists every switch the save writes, and only those");
-        assert_eq!(ExperimentalRules::switches(Group::Fixes).count(), 10);
+        assert_eq!(ExperimentalRules::switches(Group::Fixes).count(), 11);
         assert_eq!(ExperimentalRules::switches(Group::Cheats).count(), 7);
     }
 
@@ -1294,6 +1308,28 @@ mod experimental_rules_save_tests {
         assert!(rules.is_razdor_preset_on() && rules.no_corpse_garrison);
         rules.set_razdor_preset(false);
         assert!(!rules.no_corpse_garrison);
+    }
+
+    /// «Опыт при повышении сохраняется» (`keep_xp`, the owner's decision 2026-11-23): a «Исправления»
+    /// switch, off by default, written only when on, in the «Правила Раздора» preset and off in
+    /// «Правила DT». A save without its key reads it off here (`save::encode_json` writes it).
+    #[test]
+    fn the_keep_xp_switch_is_a_fix_off_without_its_key() {
+        assert!(!ExperimentalRules::for_new_game().keep_xp);
+        let old: ExperimentalRules = serde_json::from_str(r#"{"fast_ai": true}"#).unwrap();
+        assert!(!old.keep_xp);
+        let on = ExperimentalRules { keep_xp: true, ..Default::default() };
+        let json = serde_json::to_value(on).unwrap();
+        assert_eq!(json["keep_xp"].as_bool(), Some(true));
+        assert_eq!(serde_json::from_value::<ExperimentalRules>(json).unwrap(), on);
+        assert!(serde_json::to_value(ExperimentalRules::default()).unwrap().get("keep_xp").is_none(), "an off switch is not written");
+        assert_eq!(on.first_on(), Some("Experience kept on promotion"));
+        assert_eq!(on.preset(), Preset::Mixed);
+        let mut rules = ExperimentalRules::default();
+        rules.set_razdor_preset(true);
+        assert!(rules.is_razdor_preset_on() && rules.keep_xp);
+        rules.set_razdor_preset(false);
+        assert!(!rules.keep_xp && rules.preset() == Preset::Dt);
     }
 
     /// «Строгий порядок инициативы» (`strict_initiative`): off by default, in a new game, before the

@@ -625,7 +625,31 @@ pub fn encode(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
 /// runs on their threads.
 pub fn encode_json(meta: &SaveMeta, game: &Game) -> Result<Vec<u8>, SaveError> {
     let map = embedded_map(game).map(base64_encode);
-    serde_json::to_vec(&SaveOut { meta, game, map }).map_err(|e| SaveError::Corrupt(e.to_string()))
+    let mut json = serde_json::to_value(&SaveOut { meta, game, map }).map_err(|e| SaveError::Corrupt(e.to_string()))?;
+    // Every save says whether its rules keep the XP (`keep_xp` is written only when on in the game's
+    // own serialisation): a save with no key is an old one, which takes the player's setting at load.
+    if let Some(rules) = json.get_mut("game").and_then(|g| g.get_mut("experimental")).and_then(serde_json::Value::as_object_mut) {
+        rules.entry("keep_xp").or_insert(serde_json::Value::Bool(false));
+    }
+    serde_json::to_vec(&json).map_err(|e| SaveError::Corrupt(e.to_string()))
+}
+
+/// The one part of a save's JSON that [`decode`] reads for the `keep_xp` key: absent in a save from before it.
+#[derive(Deserialize, Default)]
+struct KeepXpIn {
+    #[serde(default)]
+    game: KeepXpGameIn,
+}
+
+#[derive(Deserialize, Default)]
+struct KeepXpGameIn {
+    #[serde(default)]
+    experimental: KeepXpRulesIn,
+}
+
+#[derive(Deserialize, Default)]
+struct KeepXpRulesIn {
+    keep_xp: Option<bool>,
 }
 
 /// The map bytes a save of `game` carries: those of its map, if they hash to the stored hash.
@@ -711,6 +735,10 @@ pub fn decode(bytes: &[u8]) -> Result<(SaveMeta, Game), SaveError> {
     check_version(&meta.meta)?;
     let s: SaveIn = serde_json::from_slice(&json).map_err(|e| SaveError::Corrupt(e.to_string()))?;
     let mut game = s.game;
+    let keep = serde_json::from_slice::<KeepXpIn>(&json).unwrap_or_default();
+    game.keep_xp_unsaved = keep.game.experimental.keep_xp.is_none();
+    // A run's mark from before the re-grading reads as it now stands (`marks::regrade`).
+    game.run_mark = game.run_mark.take().map(super::marks::regrade);
     if let Some(text) = s.map {
         let map = base64_decode(&text).ok_or_else(|| SaveError::Corrupt("the save's map is not base64".into()))?;
         game.map_bytes = Some(map.into());
@@ -1547,7 +1575,7 @@ pub(crate) mod tests {
     #[test]
     fn experimental_rules_survive_save_load_without_changing_install_defaults() {
         let install = demo();
-        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: true, free_units: false, auto_promotion: false, undying_units: false, fast_ai: true, bless_once: true, undead_poison_immune: false, unlimited_spells: true, merchant_item: false, rear_service_flat: true, building_store: true, death_curse_counter: false, no_corpse_garrison: false, strict_initiative: false, inherited: 0 };
+        let rules = super::super::content::ExperimentalRules { simultaneous_bonuses: true, unlimited_items: true, two_potions: true, six_cells: true, free_units: false, auto_promotion: false, undying_units: false, fast_ai: true, bless_once: true, undead_poison_immune: false, unlimited_spells: true, merchant_item: false, rear_service_flat: true, building_store: true, death_curse_counter: false, no_corpse_garrison: false, strict_initiative: false, keep_xp: false, inherited: 0 };
         let mut g = Game::new(Arc::new(install.with_experimental(rules)), HeroClass::Knight);
         g.squad[0].potions_drunk = 2;
         g.squad[0].battle_disabled = true;
@@ -1584,16 +1612,17 @@ pub(crate) mod tests {
         use crate::rules::marks::{Level, Reason};
         let c = demo();
         let mut g = Game::new(c.clone(), HeroClass::Knight);
-        g.note_settings(&[("Unit battle participation", "Off")]);
+        g.note_settings(&[("Battle AI strength", "Maximum (Razdor)")]);
         g.note_cheat("god");
         let loaded = roundtrip(&g, c.clone(), None);
         assert_eq!((loaded.run_mark().level, loaded.run_mark().reason), (Level::Red, Reason::Cheat("god".into())));
-        assert_eq!(loaded.run_mark().settings, vec![("Unit battle participation".to_string(), "Off".to_string())], "the settings list survives the save too");
-        let mut grey = Game::new(c.clone(), HeroClass::Knight);
-        grey.note_settings(&[("Unit battle participation", "Off")]);
-        let mut back = roundtrip(&grey, c, None);
+        assert_eq!(loaded.run_mark().settings, vec![("Battle AI strength".to_string(), "Maximum (Razdor)".to_string())], "the settings list survives the save too");
+        let mut fixes = Game::new(c.clone(), HeroClass::Knight);
+        fixes.note_settings(&[("Battle AI strength", "Maximum (Razdor)")]);
+        let mut back = roundtrip(&fixes, c, None);
         back.note_settings(&[]);
-        assert_eq!(back.run_mark().level, Level::Grey, "a setting changed back is still counted after a load");
+        assert_eq!(back.run_mark().level, Level::Fixes, "a setting changed back is still counted after a load");
+        assert!(!back.keep_xp_unsaved, "a saved game writes its keep_xp key");
     }
 
     /// Format 11 stored four item cells per unit: they load with two empty cells added, and a

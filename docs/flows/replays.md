@@ -180,6 +180,13 @@ on the map (`begin_cast`, `cast`), `army_window_opened`, items (`press_pack`, `p
 and the rule settings (`set_rule_settings`: a change, recorded once; `ui::main_menu::follow_settings`
 calls it every frame).
 
+«Опыт при повышении сохраняется» (`keep_xp`, 2026-11-23) is a rule of the playthrough, written in the
+rules when on. `snapshot::Settings::keep_xp_on_promotion` stays in the recording so that a record made
+before the switch replays: a restore takes it with `Game::adopt_keep_xp`, and a new record carries the
+same value in its rules and its settings. A replay never reads the player's settings. A save from before
+the switch has no key and takes the player's old setting at load (`Game::take_old_keep_xp`); a save
+written now always says `keep_xp` (`save::encode_json`).
+
 Guarded by `actions::tests::every_entry_point_that_changes_the_game_records_or_is_listed`: every
 `pub fn ... (&mut self` of `impl Game` and `impl Battle` in the entry-point files either opens a
 scope or is in `NOT_PLAYER_GAME` / `NOT_PLAYER_BATTLE` (the engine, the setup, the tools). A new

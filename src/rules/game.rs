@@ -594,11 +594,10 @@ pub struct Game {
     /// set by the interface, not part of the save.
     #[serde(skip)]
     pub max_guard: bool,
-    /// Razdor's option «Опыт при повышении» (`Settings::keep_xp_on_promotion`): on, a promoted
-    /// unit keeps its XP ([`Unit::promote`]); off (the default), the original's reset (0x4b1df0).
-    /// Set by the interface, not part of the save.
+    /// The save had no `keep_xp` key (`save::decode`): an old save, whose rule is the player's old
+    /// «Опыт при повышении» setting, taken at load by [`Game::take_old_keep_xp`]. Not part of the save.
     #[serde(skip)]
-    pub keep_xp_on_promotion: bool,
+    pub keep_xp_unsaved: bool,
     /// Razdor's deviation «Сохранять расстановку после боя» (`Settings::keep_formation`, the
     /// owner's request): on, after a battle every unit returns to the cell it had before it
     /// (the dead too), instead of the cells the battle left it on (4988c0, 4d2141, 489f50).
@@ -764,8 +763,8 @@ impl Game {
     /// every frame and on every load: a cheat used (red), an experimental rule on (yellow: the
     /// playthrough's rules, fixed for it), and the gameplay setting that differs from the
     /// original (`gameplay`: each setting's catalog name and its value's catalog key, from
-    /// `ui::audio::Settings::gameplay_differs_from_original`; grey, the first one the reason and
-    /// every one listed in `RunMark::settings`).
+    /// `ui::audio::Settings::gameplay_differs_from_original`; a fix (`Fixes`, green with a «Р»), the
+    /// first one the reason and every one listed in `RunMark::settings`).
     /// It only rises: a setting that was non-original stays counted for the rest of the run.
     pub fn note_settings(&mut self, gameplay: &[(&str, &str)]) {
         use super::marks::{Level, Reason};
@@ -779,8 +778,25 @@ impl Game {
             mark.worsen(Level::Fixes, Reason::Rule(rule.to_string()));
         }
         for (setting, value) in gameplay {
-            mark.worsen(Level::Grey, Reason::Setting(setting.to_string()));
+            mark.worsen(Level::Fixes, Reason::Setting(setting.to_string()));
             mark.note_setting(setting, value);
+        }
+    }
+
+    /// Sets the experimental `keep_xp` rule (`ExperimentalRules::keep_xp`) and the content that copies
+    /// the rules. Not an action: the caller is a restore, or the rule settings that are the same as the rules.
+    pub fn adopt_keep_xp(&mut self, on: bool) {
+        if self.experimental.keep_xp != on {
+            self.experimental.keep_xp = on;
+            self.content = Arc::new(self.content.with_experimental(self.experimental));
+        }
+    }
+
+    /// A save from before the `keep_xp` key takes the player's old «Опыт при повышении» setting, once,
+    /// at load (`keep_xp_unsaved`). A save with the key keeps its rule.
+    pub fn take_old_keep_xp(&mut self, old_setting: bool) {
+        if std::mem::take(&mut self.keep_xp_unsaved) {
+            self.adopt_keep_xp(old_setting);
         }
     }
 
@@ -893,7 +909,7 @@ impl Game {
             improved_ai: false,
             max_ai: false,
             max_guard: false,
-            keep_xp_on_promotion: false,
+            keep_xp_unsaved: false,
             keep_formation: false,
             formation_before_battle: None,
             back_to: None,
@@ -1079,7 +1095,7 @@ impl Game {
         self.improved_ai = s.improved_ai;
         self.max_ai = s.max_ai;
         self.max_guard = s.max_guard;
-        self.keep_xp_on_promotion = s.keep_xp_on_promotion;
+        self.adopt_keep_xp(s.keep_xp_on_promotion);
         self.keep_formation = s.keep_formation;
         self.allow_unit_benching = s.allow_unit_benching;
         self.pursue = s.pursue;
@@ -2763,7 +2779,7 @@ impl Game {
         if unit == 0 {
             return Err(PromoteError::NotAvailable);
         }
-        let keep = self.keep_xp_on_promotion;
+        let keep = self.experimental.keep_xp;
         // The hero (unit 0) is refused above; every other squad member is an ordinary unit.
         self.squad.get_mut(unit).ok_or(PromoteError::NotAvailable)?.promote(&c, to, keep, false)
     }
@@ -2795,7 +2811,7 @@ impl Game {
                 break;
             }
             let to = options[self.rng.range(0, options.len() as i32 - 1) as usize];
-            if self.squad[k].promote(&self.content, to, self.keep_xp_on_promotion, false).is_err() {
+            if self.squad[k].promote(&self.content, to, self.experimental.keep_xp, false).is_err() {
                 break;
             }
         }
@@ -4431,7 +4447,7 @@ mod tests {
         g.hire(spear).unwrap();
         g.squad[1].level = 3;
         g.squad[1].xp = 40;
-        g.keep_xp_on_promotion = true;
+        g.adopt_keep_xp(true);
         let gold = g.gold;
         g.promote(1, sword).unwrap();
         assert_eq!((g.squad[1].def, g.squad[1].level, g.squad[1].xp, g.gold), (sword, 2, 5, gold));

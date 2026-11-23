@@ -85,10 +85,18 @@ impl Settings {
 
     pub fn load() -> Settings {
         let read = Settings::path().and_then(|p| std::fs::read(p).ok());
+        let raw: Option<serde_json::Value> = read.as_deref().and_then(|b| serde_json::from_slice(b).ok());
         let mut s: Settings = read.and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         // Ticks kept before they were per mod count for the base game (1456).
         for file in std::mem::take(&mut s.completed_scenarios) {
             add_won(&mut s.completed_by_mod, None, &file);
+        }
+        // «Опыт при повышении» moved into the rules window (2026-11-23): a player who had the old setting on
+        // gets the switch on in the remembered rules, once. The key is written from then on (`merged_json`).
+        let rules_have_key = raw.as_ref().and_then(|j| j.get("experimental_rules")).is_some_and(|r| r.get("keep_xp").is_some());
+        if !rules_have_key && super::audio::Settings::load().keep_xp_on_promotion {
+            s.experimental_rules.keep_xp = true;
+            s.save();
         }
         s
     }
@@ -124,6 +132,9 @@ impl Settings {
         json["scenario_lang"] = serde_json::json!(self.scenario_lang);
         // Written, or the rules window's choice is lost at the next new game (a player's report).
         json["experimental_rules"] = serde_json::json!(self.experimental_rules);
+        // The switch is always written, on or off: a block with no `keep_xp` key is from before the
+        // switch, and its old setting seeds it once (`load`).
+        json["experimental_rules"]["keep_xp"] = serde_json::json!(self.experimental_rules.keep_xp);
         json
     }
 }

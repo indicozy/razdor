@@ -94,7 +94,7 @@ impl Settings {
             improved_ai: g.improved_ai,
             max_ai: g.max_ai,
             max_guard: g.max_guard,
-            keep_xp_on_promotion: g.keep_xp_on_promotion,
+            keep_xp_on_promotion: g.experimental.keep_xp,
             keep_formation: g.keep_formation,
             allow_unit_benching: g.allow_unit_benching,
             pursue: g.pursue,
@@ -287,7 +287,8 @@ impl Snapshot {
         game.improved_ai = s.improved_ai;
         game.max_ai = s.max_ai;
         game.max_guard = s.max_guard;
-        game.keep_xp_on_promotion = s.keep_xp_on_promotion;
+        // An older recording has the rule only in its settings; a newer one has it in the rules too.
+        game.adopt_keep_xp(s.keep_xp_on_promotion);
         game.keep_formation = s.keep_formation;
         game.allow_unit_benching = s.allow_unit_benching;
         game.pursue = s.pursue;

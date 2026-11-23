@@ -1748,18 +1748,6 @@ fn install_expert_ai() -> bool {
     chrome::ui_text("Options", "OptValue9").is_some_and(|v| razdor::dt::ini::loose_int(&v) == 1)
 }
 
-/// The original's own values: the install's `[Options]`, never the player's choices. They are
-/// what a gameplay setting is compared with for the run's mark
-/// (`audio::Settings::gameplay_differs_from_original`).
-pub fn install_originals() -> super::audio::Originals {
-    super::audio::Originals {
-        improved_ai: install_expert_ai(),
-        wide_row: chrome::install_option("OptValue11").is_none_or(|v| razdor::dt::ini::loose_int(&v) == 1),
-        impossible: install_on("OptValue10", false),
-        pursue: install_on("OptValue7", true),
-    }
-}
-
 /// Razdor's «Сила ИИ в бою» (the owner's request): the original's AI, its improved level
 /// (`OptValue9`, [`expert_ai`]) or Razdor's «Максимум» for the enemy of the player's battles
 /// (`razdor::rules::battle::Battle::max_choice`), which plays on the improved level's base.
@@ -1800,13 +1788,17 @@ pub fn set_ai_strength(audio: &mut super::audio::Settings, s: AiStrength) {
 /// before the battle it may start (a pending foe, a battle's «Рестарт»). Before #19 a
 /// restored battle began with the defaults, the original's AI on its normal level: with
 /// «Максимум» chosen, its «Рестарт» was played by another AI than the battle itself.
+/// The run's mark reads the settings only while the settings window is closed (`options_open`):
+/// a value cycled through or cancelled in it marks nothing (2026-11-23).
 pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::game::Game) {
     // The rule settings go through the game (a change is an action, recorded: `Game::set_rule_settings`).
+    // «Опыт при повышении» is the game's own rule (`ExperimentalRules::keep_xp`), not a setting: it is kept as it is.
+    let keep_xp = g.experimental.keep_xp;
     g.set_rule_settings(razdor::rules::recording::snapshot::Settings {
         improved_ai: expert_ai(audio),
         max_ai: ai_strength(audio) == AiStrength::Max,
         max_guard: audio.max_guard,
-        keep_xp_on_promotion: audio.keep_xp_on_promotion,
+        keep_xp_on_promotion: keep_xp,
         keep_formation: audio.keep_formation,
         // Sitting out («Не участвует в боях») is normal play (2026-11-15): always honoured.
         allow_unit_benching: true,
@@ -1816,9 +1808,12 @@ pub fn follow_settings(audio: &super::audio::Settings, g: &mut razdor::rules::ga
     g.battle_marks = audio.battle_marks;
     g.army_list = audio.army_list;
     g.leader_caption = audio.leader_caption;
-    // The run's mark follows what it uses now: a gameplay setting that is not the original's
-    // (`Game::note_settings`; the rules and the cheats are read from the game itself).
-    g.note_settings(&audio.gameplay_differs_from_original(&install_originals()));
+    // The run's mark follows what it uses now: «Максимум» (`Game::note_settings`; the rules and the
+    // cheats are read from the game itself). Not while the settings window is open: it shows values
+    // that are not chosen yet.
+    if !options_open() {
+        g.note_settings(&audio.gameplay_differs_from_original());
+    }
 }
 
 /// The improved AI's checkbox clicked: on gives the improved level, off the original's (and
@@ -4336,10 +4331,16 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     true
 }
 
+/// Whether the settings window is open (from its opening to «Принять» or «Отмена»).
+pub fn options_open() -> bool {
+    OPENED_WITH.with(|o| o.borrow().is_some())
+}
+
 /// Closes the in-game settings window with its changes kept, as «Принять» does (the bar's
 /// settings button, a second press: the owner's request). The group and keys windows close
 /// with it; the settings already set in `audio` stay.
 pub fn close_options_kept() {
+    OPENED_WITH.with(|o| *o.borrow_mut() = None);
     GROUP.with(|g| g.set(None));
     KEYS_OPEN.with(|o| o.set(false));
     KEYS_FROM_HELP.with(|f| f.set(false));
@@ -4350,6 +4351,17 @@ pub fn close_options_kept() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The run's mark reads the settings only while the settings window is closed (2026-11-23): the
+    /// window's opening keeps its snapshot, «Принять» and the bar's close end it.
+    #[test]
+    fn the_settings_window_is_open_until_it_closes() {
+        assert!(!options_open());
+        OPENED_WITH.with(|o| *o.borrow_mut() = Some(super::super::audio::Settings::default()));
+        assert!(options_open(), "a window open is not a mark's moment");
+        close_options_kept();
+        assert!(!options_open(), "the bar's close ends it too, so the next frame marks the kept values");
+    }
 
     /// `Castle.lit`'s size.
     const CASTLE: (f32, f32) = (512.0, 512.0);
