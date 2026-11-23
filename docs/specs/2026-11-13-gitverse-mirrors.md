@@ -98,10 +98,9 @@ The service info the app needs (the update feed's addresses, the hub's folders, 
   and pushes only it to GitVerse, then waits until the anonymous address serves those bytes.
 - **The app** (`src/remote_config.rs`, no macroquad): `remote_config::start()` at start installs the cached config
   at once (`remote-config.json` in the cache folder, the last good one) and a thread fetches `ADDRESSES`
-  (GitHub first, GitVerse after; the stall limit as the update feed's). Without a learned primary host (the first
-  start) all addresses are fetched at once and the first reply that parses as a config wins (an unknown path
-  answers HTML on GitVerse: a web page is no config) and is kept as the cache; with one, the addresses are tried
-  in the primary's order (see «Learned primary»).
+  (GitHub first, GitVerse after, on every start; the stall limit as the update feed's). The addresses are tried
+  in that order, one after the other (`resolve`): the first reply that parses as a config wins (an unknown path
+  answers HTML on GitVerse: a web page is no config) and is kept as the cache. Nothing is learned (see «Learned primary»).
   With none, the cache is used, else the built-in lists (`mirror.rs`, today's addresses). The log says which
   one was used (`remote config: using the …`).
 - **Holiday** (optional `holiday` object, 2026-11-23): `on` (default true; `false` stops the New Year season for
@@ -119,25 +118,31 @@ The service info the app needs (the update feed's addresses, the hub's folders, 
 - **Changing it**: edit `data/remote/config.json` and push to `main`; then run `publish_config.py` (`--dry-run`
   checks only). An app that reads an older schema ignores a newer file, so a schema change needs an app release.
 
-## Learned primary (2026-11-13)
+## Learned primary (2026-11-13), replaced by GitHub-always-first (2026-11-23)
+
+**Replaced (the owner's decision, 2026-11-23):** GitHub is tried first on every request, and GitVerse is only
+that request's fallback. Nothing is learned, saved or remembered between requests or launches. The code follows
+the 2026-11-23 bullets below; the 2026-11-13 bullets that are not marked as replaced stay as they were.
+
+The history (2026-11-13): the host that works for a player became that player's primary, and
+every list was ordered with its addresses first. That is gone, and the rest of this section keeps the
+2026-11-13 wording only where it still holds.
 
 The owner's decision: the host that works for a player becomes that player's primary ("where they
 download from becomes primary"). The same binary is on both hosts, so the app learns it (`src/mirror.rs`,
 no macroquad):
 
-- **First start** (no saved primary): `remote_config::start` fetches `config.json` from both Pages hosts
-  at once (`resolve_race`). The first reply that parses as a config wins; an HTML page (GitVerse answers an
-  unknown path with HTTP 200) loses to a slower valid config. The winner's host is saved as the primary.
-- **Ordering**: every list is ordered with the primary host's addresses first (`mirror::ordered_by`), each
-  part in the list's own order. Without a primary, the list as it is, which is GitHub first (the config's
-  order; a hub file's addresses are put GitHub first as well). The lists: the update feed (`update::check`,
-  through `mirror::first_ok`), the hub catalog (`catalog_from_mirrors`, through `first_ok`) and the hub's files
-  (they come from the catalog that was read), the game archive's links (`gdrive::download_game`), and the
-  updater's file (its release comes from the feed that answered, so the feed's order decides it).
-- **Adapt**: a request's fallback chain (`mirror::Chain`) moves the primary only when the primary host failed
-  in it (an error, the stall limit, an HTML page, a file that does not verify) and then another known host
-  answered. One success on the primary keeps it; a failure on the other host alone changes nothing. A 429 or
-  503 is never a reason to move the primary (`mirror::is_throttle`): it pauses that host instead.
+- **Order** (2026-11-23, replaces the learned primary): every list is in the config's order, GitHub first
+  (`mirror::order`); a host paused by a throttle goes last for its requests while the pause lasts (per session).
+  A GitHub failure in one request changes nothing for the next one. The lists: the update feed (`update::check`,
+  `mirror::first_ok`), the hub catalog (`catalog_from_mirrors`, `first_ok`) and the hub's files (they come from
+  the catalog that was read), the game archive's links (`gdrive::download_game`), and the updater's file (its
+  release comes from the feed that answered).
+- **First fetch of the remote config** (2026-11-23): `remote_config::start` tries `ADDRESSES` one after the other
+  in that order (`resolve`), not in a race. The 2026-11-13 race (the first valid reply won, and its host became
+  the primary) is gone: a fast GitVerse reply could win while GitHub was fine.
+- **Adapt** (2026-11-23): a request's failed address (an error, the stall limit, an HTML page, a file that does
+  not verify) gives way to the next address for that request only. Nothing moves for later requests.
 - **Throttles** (2026-11-22): one pause per host, shared by its requests (`mirror::Pauses`): a 429 or 503 with
   a `Retry-After` waits that long (at most 60 s), else 2, 4, 8 ... 60 s, jittered to 75-125 %. A paused host's
   addresses go last in their list, and a request waits for its host's pause (`mirror::wait_host`). Every
@@ -155,11 +160,8 @@ no macroquad):
   by `update::parse_conditional`); Android: `razdorFetchConditional` in `MainActivityInject.java`; iOS: no headers,
   always a fresh fetch. The copies: `cache/copy-index-v2.json`, `cache/copy-index.json` (the hub folder) and
   `update-feed.json` (the cache folder).
-- **The updater**: the host a new version's file was downloaded from becomes the primary (`mirror::learn_from`,
-  after the file checks out).
-- **Saved** in the cache folder as `mirror-pref.json` (`{"host": "gitverse" | "github", "since": <unix s>, "order": 2}`);
-  a file that does not read is no primary. `order` 2 is the GitHub-first order (2026-11-22): a file without it
-  (learned under the old GitVerse-first order) is ignored, so each player starts on GitHub once. Every change is logged (`mirror: the primary host is … (was …): why`).
+- **Old saved primary** (2026-11-23): `mirror-pref.json` in the cache folder, written by builds up to 1.6.0,
+  is deleted at start (`mirror::remove_old_pref`). Nothing reads or writes it now.
 - **Hosts**: GitVerse = `gitverse.ru` and `*.gitverse.site`; GitHub = `github.com`, `api.github.com`,
   `*.github.io`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`. Any other host is in
   neither group and keeps its place.
@@ -167,9 +169,11 @@ no macroquad):
   through the mirror lists at all.
 - **Limit**: the updater takes one address per release (the feed's own), so a failed program download does not
   try the other host's copy of the same version in the same run; the next check's feed order decides it.
-- **Tests** (no network, fake fetches): the first-start race (the faster valid config wins; an HTML page loses),
-  the ordering of each list, a chain that moves on a primary failure and stays otherwise, the updater's host,
-  the game download's switch, a garbage file ignored, and `RAZDOR_HUB` not reordered.
+- **Tests** (no network, fake fetches): the order is the config's whatever came before; a GitHub failure in one
+  request does not change the next request's order; a throttled host goes last only while its pause lasts; the
+  first fetch of the remote config uses GitHub's valid config even when GitVerse answers too, and falls back to
+  GitVerse for a web page or a failure; the game download asks GitHub first; a leftover `mirror-pref.json` is
+  deleted; `RAZDOR_HUB` is not reordered.
 
 ## Publishing
 

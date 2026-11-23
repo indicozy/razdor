@@ -198,7 +198,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   (maps, campaigns, mods) stay on release attachments; moving them to Pages is postponed. From 1.5.2 on,
   The owner's decision (2026-11-22): GitHub is the main host and GitVerse the fallback mirror for Russia. The
   app tries GitHub first and GitVerse after it for app updates, the hub, the holiday files and the game download,
-  and a player's learned primary follows the same rule (a file learned under the old order is ignored).
+  GitHub is tried first on every request; GitVerse is only that request's fallback, and nothing is remembered (the owner's decision, 2026-11-23).
 - "release" / "make a release": the `release` skill. The Discord release post goes out together with
   the release's start (right after the tag is pushed), without waiting for the release pipeline to
   finish (the owner's decision, 2026-10-27).

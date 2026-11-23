@@ -150,12 +150,11 @@ pub fn verify(archive: &Archive, path: &Path) -> Result<(), String> {
 }
 
 /// Downloads `archive` into `dest`, verified. A `dest` that verifies already is kept (no download).
-/// The addresses are tried in order ([`Archive::links`], the learned primary host's first, `mirror`):
-/// an address that fails (a connection, an HTTP error, a stall, a web page, a file that does not
-/// verify) gives way to the next one, and the partial copy stays for it to continue (the same file
-/// on every address). When every address fails, the result is [`Failure::NoAddress`]. Progress and
-/// cancel as in [`Progress`]. A primary host that failed and is followed by another host's answer
-/// becomes the primary (`mirror::Chain`).
+/// The addresses are tried in order ([`Archive::links`], GitHub first, `mirror::order`): an address
+/// that fails (a connection, an HTTP error, a stall, a web page, a file that does not verify) gives
+/// way to the next one for this request only, and the partial copy stays for it to continue (the
+/// same file on every address). When every address fails, the result is [`Failure::NoAddress`].
+/// Progress and cancel as in [`Progress`]. Nothing is remembered for the next request.
 pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &Progress) -> Result<(), Failure> {
     progress.bytes.store(0, Ordering::Relaxed);
     if dest.is_file() && verify(archive, dest).is_ok() {
@@ -164,15 +163,11 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
     }
     let _ = fs::remove_file(dest);
     let part = part_path(dest);
-    let mut chain = crate::mirror::chain();
     let mut last = String::from("no address");
-    for link in chain.order(&archive.links[..]) {
+    for link in crate::mirror::order(&archive.links[..]) {
         match download_from(net, link, archive, &part, progress) {
             Ok(()) => {
                 crate::diag!("game download: from {link}");
-                if let Some(to) = chain.succeeded(link) {
-                    crate::mirror::learn(to, &format!("the game download: its primary failed, {link} answered"));
-                }
                 fs::rename(&part, dest).map_err(|e| Failure::Failed(e.to_string()))?;
                 progress.bytes.store(archive.size, Ordering::Relaxed);
                 return Ok(());
@@ -180,7 +175,6 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
             Err(Failure::Cancelled) => return Err(Failure::Cancelled),
             Err(Failure::Failed(why) | Failure::NoAddress(why)) => {
                 crate::mirror::note_failure(link, &why, None);
-                chain.failed(link, &why);
                 last = why;
             }
         }
@@ -384,19 +378,23 @@ mod tests {
     }
 
     #[test]
-    fn the_primary_hosts_link_is_asked_first_and_its_failure_then_another_hosts_answer_moves_the_primary() {
-        let dir = scratch("primary");
+    fn github_is_asked_first_and_a_failure_there_is_not_remembered_by_the_next_download() {
+        let dir = scratch("github-first");
         let dest = dir.join("game.zip");
         let gh = "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/test.zip";
         let gv = "https://gitverse.ru/api/attachments/test-game";
-        crate::mirror::learn(crate::mirror::Host::GitHub, "test: the start");
-        let a = Archive::at_urls(vec![gv.into(), gh.into()], BODY.len() as u64, crate::update::sha256_hex(BODY), "test.zip".into());
+        let a = Archive::at_urls(vec![gh.into(), gv.into()], BODY.len() as u64, crate::update::sha256_hex(BODY), "test.zip".into());
         let net = Fake::new(vec![Reply::Fail("stalled"), Reply::Body(200, BODY.to_vec())]);
         download_game(&net, &a, &dest, &Progress::default()).unwrap();
         let asked: Vec<String> = net.requests.borrow().iter().map(|r| r.0.clone()).collect();
-        assert_eq!(asked, vec![gh.to_string(), gv.to_string()], "the primary is asked first");
-        assert_eq!(crate::mirror::current(), Some(crate::mirror::Host::GitVerse), "its failure, then GitVerse's answer");
+        assert_eq!(asked, vec![gh.to_string(), gv.to_string()], "GitHub is asked first, GitVerse answers as the fallback");
         assert_eq!(fs::read(&dest).unwrap(), BODY);
+
+        let dest2 = dir.join("game2.zip");
+        let net2 = Fake::new(vec![Reply::Body(200, BODY.to_vec())]);
+        download_game(&net2, &a, &dest2, &Progress::default()).unwrap();
+        let asked2: Vec<String> = net2.requests.borrow().iter().map(|r| r.0.clone()).collect();
+        assert_eq!(asked2, vec![gh.to_string()], "the next download asks GitHub first, as the config says");
         let _ = fs::remove_dir_all(&dir);
     }
 
