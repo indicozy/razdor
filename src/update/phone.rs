@@ -196,7 +196,7 @@ mod android {
     /// One POST of `body` to `url` (the analytics' requests). The body goes through a file in the cache
     /// folder, read by the Java side (`razdorPost`), which answers `HTTP <code>` and the reply's body.
     /// `version` and `commit` are the API headers of the build.
-    pub fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+    pub fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
         secure(url)?;
         let path = cache_dir()?.join(crate::update::fetch_temp_name());
         std::fs::write(&path, body).map_err(|e| format!("post: {e}"))?;
@@ -209,7 +209,7 @@ mod android {
     /// the `body` (written to a file in the cache folder, read by the Java side's `razdorRequest`). The
     /// reply's body comes back as bytes, from a file the Java side writes. Any status is `Ok`. `version`
     /// and `commit` are the API headers of the build.
-    pub fn request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+    pub fn request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
         secure(url)?;
         let dir = cache_dir()?;
         let stem = crate::update::fetch_temp_name();
@@ -219,12 +219,9 @@ mod android {
             std::fs::write(path, bytes).map_err(|e| format!("request: {e}"))?;
         }
         let text = java_request(verb, url, key.unwrap_or(""), body_path.as_deref(), &reply, seconds, version, commit);
-        let result = text.and_then(|text| {
-            let code = text.strip_prefix("HTTP ").and_then(|rest| rest.split_whitespace().next()).and_then(|c| c.parse::<u16>().ok());
-            match code {
-                Some(code) => std::fs::read(&reply).map(|bytes| (code, bytes)).map_err(|e| format!("request: {e}")),
-                None => Err(if text.is_empty() { "no reply".to_string() } else { text }),
-            }
+        let result = text.and_then(|text| match crate::update::http_status(&text) {
+            Some((code, retry_after)) => std::fs::read(&reply).map(|bytes| (code, bytes, retry_after)).map_err(|e| format!("request: {e}")),
+            None => Err(if text.is_empty() { "no reply".to_string() } else { text }),
         });
         let _ = std::fs::remove_file(&reply);
         if let Some(path) = &body_path {
@@ -359,7 +356,7 @@ pub use android::{cache_dir, download, download_cancel, download_range, get, get
 
 /// iOS: no POST yet (the analytics stay queued there; `telemetry` retries later).
 #[cfg(target_os = "ios")]
-pub fn post(_url: &str, _body: &[u8], _seconds: u32, _version: &str, _commit: &str) -> Result<(u16, Vec<u8>), String> {
+pub fn post(_url: &str, _body: &[u8], _seconds: u32, _version: &str, _commit: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
     Err("post: not on iOS yet".into())
 }
 

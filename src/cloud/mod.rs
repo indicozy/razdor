@@ -54,6 +54,26 @@ pub fn next_backoff(prev: u64) -> u64 {
     }
 }
 
+/// The wait with jitter: `secs` times a factor from 0.8 to 1.2 (80 + `random` % 41 percent), never under
+/// one second, so devices that failed together do not come back in step. `random` is any u64 (see
+/// [`random_u64`]); the function is pure, so its bounds are tested.
+pub fn jittered(secs: u64, random: u64) -> u64 {
+    let percent = 80 + random % 41;
+    (secs.saturating_mul(percent) / 100).max(1)
+}
+
+/// The wait before a retry: the jittered backoff, or the server's `Retry-After` when that is longer.
+pub fn retry_wait_secs(backoff: u64, random: u64, retry_after: u64) -> u64 {
+    jittered(backoff, random).max(retry_after)
+}
+
+/// Eight random bytes from the OS, or None when it gives none.
+fn random_u64() -> Option<u64> {
+    let mut raw = [0u8; 8];
+    getrandom::fill(&mut raw).ok()?;
+    Some(u64::from_le_bytes(raw))
+}
+
 /// One request to the worker. Each one runs in order on the background thread.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Job {
@@ -284,7 +304,7 @@ impl Worker {
             sh.refreshing = matches!(job, Job::Refresh);
             sh.downloading = download.clone();
         }
-        let retryable = matches!(job, Job::Sync | Job::Pull | Job::Push | Job::Refresh);
+        let retryable = matches!(job, Job::Sync | Job::Pull | Job::Push | Job::Refresh | Job::CreateAccount);
         match self.run_job(&job) {
             Ok(()) => {
                 let mut sh = lock(&self.shared);
@@ -302,19 +322,24 @@ impl Worker {
                     sh.download_failed = download.clone();
                 }
                 sh.phase = match e {
-                    CloudError::Offline(_) => Phase::Offline,
+                    CloudError::Offline(_) | CloudError::Throttled { .. } => Phase::Offline,
                     CloudError::Full => Phase::Full,
                     _ => Phase::Failed,
                 };
                 if sh.phase == Phase::Failed {
                     sh.paused = true;
                 }
-                let offline = matches!(e, CloudError::Offline(_));
+                let offline = matches!(e, CloudError::Offline(_) | CloudError::Throttled { .. });
+                let server_wait = match &e {
+                    CloudError::Throttled { retry_after, .. } => *retry_after,
+                    _ => 0,
+                };
                 sh.last_error = Some(e);
                 drop(sh);
                 if offline && retryable {
                     self.backoff_secs = next_backoff(self.backoff_secs);
-                    self.retry = Some((Instant::now() + Duration::from_secs(self.backoff_secs), job));
+                    let wait = retry_wait_secs(self.backoff_secs, random_u64().unwrap_or(20), server_wait);
+                    self.retry = Some((Instant::now() + Duration::from_secs(wait), job));
                 }
             }
         }
@@ -330,8 +355,17 @@ impl Worker {
     fn run_job(&mut self, job: &Job) -> Result<(), CloudError> {
         match job {
             Job::CreateAccount => {
-                let key = Api::new(self.net.clone(), &self.base, None).create_account()?;
-                self.keep_key(&key)
+                // Already linked (a retry that runs after the player's own try): no second account.
+                if self.key.is_some() {
+                    return Ok(());
+                }
+                // The device's own key is on disk before the request, so a retry sends the same one.
+                let pending = account::pending_key(&self.cloud_dir).map_err(CloudError::Refused)?;
+                let key = Api::new(self.net.clone(), &self.base, None).create_account(&pending)?;
+                self.keep_key(&key)?;
+                // The account key is kept; a pending file left by a failed removal is harmless.
+                let _ = account::forget_pending(&self.cloud_dir);
+                Ok(())
             }
             Job::Redeem(code) => {
                 let key = Api::new(self.net.clone(), &self.base, None).link_redeem(code)?;
@@ -484,7 +518,7 @@ mod tests {
     impl Net for Refusing {
         fn send(&self, _: &str, _: &str, _: Option<&str>, _: Option<&[u8]>) -> Result<Reply, String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(Reply { status: self.status, body: b"{\"error\":\"bad\"}".to_vec() })
+            Ok(Reply { status: self.status, body: b"{\"error\":\"bad\"}".to_vec(), retry_after: None })
         }
     }
 
@@ -536,5 +570,85 @@ mod tests {
         }
         assert_eq!(&seen[..3], &[60, 120, 240]);
         assert_eq!(*seen.last().expect("some"), MAX_RETRY_SECS);
+    }
+
+    #[test]
+    fn the_jitter_stays_within_a_fifth_either_way_and_never_under_a_second() {
+        assert_eq!(jittered(100, 0), 80);
+        assert_eq!(jittered(100, 40), 120);
+        assert_eq!(jittered(100, 41), 80, "the factor wraps through 80..=120 percent");
+        assert_eq!(jittered(0, 5), 1, "never below one second");
+        assert_eq!(jittered(1, 0), 1);
+        for secs in [1u64, 2, 60, 3600, MAX_RETRY_SECS] {
+            let mut seen = std::collections::HashSet::new();
+            for random in 0..500u64 {
+                let v = jittered(secs, random);
+                assert!(v >= (secs * 80 / 100).max(1) && v <= secs * 120 / 100, "{secs} s -> {v} s");
+                seen.insert(v);
+            }
+            if secs >= 60 {
+                assert!(seen.len() > 10, "{secs} s: the jitter spreads ({} values)", seen.len());
+            }
+        }
+    }
+
+    #[test]
+    fn a_server_wait_is_honoured_when_it_is_longer_than_the_backoff() {
+        // The backoff (jittered) when the server asks nothing, and the server's wait when it asks more.
+        assert_eq!(retry_wait_secs(60, 0, 0), 48);
+        assert_eq!(retry_wait_secs(60, 0, 300), 300);
+        assert_eq!(retry_wait_secs(60, 40, 30), 72, "a shorter wait does not cut the backoff");
+    }
+
+    /// A transport for the account creation: the first request gets no answer, then every request is
+    /// answered with the key it carries (as the server does for a new account). It keeps the bodies.
+    struct Creating {
+        bodies: Arc<Mutex<Vec<String>>>,
+        fail_first: std::sync::atomic::AtomicBool,
+    }
+
+    impl Net for Creating {
+        fn send(&self, _: &str, _: &str, _: Option<&str>, body: Option<&[u8]>) -> Result<Reply, String> {
+            let text = String::from_utf8_lossy(body.unwrap_or_default()).into_owned();
+            self.bodies.lock().expect("lock").push(text.clone());
+            if self.fail_first.swap(false, Ordering::SeqCst) {
+                return Err("curl: exit 28".into());
+            }
+            let sent: serde_json::Value = serde_json::from_str(&text).expect("json");
+            let key = sent["key"].as_str().expect("a key").to_string();
+            Ok(Reply { status: 200, body: format!("{{\"key\":\"{key}\"}}").into_bytes(), retry_after: None })
+        }
+    }
+
+    #[test]
+    fn a_lost_creation_is_retried_under_the_same_key() {
+        let d = dir("create-retry");
+        let bodies = Arc::new(Mutex::new(Vec::new()));
+        let net = Creating { bodies: bodies.clone(), fail_first: std::sync::atomic::AtomicBool::new(true) };
+        let cloud = Cloud::start(Box::new(MemLocal::new("ПК")), Arc::new(net), "http://127.0.0.1:9", d.clone());
+        cloud.request_by_player(Job::CreateAccount);
+        assert!(wait_for_phase(&cloud, Phase::Offline), "the first try gets no answer");
+        assert!(cloud.finish(Duration::from_secs(5)));
+        assert!(account::load_key(&d).is_none(), "no account key yet");
+        assert!(d.join(account::PENDING_FILE).exists(), "the device's key is on disk before the answer");
+
+        cloud.request_by_player(Job::CreateAccount);
+        assert!(cloud.finish(Duration::from_secs(5)));
+        let sent = bodies.lock().expect("lock").clone();
+        assert_eq!(sent.len(), 2, "two requests");
+        let key_of = |body: &str| {
+            let v: serde_json::Value = serde_json::from_str(body).expect("json");
+            v["key"].as_str().expect("a key").to_string()
+        };
+        assert_eq!(key_of(&sent[0]), key_of(&sent[1]), "the retry carries the same key");
+        assert_eq!(account::load_key(&d).as_deref(), Some(key_of(&sent[1]).as_str()), "the account key is kept");
+        assert!(!d.join(account::PENDING_FILE).exists(), "the pending key is gone");
+        assert!(cloud.linked());
+
+        // A retry that runs after the account exists sends nothing: no second account.
+        cloud.request(Job::CreateAccount);
+        assert!(cloud.finish(Duration::from_secs(5)));
+        assert_eq!(bodies.lock().expect("lock").len(), 2, "nothing is sent for a linked device");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

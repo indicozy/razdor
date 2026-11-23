@@ -1,11 +1,12 @@
 //! How the sender posts a request. The live one goes through the app's own HTTP (`update::post`:
 //! curl on the desktop, the app's Java connection on Android); the tests inject their own.
 
-/// The server's answer: the status and the body.
+/// The server's answer: the status, the body and the `Retry-After` in seconds, when it sent one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reply {
     pub status: u16,
     pub body: Vec<u8>,
+    pub retry_after: Option<u64>,
 }
 
 /// Posts `body` (JSON, or a frame) to `url`. `Err` is a transport failure (no answer at all).
@@ -19,7 +20,7 @@ pub struct Live;
 impl Transport for Live {
     fn post(&self, url: &str, body: &[u8], seconds: u32) -> Result<Reply, String> {
         let [(_, version), (_, commit)] = crate::cloud::http::build_headers();
-        crate::update::post(url, body, seconds, &version, &commit).map(|(status, body)| Reply { status, body })
+        crate::update::post(url, body, seconds, &version, &commit).map(|(status, body, retry_after)| Reply { status, body, retry_after })
     }
 }
 

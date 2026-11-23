@@ -75,7 +75,7 @@ impl Device {
 /// Two devices of one account: `a` creates it, `b` links to it with a code.
 fn linked_pair(base: &str, root: &std::path::Path) -> (Device, Device) {
     let a = Device::new(root, "a", "ПК");
-    let key = Api::new(net(), base, None).create_account().expect("creates an account");
+    let key = Api::new(net(), base, None).create_account(&account::new_key().expect("random")).expect("creates an account");
     account::store_key(&a.dir, &key).expect("keeps the key");
     let b = Device::new(root, "b", "телефон");
     let code = Api::new(net(), base, Some(key.clone())).link_issue().expect("a code").code;
@@ -285,7 +285,7 @@ fn the_background_worker_creates_syncs_and_deletes_the_account() {
 fn marks_merge_and_a_deleted_account_is_refused() {
     let (base, root) = server("marks");
     let mut a = Device::new(&root, "a", "ПК");
-    let key = Api::new(net(), &base, None).create_account().expect("creates an account");
+    let key = Api::new(net(), &base, None).create_account(&account::new_key().expect("random")).expect("creates an account");
     account::store_key(&a.dir, &key).expect("keeps the key");
     a.local.set_mark("one", MarkLevel::Grey);
     a.local.set_setting("language", "ru", 10);

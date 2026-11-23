@@ -13,6 +13,8 @@ use sha2::{Digest, Sha256};
 
 /// The key file's name in the cloud folder.
 pub const KEY_FILE: &str = "account.key";
+/// The file of an account creation not yet answered (see [`pending_key`]).
+pub const PENDING_FILE: &str = "pending.key";
 /// Bytes of a key: 256 random bits (the server takes at least 128).
 pub const KEY_BYTES: usize = 32;
 /// Base-31 digits of a key (31^52 > 2^256).
@@ -64,16 +66,44 @@ pub fn load_key(cloud_dir: &Path) -> Option<String> {
 
 /// Writes the key: a temporary file created 0600 on unix, then renamed over the key file.
 pub fn store_key(cloud_dir: &Path, key: &str) -> std::io::Result<()> {
+    write_key_file(cloud_dir, KEY_FILE, key)
+}
+
+/// Writes `key` to `name` in `cloud_dir` the same way as [`store_key`].
+fn write_key_file(cloud_dir: &Path, name: &str, key: &str) -> std::io::Result<()> {
     AccountKey::parse(key).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     std::fs::create_dir_all(cloud_dir)?;
-    let tmp = cloud_dir.join(format!("{KEY_FILE}.tmp"));
+    let tmp = cloud_dir.join(format!("{name}.tmp"));
     let _ = std::fs::remove_file(&tmp);
     {
         let mut file = open_private(&tmp)?;
         file.write_all(key.as_bytes())?;
         file.sync_all()?;
     }
-    std::fs::rename(&tmp, key_path(cloud_dir))
+    std::fs::rename(&tmp, cloud_dir.join(name))
+}
+
+/// The key of an account creation that has not been answered yet (`pending.key`). It is made once,
+/// stored before the request is sent, and reused by every retry: the server answers a known key with
+/// the same account, so a retry that follows a lost answer does not make a second account.
+pub fn pending_key(cloud_dir: &Path) -> Result<String, String> {
+    if let Ok(text) = std::fs::read_to_string(cloud_dir.join(PENDING_FILE)) {
+        let key = text.trim().to_string();
+        if AccountKey::parse(&key).is_ok() {
+            return Ok(key);
+        }
+    }
+    let key = new_key()?;
+    write_key_file(cloud_dir, PENDING_FILE, &key).map_err(|e| format!("the pending key file: {e}"))?;
+    Ok(key)
+}
+
+/// Removes the pending key once the account's key is kept. A missing file is not an error.
+pub fn forget_pending(cloud_dir: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(cloud_dir.join(PENDING_FILE)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 /// Removes the key (the account is gone, or this device left it). A missing file is not an error.
@@ -265,6 +295,35 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         std::fs::write(key_path(&dir), "not a key").expect("write");
         assert_eq!(load_key(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_pending_key_is_made_once_and_kept_until_forgotten() {
+        let dir = temp("pending");
+        let first = pending_key(&dir).expect("made");
+        assert_eq!(pending_key(&dir).expect("reused"), first, "a retry reuses the same key");
+        assert_eq!(load_key(&dir), None, "the account key is not kept yet");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(PENDING_FILE)).expect("meta").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        forget_pending(&dir).expect("forgets");
+        forget_pending(&dir).expect("a missing pending key is not an error");
+        assert_ne!(pending_key(&dir).expect("a new one"), first, "after the answer a new creation has its own key");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_garbled_pending_file_is_replaced() {
+        let dir = temp("pending-garbled");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join(PENDING_FILE), "not a key").expect("write");
+        let key = pending_key(&dir).expect("made");
+        assert!(AccountKey::parse(&key).is_ok());
+        assert_eq!(std::fs::read_to_string(dir.join(PENDING_FILE)).expect("read"), key);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

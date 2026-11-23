@@ -20,11 +20,33 @@ pub fn build_headers() -> [(&'static str, String); 2] {
     ]
 }
 
-/// An HTTP answer: its status and body.
+/// The longest wait a server's `Retry-After` can ask for, in seconds (a day). A bigger number is cut to
+/// it: a huge value would overflow the worker's clock, and no server means a day's silence.
+pub const MAX_RETRY_AFTER_SECS: u64 = 24 * 3600;
+
+/// An HTTP answer: its status, its body and the `Retry-After` the server sent, in seconds (only the
+/// integer form is read; an HTTP date gives `None`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Reply {
     pub status: u16,
     pub body: Vec<u8>,
+    pub retry_after: Option<u64>,
+}
+
+/// The `Retry-After` of the last response in a header dump (`curl -D`, which keeps every response's
+/// block, redirects included): the seconds, cut to [`MAX_RETRY_AFTER_SECS`], or `None`.
+pub fn retry_after_of(dump: &str) -> Option<u64> {
+    let mut found = None;
+    for line in dump.lines() {
+        if line.starts_with("HTTP/") {
+            found = None;
+        } else if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("retry-after") {
+                found = value.trim().parse::<u64>().ok().map(|s| s.min(MAX_RETRY_AFTER_SECS));
+            }
+        }
+    }
+    found
 }
 
 /// The transport. The sync code takes one, so the tests can run it against the real server or
@@ -37,11 +59,12 @@ pub trait Net: Send + Sync {
 /// A header line in a file only this user can read (0600 on unix), removed when dropped: how the
 /// account key reaches curl without appearing in its arguments.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-struct HeaderFile(std::path::PathBuf);
+pub(crate) struct HeaderFile(pub(crate) std::path::PathBuf);
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 impl HeaderFile {
-    fn new(line: &str) -> std::io::Result<HeaderFile> {
+    /// A new private file holding `line` (`""` for an empty one, such as a header dump).
+    pub(crate) fn new(line: &str) -> std::io::Result<HeaderFile> {
         use std::io::Write;
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
         let path = std::env::temp_dir().join(format!("razdor-cloud-{}-{nanos}.h", std::process::id()));
@@ -92,6 +115,9 @@ impl Net for Curl {
             }
             None => None,
         };
+        // The response headers go to a private file (`-D`): the Retry-After is read from it.
+        let dump = HeaderFile::new("").map_err(|e| format!("curl: header dump: {e}"))?;
+        cmd.arg("-D").arg(&dump.0);
         cmd.args(["-o", "-", "-w", "\n%{http_code}"]);
         if body.is_some() {
             cmd.args(["--data-binary", "@-"]).stdin(Stdio::piped());
@@ -114,7 +140,9 @@ impl Net for Curl {
         if !out.status.success() {
             return Err(format!("curl: exit {}", out.status.code().unwrap_or(-1)));
         }
-        split_reply(&out.stdout)
+        let mut reply = split_reply(&out.stdout)?;
+        reply.retry_after = std::fs::read(&dump.0).ok().and_then(|head| retry_after_of(&String::from_utf8_lossy(&head)));
+        Ok(reply)
     }
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -134,8 +162,8 @@ pub struct Phone {
 impl Net for Phone {
     fn send(&self, method: &str, url: &str, key: Option<&str>, body: Option<&[u8]>) -> Result<Reply, String> {
         let [(_, version), (_, commit)] = build_headers();
-        let (status, body) = crate::update::phone_request(method, url, key, body, self.seconds, &version, &commit)?;
-        Ok(Reply { status, body })
+        let (status, body, retry_after) = crate::update::phone_request(method, url, key, body, self.seconds, &version, &commit)?;
+        Ok(Reply { status, body, retry_after })
     }
 }
 
@@ -178,7 +206,7 @@ fn split_reply(out: &[u8]) -> Result<Reply, String> {
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .ok_or("curl: bad status code")?;
-    Ok(Reply { status, body: out[..cut].to_vec() })
+    Ok(Reply { status, body: out[..cut].to_vec(), retry_after: None })
 }
 
 /// A one-shot local HTTP server for the transports' tests: it answers the first request with 200
@@ -223,6 +251,19 @@ mod tests {
         assert!(head.contains(&format!("x-razdor-commit: {commit}")), "the commit header: {head}");
         let names: Vec<&str> = build_headers().iter().map(|(name, _)| *name).collect();
         assert_eq!(names, ["x-razdor-version", "x-razdor-commit"]);
+    }
+
+    #[test]
+    fn retry_after_is_read_from_the_last_response_in_the_dump() {
+        assert_eq!(retry_after_of("HTTP/2 429\r\nRetry-After: 120\r\n\r\n"), Some(120));
+        // A redirect's block does not count: the last response is the answer.
+        assert_eq!(retry_after_of("HTTP/1.1 302 Found\nRetry-After: 5\n\nHTTP/2 200\n"), None);
+        assert_eq!(retry_after_of("HTTP/2 503\nretry-after:  7 \n"), Some(7), "name case and spaces");
+        // An HTTP date is no number, so no wait.
+        assert_eq!(retry_after_of("HTTP/2 503\nRetry-After: Wed, 21 Oct 2026 07:28:00 GMT\n"), None);
+        assert_eq!(retry_after_of("HTTP/2 503\n"), None);
+        // A number past a day is cut to a day.
+        assert_eq!(retry_after_of("HTTP/2 429\nRetry-After: 999999999\n"), Some(MAX_RETRY_AFTER_SECS));
     }
 
     #[test]

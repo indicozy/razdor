@@ -218,8 +218,10 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
 - The sender never holds the queue's lock during a request, so a frame never waits for the network.
 - 2xx sends. 408, 429 and 5xx, and transport failures, wait: 1 minute, doubled each time, at most six
   hours, each wait with ±25% jitter (`worker::retry_wait`, `jitter::jittered`, seeded from the install id).
-  Any other 4xx is dropped (a refused body is never sent again: the server bans senders that
-  keep sending invalid data). A 429 or 503 also pauses the host (`mirror::throttled`).
+  A `Retry-After` longer than that wait is the wait (`update::post` reads it, `Reply.retry_after`). Any other
+  4xx is dropped (a refused body is never sent again: the server bans senders that
+  keep sending invalid data). A 429 or 503 also pauses the host (`mirror::throttled`, with the same
+  `Retry-After`).
 - The mirror's pauses are per host: `worker::step` takes the first address of the `api` list that is not
   paused.
 - The panic hook writes a file only. Nothing is queued from the hook; the next start queues it.
@@ -280,7 +282,12 @@ Off-screen: `RAZDOR_SCENE_CONSENT=1`, `RAZDOR_SCENE_CRASH=save|none`, `RAZDOR_SC
 The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`; the rest is behind it.
 
 - `account.rs`: the account key (`<cloud folder>/account.key`, 0600 on unix, written through a temporary
-  file and a rename). `phrase` and `key_from_phrase` turn the key into 53 characters of the link alphabet
+  file and a rename). The device makes that key itself (`account::new_key`: 32 random bytes from the OS, as
+  64 lowercase hex). Creating an account sends it: `POST /v1/account` with `AccountNew { key }`, so a retry
+  of a lost answer gets the same account back. The key is stored first as `<cloud folder>/pending.key`
+  (0600, `account::pending_key`); a retry reuses it, and a success keeps the answer's key as `account.key`
+  and deletes the pending file. The worker's `CreateAccount` does nothing when the device is already linked,
+  so a retry that runs after the player's own try never makes a second account. `phrase` and `key_from_phrase` turn the key into 53 characters of the link alphabet
   (52 base-31 digits and a check digit) and back; a typo fails the check. The key is never the analytics
   install id.
 - `device.id` (`account::device_id`): this device's random id, 32 hex, made once in the cloud folder. Its rows
@@ -296,12 +303,16 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
 - `pack.rs`: zstd (level 9) on the client, the SHA-256 of the packed bytes (the hash the server checks), and
   the limits in both directions.
 - `http.rs`: the `Net` transport. Desktop runs `curl` (the key in the `x-razdor-key` header, the body on
-  stdin). Android and iOS have no transport yet: their requests fail as offline. Every API request (cloud,
+  stdin). The response headers go to a private dump file (`curl -D`, 0600), and the `Retry-After` of the
+  last response is read from it (`retry_after_of`: integer seconds only, an HTTP date is no wait, a value
+  past a day is cut to a day). Android's `razdorRequest` and `razdorPost` put it in their status line
+  (`HTTP <code> retry-after <s>`), which `update::http_status` reads. `Reply.retry_after` carries it up. Android and iOS have no transport yet: their requests fail as offline. Every API request (cloud,
   telemetry, the health probe) also sends `x-razdor-version` (the app version) and `x-razdor-commit` (the
   build's commit, `unknown` without git): `build_headers`, on desktop and Android alike; the downloads do not.
 - `api.rs`: the typed calls over `Net`, every body validated both ways. A status maps onto `CloudError`:
-  409 `Conflict`, 413 `Full`, 404 `NotFound`, 401 and 403 `Unauthorized`, 408, 429 and 5xx `Offline`, any other
-  4xx `Refused`, a bad answer `Bad`.
+  409 `Conflict`, 413 `Full`, 404 `NotFound`, 401 and 403 `Unauthorized`, 408, 429 and 5xx `Throttled { why,
+  retry_after }` (offline-like: retried, the server's `Retry-After` in seconds, 0 when it sent none), no
+  answer at all `Offline`, any other 4xx `Refused`, a bad answer `Bad`.
 - `sync.rs`: over the `Local` trait (this device's saves and documents, implemented by the game's store).
   - `push` (the mirror): lists the account, then `sort_rows` splits this device's own rows: a row whose raw
     hash is no longer on the device (a save deleted or overwritten here), or a second row of one content, is
@@ -322,8 +333,11 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
 - `mod.rs`: `Cloud` runs the jobs (`Job::CreateAccount`, `Link`, `Redeem`, `DeleteAccount`, `Sync` (start and
   the button), `Pull`, `Push` (exit and minimise), `Refresh` (the «Облако» tab), `Download(id)`) on one
   background thread. `request` only queues; `snapshot` gives the `Shared` state (phase, states, others,
-  newer saves, quota, the last link code, errors); `state_of` gives one save's icon. Offline, a sync
-  retries after 1 minute, doubling up to 6 hours. Without an account nothing is sent.
+  newer saves, quota, the last link code, errors); `state_of` gives one save's icon. Offline (`Offline` or
+  `Throttled`), a retryable job (the syncs, `Refresh`, `CreateAccount`) retries after 1 minute, doubling up
+  to 6 hours. Each wait is `jittered(backoff, random)`: the backoff times a factor from 0.8 to 1.2 (the OS's
+  random bytes; never under 1 s). The wait is then `max(` that, the server's `Retry-After` `)`
+  (`retry_wait_secs`). Without an account nothing is sent.
   A failed sync (any error but offline or full) sets `paused`: `request` then drops the automatic
   Sync, Pull, Push and Refresh (the start, the exit, minimising) and logs each drop. Only the player's
   requests run, through `request_by_player` («Синхронизировать», the recovery phrase, turning the cloud on),

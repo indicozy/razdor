@@ -7,6 +7,7 @@ use razdor_wire::cloud::{
     AccountCreated, AccountNew, BenchReport, HubList, LinkIssued, LinkRedeem, LinkRedeemed, Marks,
     SaveList, SaveMeta, SavePut, SyncedSettings,
 };
+use razdor_wire::ids::AccountKey;
 use razdor_wire::{frame, paths, Validate, SCHEMA};
 use serde::de::DeserializeOwned;
 
@@ -16,8 +17,11 @@ use super::pack::sha256_hex;
 /// Why a cloud call failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CloudError {
-    /// No answer: no network, a timeout, a throttle or a server error. Tried again later.
+    /// No answer: no network, a timeout. Tried again later.
     Offline(String),
+    /// The server is busy or asks to wait (a 408, 429 or 5xx): offline-like, retried later, and not
+    /// before `retry_after` seconds (0 when the server sent no `Retry-After`).
+    Throttled { why: String, retry_after: u64 },
     /// The account's quota is full: «Облако заполнено, удалите старые сохранения».
     Full,
     /// Refused because of a conflict or a limit (a map's save count, a session that changed); the
@@ -37,6 +41,7 @@ impl std::fmt::Display for CloudError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CloudError::Offline(why) => write!(f, "offline: {why}"),
+            CloudError::Throttled { why, retry_after } => write!(f, "offline: {why} (retry after {retry_after} s)"),
             CloudError::Full => write!(f, "the cloud is full"),
             CloudError::Conflict(text) => write!(f, "conflict: {text}"),
             CloudError::NotFound => write!(f, "not found"),
@@ -67,14 +72,14 @@ impl Api {
             None
         };
         let url = format!("{}{path}", self.base);
-        let Reply { status, body: answer } = self.net.send(method, &url, key, body).map_err(CloudError::Offline)?;
+        let Reply { status, body: answer, retry_after } = self.net.send(method, &url, key, body).map_err(CloudError::Offline)?;
         match status {
             200..=299 => Ok(answer),
             401 | 403 => Err(CloudError::Unauthorized),
             404 => Err(CloudError::NotFound),
             409 => Err(CloudError::Conflict(message(&answer))),
             413 => Err(CloudError::Full),
-            408 | 429 | 500..=599 => Err(CloudError::Offline(format!("HTTP {status}"))),
+            408 | 429 | 500..=599 => Err(CloudError::Throttled { why: format!("HTTP {status}"), retry_after: retry_after.unwrap_or(0) }),
             _ => Err(CloudError::Refused(message(&answer))),
         }
     }
@@ -90,9 +95,12 @@ impl Api {
         serde_json::to_vec(value).map_err(|e| CloudError::Refused(e.to_string()))
     }
 
-    /// A new account: its key (the game keeps it; the server keeps only its hash).
-    pub fn create_account(&self) -> Result<String, CloudError> {
-        let body = Self::json_body(&AccountNew { schema: SCHEMA, key: None })?;
+    /// A new account under the device's own `key` (hex, see `account::pending_key`). The server answers a
+    /// key it already knows with the same account, so a retry is harmless. The answer's key is returned
+    /// (it is the same key); the game keeps it (the server keeps only its hash).
+    pub fn create_account(&self, key: &str) -> Result<String, CloudError> {
+        let key = AccountKey::parse(key).map_err(|e| CloudError::Refused(e.to_string()))?;
+        let body = Self::json_body(&AccountNew { schema: SCHEMA, key: Some(key) })?;
         let answer = self.send("POST", paths::ACCOUNT, Some(&body), false)?;
         let created: AccountCreated = Self::decode(&answer)?;
         Ok(created.key.as_str().to_string())
@@ -238,20 +246,30 @@ mod tests {
     struct Stub {
         reply: Mutex<Result<Reply, String>>,
         calls: Mutex<Vec<(String, String, Option<String>)>>,
+        bodies: Mutex<Vec<String>>,
+    }
+
+    impl Stub {
+        fn new(reply: Result<Reply, String>) -> Arc<Stub> {
+            Arc::new(Stub { reply: Mutex::new(reply), calls: Mutex::new(Vec::new()), bodies: Mutex::new(Vec::new()) })
+        }
+
+        /// The last request's body, as text (empty for none).
+        fn last_body(&self) -> String {
+            self.bodies.lock().expect("lock").last().cloned().unwrap_or_default()
+        }
     }
 
     impl Net for Stub {
-        fn send(&self, method: &str, url: &str, key: Option<&str>, _body: Option<&[u8]>) -> Result<Reply, String> {
+        fn send(&self, method: &str, url: &str, key: Option<&str>, body: Option<&[u8]>) -> Result<Reply, String> {
             self.calls.lock().expect("lock").push((method.into(), url.into(), key.map(String::from)));
+            self.bodies.lock().expect("lock").push(body.map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default());
             self.reply.lock().expect("lock").clone()
         }
     }
 
     fn stub(status: u16, body: &str) -> Arc<Stub> {
-        Arc::new(Stub {
-            reply: Mutex::new(Ok(Reply { status, body: body.as_bytes().to_vec() })),
-            calls: Mutex::new(Vec::new()),
-        })
+        Stub::new(Ok(Reply { status, body: body.as_bytes().to_vec(), retry_after: None }))
     }
 
     #[test]
@@ -261,8 +279,8 @@ mod tests {
             (413, "{}", CloudError::Full),
             (404, "", CloudError::NotFound),
             (401, "", CloudError::Unauthorized),
-            (429, "", CloudError::Offline("HTTP 429".into())),
-            (503, "", CloudError::Offline("HTTP 503".into())),
+            (429, "", CloudError::Throttled { why: "HTTP 429".into(), retry_after: 0 }),
+            (503, "", CloudError::Throttled { why: "HTTP 503".into(), retry_after: 0 }),
             (400, "{\"error\":\"bad\"}", CloudError::Refused("bad".into())),
         ];
         for (status, body, want) in cases {
@@ -270,6 +288,27 @@ mod tests {
             let api = Api::new(net, "http://x", Some("k".repeat(32)));
             assert_eq!(api.list_saves().expect_err("refused"), want, "status {status}");
         }
+    }
+
+    #[test]
+    fn a_throttle_keeps_the_servers_retry_after() {
+        let net = Stub::new(Ok(Reply { status: 429, body: Vec::new(), retry_after: Some(120) }));
+        let api = Api::new(net, "http://x", Some("k".repeat(32)));
+        assert_eq!(
+            api.list_saves(),
+            Err(CloudError::Throttled { why: "HTTP 429".into(), retry_after: 120 })
+        );
+    }
+
+    #[test]
+    fn the_account_is_created_under_the_devices_key() {
+        let key = "cd".repeat(32);
+        let net = stub(200, &format!("{{\"key\":\"{key}\"}}"));
+        let api = Api::new(net.clone(), "http://x", None);
+        assert_eq!(api.create_account(&key).expect("creates"), key);
+        let sent = net.last_body();
+        assert!(sent.contains(&format!("\"key\":\"{key}\"")), "the body carries the key: {sent}");
+        assert!(api.create_account("not hex").is_err(), "a bad key is refused before it is sent");
     }
 
     #[test]
@@ -299,10 +338,7 @@ mod tests {
 
     #[test]
     fn a_transport_failure_is_offline() {
-        let net = Arc::new(Stub {
-            reply: Mutex::new(Err("curl: exit 7".into())),
-            calls: Mutex::new(Vec::new()),
-        });
+        let net = Stub::new(Err("curl: exit 7".into()));
         let api = Api::new(net, "http://x", Some("ab".repeat(32)));
         assert_eq!(api.list_saves(), Err(CloudError::Offline("curl: exit 7".into())));
     }

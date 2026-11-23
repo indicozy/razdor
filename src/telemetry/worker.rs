@@ -114,10 +114,11 @@ pub fn step(hub: &Hub, transport: &dyn Transport, api: &[String], now: u64) -> S
         Ok(reply) if reply.status == 408 || reply.status == 429 || reply.status >= 500 => {
             crate::diag!("telemetry: {url}: HTTP {}, retried later", reply.status);
             if reply.status == 429 || reply.status == 503 {
-                mirror::throttled(&url, None);
+                mirror::throttled(&url, reply.retry_after);
             }
             let tries = meta.tries + 1;
-            let wait = retry_wait(hub, meta.tries);
+            // The server's Retry-After, when it is longer than the backoff, is the wait.
+            let wait = retry_wait(hub, meta.tries).max(reply.retry_after.unwrap_or(0));
             let _ = queue.reschedule(meta.seq, tries, now + wait);
             Step::Wait(Some(wait))
         }
@@ -199,7 +200,7 @@ mod tests {
     }
 
     fn reply(status: u16, body: &str) -> Reply {
-        Reply { status, body: body.as_bytes().to_vec() }
+        Reply { status, body: body.as_bytes().to_vec(), retry_after: None }
     }
 
     #[test]
@@ -226,6 +227,19 @@ mod tests {
         let Step::Wait(Some(wait)) = waited else { panic!("{waited:?}") };
         assert!((45..=75).contains(&wait), "a minute with ±25% jitter: {wait}");
         assert_eq!(hub.queue().metas().next().unwrap().not_before, 1_000 + wait);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_retry_after_longer_than_the_backoff_is_the_wait() {
+        let (hub, dir) = hub("retry-after");
+        hub.set_consent(Consent::Yes, "1.5.4");
+        let a = host("retry-after");
+        hub.enqueue_json("/v1/events", Class::Consent, b"{}".to_vec()).unwrap();
+        let asked = Reply { status: 429, body: Vec::new(), retry_after: Some(900) };
+        let waited = step(&hub, &Fixed(Ok(asked)), std::slice::from_ref(&a), 1_000);
+        assert_eq!(waited, Step::Wait(Some(900)), "the server's 900 s beats the minute's backoff");
+        assert_eq!(hub.queue().metas().next().unwrap().not_before, 1_900);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

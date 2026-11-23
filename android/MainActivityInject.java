@@ -526,6 +526,7 @@ public String razdorPost(String url, String bodyPath, String version, String com
             }
         }
         int code = connection.getResponseCode();
+        String retryAfter = code / 100 != 2 ? connection.getHeaderField("Retry-After") : null;
         java.io.InputStream reply = code / 100 == 2 ? connection.getInputStream() : connection.getErrorStream();
         StringBuilder body = new StringBuilder();
         if (reply != null) {
@@ -537,7 +538,7 @@ public String razdorPost(String url, String bodyPath, String version, String com
                 }
             }
         }
-        return "HTTP " + code + "\n" + body;
+        return "HTTP " + code + (retryAfter == null ? "" : " retry-after " + retryAfter.trim()) + "\n" + body;
     } catch (java.net.SocketTimeoutException e) {
         return "stalled: " + e;
     } catch (Exception e) {

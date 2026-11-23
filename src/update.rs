@@ -464,18 +464,23 @@ fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
-/// One POST of `body` to `url` (the analytics' requests, `telemetry`): the status and the reply's
-/// body. A transport failure is `Err`; any HTTP answer is `Ok`, whatever its status. Not retried here.
+/// One POST of `body` to `url` (the analytics' requests, `telemetry`): the status, the reply's body and
+/// the server's `Retry-After` in seconds. A transport failure is `Err`; any HTTP answer is `Ok`, whatever
+/// its status. Not retried here.
 /// `version` and `commit` are the build's headers for the API (`cloud::http::build_headers`).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
     use std::io::Write;
     use std::process::Stdio;
     // The body goes on stdin, never on the command line (it can be a few megabytes).
+    // The response headers go to a private file (`-D`): the Retry-After is read from it.
+    let dump = crate::cloud::http::HeaderFile::new("").map_err(|e| format!("curl: header dump: {e}"))?;
     let mut cmd = curl_base();
     cmd.args(["--max-time", &seconds.to_string(), "-X", "POST", "-H", "Content-Type: application/json"])
         .args(["-H", &format!("{}: {version}", razdor_wire::paths::VERSION_HEADER)])
         .args(["-H", &format!("{}: {commit}", razdor_wire::paths::COMMIT_HEADER)])
+        .arg("-D")
+        .arg(&dump.0)
         .args(["--data-binary", "@-", "-w", "\n%{http_code}", url])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -489,18 +494,19 @@ pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: 
     if !out.status.success() {
         return Err(curl_why(out.status, &String::from_utf8_lossy(&out.stderr)));
     }
-    parse_post_reply_bytes(&out.stdout)
+    let retry_after = std::fs::read(&dump.0).ok().and_then(|head| crate::cloud::http::retry_after_of(&String::from_utf8_lossy(&head)));
+    parse_post_reply_bytes(&out.stdout).map(|(code, body)| (code, body, retry_after))
 }
 
 /// One POST (see the desktop's); on the phones it is the phones' own request.
 #[cfg(any(target_os = "android", target_os = "ios"))]
-pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
     phone::post(url, body, seconds, version, commit)
 }
 
 /// One cloud request on Android (`cloud::http::Phone`): the phone's own `HttpURLConnection` (`phone::request`).
 #[cfg(target_os = "android")]
-pub(crate) fn phone_request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>), String> {
+pub(crate) fn phone_request(verb: &str, url: &str, key: Option<&str>, body: Option<&[u8]>, seconds: u32, version: &str, commit: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
     phone::request(verb, url, key, body, seconds, version, commit)
 }
 
@@ -515,13 +521,22 @@ fn parse_post_reply_bytes(out: &[u8]) -> Result<(u16, Vec<u8>), String> {
     }
 }
 
-/// The phones' reply: `HTTP <code>` on the first line, the body after it; anything else is the failure's text.
+/// The phones' reply: `HTTP <code>` on the first line (with ` retry-after <seconds>` when the server sent
+/// one), the body after it; anything else is the failure's text.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
-pub(crate) fn parse_post_reply(text: &str) -> Result<(u16, Vec<u8>), String> {
+pub(crate) fn parse_post_reply(text: &str) -> Result<(u16, Vec<u8>, Option<u64>), String> {
     let rest = text.strip_prefix("HTTP ").ok_or_else(|| if text.is_empty() { "no reply".to_string() } else { text.to_string() })?;
-    let (code, body) = rest.split_once('\n').unwrap_or((rest, ""));
-    let code = code.trim().parse::<u16>().map_err(|_| "post: no status".to_string())?;
-    Ok((code, body.as_bytes().to_vec()))
+    let (line, body) = rest.split_once('\n').unwrap_or((rest, ""));
+    let (code, retry_after) = http_status(&format!("HTTP {line}")).ok_or_else(|| "post: no status".to_string())?;
+    Ok((code, body.as_bytes().to_vec(), retry_after))
+}
+
+/// The phones' status line (`HTTP <code>`, optionally ` retry-after <seconds>`): the code and the wait,
+/// the wait cut to [`crate::cloud::http::MAX_RETRY_AFTER_SECS`]. None for a text that is no status line.
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) fn http_status(text: &str) -> Option<(u16, Option<u64>)> {
+    let (code, retry_after) = crate::mirror::http_reply(text)?;
+    Some((code, retry_after.map(|s| s.min(crate::cloud::http::MAX_RETRY_AFTER_SECS))))
 }
 
 /// The validators a copy was fetched with: the server's `ETag` and `Last-Modified`, sent back as
