@@ -82,23 +82,11 @@ pub fn row_cells<const N: usize>(r: Rect) -> [Rect; N] {
     std::array::from_fn(|i| Rect::new(r.x + i as f32 * (w + gap), r.y, w, r.h))
 }
 
-/// A button of the row: the green marble art of the original's buttons, three-sliced so its
-/// ends keep their shape, Down while `lit`. A hover edge marks an unlit one. Without the art, a
-/// plain green panel.
+/// A button of the row: a marble button as every other one ([`chrome::button_frame`]), Down and ringed
+/// in gold while `lit` (Razdor's chosen tab). A hover edge marks an unlit one.
 fn row_face(r: Rect, lit: bool, hover: bool) {
-    let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
-    let state = if lit { "Down" } else { "Up" };
-    match chrome::win_fx(&format!("{name}{state}"), chrome::Fx::Plain) {
-        Some(t) => chrome::three_slice(&t, r, 14.0, WHITE),
-        None => {
-            let bg = if lit { Color::new(0.16, 0.36, 0.28, 1.0) } else { Color::new(0.10, 0.25, 0.19, 1.0) };
-            draw_rectangle(r.x, r.y, r.w, r.h, bg);
-            draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, chrome::SILVER);
-        }
-    }
-    if lit {
-        draw_rectangle_lines(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 2.0, ACCENT);
-    } else if hover {
+    chrome::button_frame(r, lit, lit.then_some(chrome::GOLD));
+    if hover && !lit {
         draw_rectangle_lines(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 1.0, INK);
     }
 }

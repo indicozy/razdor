@@ -615,13 +615,13 @@ Enter picks the first match up. An empty worn slot on the unit panel is the orig
 The backpack's view (Razdor's, view only: the pack keeps its order) is one row at the top of the
 army window's backpack (`items_view::squad`, y 31, x 258 to 826): nine equal buttons with small
 even gaps (`item_filter::row_cells`), drawn on the green marble of the original's buttons
-(`item_filter::row_face`: `Btn1`/`Btn2`/`Btn3` Up, Down while lit, three-sliced so the ends keep
-their shape). The first eight are the group buttons (`item_filter::group_row`, in
+(`item_filter::row_face`: `chrome::button_frame`, a marble button as every other, see "How to draw a
+button"; Down while lit, its outline gold). The first eight are the group buttons (`item_filter::group_row`, in
 `item_filter::ROW`: helms, armour, weapons, shields, rings, amulets, potions, other;
 `rules::pack_order::ItemGroup`, each kind in exactly one). Each shows its group's picture
 (`item_filter::representative`: the lowest id of the group, but a shield prefers an item named
 «щит», so the shields button shows a shield, not the bracers) fitted inside, its name as a hint (`group_label`). A click on a
-group shows only it and holds its button down (accent edge); a click on the lit one shows all
+group shows only it and holds its button down (gold outline); a click on the lit one shows all
 again (there is no "all" button). The ninth is the search (`item_filter::search_button`): idle it
 reads «Поиск»; a click, Ctrl+F or a typed letter makes it the field, the text shows on its face
 and it stays lit while a query is held; Esc clears it. Its hover hint gives the found and of
@@ -1225,6 +1225,31 @@ never written, only the look is restored (`photo::leave` returns it).
   The regression cases are `photo-*` in `tools/ui-regress/scenes.txt` (no shutter case: its notice has the time).
 - **Tests.** `ui::photo::tests` (the limits, the drag's slop and its turn, the strip's phone targets, the stamp,
   the file name, the flip, the PNG round trip, the entry and leave with the look given back, the pause gate).
+
+## How to draw a button
+
+A marble button is drawn one of two ways, never a third, and the choice is made in one place:
+`chrome::button_plan` (pure, tested), called by `chrome::marble_frame`, which every marble button draws through
+(`chrome::marble_button` and its variants, `defeat_button`, `quest_button`, `composed_button*`, `button_frame`).
+New code draws a marble button through one of those, never with its own pick of a picture or `three_slice`
+(the test `ui::chrome::tests::no_button_picture_is_three_sliced` fails with the file and line of one that does).
+
+1. **The game's own picture.** When the button is as wide as one of the game's pictures (`Graphics/Windows/Btn1`,
+   `Btn2`, `Btn3`, `Up` and `Down`; sizes read from the files, `chrome::BUTTON_ART` without them) at the button's
+   height, within `chrome::BUTTON_ART_SLACK` px of the art (a scaled layout's rounding), that picture is drawn
+   whole, scaled alike both ways (`button_grow`, a phone's height).
+2. **A composed button.** At any other width (a square, a button narrower or wider than the art) it is built as
+   the game's own six buttons are built (`ui/marble_button.rs`): a cut of the tiling `Windows/Win-marble` under
+   the bevel, the 1-px outline from `Windows/SteelLine` walked as the original frames its windows (0x48d1d4).
+   `marble_button::button` makes the picture at the art's height and the button's width at that scale. Made
+   pictures are kept per size, state, tint and ring, the most recently drawn 128 (`BUTTON_CACHE_KEEP`), so a
+   width that changes every frame cannot fill the memory. Examples: the tree's «[ ]», «Добавить карту…», the new
+   game's «...», the rules window's choices and «Ок».
+3. **Never** stretch or squeeze the marble texture or a button picture to another size, and never glue pieces
+   of ready buttons together. A selected state (a chosen tab) is the same button with its outline in
+   `chrome::GOLD` instead of the steel (`marble_button::ring`, the `ring` argument of `composed_button_sized` and
+   `button_frame`). The red buttons are the same choice with the picture tinted: the quest's (`Fx::ButtonRed`)
+   and the defeat window's (`Fx::RotateRgb`, 0x4dba90); a disabled button is grey whatever its tint.
 
 ## How to add a window
 

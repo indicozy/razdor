@@ -64,6 +64,8 @@ struct Chrome {
     /// are one file, and a new tuning makes its texture again.
     visual_images: HashMap<String, Option<Image>>,
     animations: HashMap<String, Option<Vec<Texture2D>>>,
+    /// The button pictures [`button_texture`] made, most recently drawn first.
+    buttons: Vec<(String, Option<Texture2D>)>,
     texts: Option<Option<Ini>>,
     /// The data language's `<Prefix>_DiscordTimes.ini` made by razdor-translate (for English
     /// the install's, else Razdor's copy), by the prefix it was read for
@@ -106,7 +108,7 @@ pub fn set_install(dir: PathBuf) {
         preload::release(path);
     }
     CHROME.with(|c| {
-        *c.borrow_mut() = Some(Chrome { dir, textures: HashMap::new(), visual_textures: HashMap::new(), visual_images: HashMap::new(), animations: HashMap::new(), texts: None, english_texts: None, english_fallback: None })
+        *c.borrow_mut() = Some(Chrome { dir, textures: HashMap::new(), visual_textures: HashMap::new(), visual_images: HashMap::new(), animations: HashMap::new(), buttons: Vec::new(), texts: None, english_texts: None, english_fallback: None })
     });
 }
 
@@ -2617,72 +2619,185 @@ pub fn parchment(r: Rect, ornaments: bool) {
 /// A text button on green marble with a silver edge (the original's `Btn*`). True when
 /// clicked this frame.
 pub fn marble_button(r: Rect, label: &str, enabled: bool, hover: bool) {
-    marble_button_tinted(r, label, enabled, hover, false);
+    marble_frame(r, enabled, hover, Fx::Plain, None);
+    button_label(r, label, enabled, hover, false);
 }
 
-/// The quest action uses the same marble pattern in the original's warm red palette.
 /// The event window's buttons in its defeat look: the green ones with their channels turned
-/// (red takes green: 0x4dba90 → 0x48dd40(2, 3, 1); 0x4aa263 swaps them in).
+/// (red takes green: 0x4dba90 → 0x48dd40(2, 3, 1); 0x4aa263 swaps them in). A disabled one is
+/// grey, as a disabled green one.
 pub fn defeat_button(r: Rect, label: &str, enabled: bool, hover: bool) {
-    let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
-    let state = if hover && enabled { "Down" } else { "Up" };
-    match win_fx(&format!("{name}{state}"), Fx::RotateRgb) {
-        Some(t) if enabled => {
-            three_slice(&t, r, 14.0, WHITE);
-            button_label(r, label, enabled, hover, false);
-        }
-        _ => marble_button(r, label, enabled, hover),
-    }
-}
-
-/// [`defeat_button`] with its art named (`Btn1`, `Btn2`, `Btn3`) rather than picked by the
-/// width on screen, for windows laid out in the original's pixels times a scale.
-pub fn defeat_button_art(r: Rect, art: &str, label: &str, hover: bool) {
-    let state = if hover { "Down" } else { "Up" };
-    match win_fx(&format!("{art}{state}"), Fx::RotateRgb) {
-        Some(t) => {
-            three_slice(&t, r, 14.0, WHITE);
-            button_label(r, label, true, hover, false);
-        }
-        None => marble_button(r, label, true, hover),
-    }
+    marble_frame(r, enabled, hover, Fx::RotateRgb, None);
+    button_label(r, label, enabled, hover, false);
 }
 
 /// The quest action uses the same button art, with the original's red enabled state.
 pub fn quest_button(r: Rect, label: &str, enabled: bool, hover: bool) {
-    marble_button_tinted(r, label, enabled, hover, true);
+    marble_frame(r, enabled, hover, Fx::ButtonRed, None);
+    button_label(r, label, enabled, hover, true);
 }
 
-fn marble_button_tinted(r: Rect, label: &str, enabled: bool, hover: bool, quest_red: bool) {
-    marble_frame(r, enabled, hover, quest_red);
-    button_label(r, label, enabled, hover, quest_red);
+/// The game's button pictures (`Graphics/Windows/<name>Up` and `<name>Down`) and their sizes in the
+/// art's pixels when the files cannot be read.
+pub const BUTTON_ART: [(&str, (f32, f32)); 3] = [("Btn1", (96.0, 36.0)), ("Btn2", (128.0, 36.0)), ("Btn3", (160.0, 36.0))];
+
+/// How far a button's width may be from a picture's, in the picture's pixels at the button's height, and
+/// still be that picture: the rounding of a layout made in the original's pixels times a scale.
+pub const BUTTON_ART_SLACK: f32 = 2.0;
+
+/// How many made button pictures are kept ([`button_texture`]): the most recently drawn ones, so a
+/// button whose size changes every frame cannot fill the memory.
+const BUTTON_CACHE_KEEP: usize = 128;
+
+/// How a marble button of a given size is drawn ([`button_plan`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonPlan {
+    /// The game's own picture [`BUTTON_ART`]`[i]`, whole, scaled to the button's height (both ways alike).
+    Whole(usize),
+    /// Made as the game's own pictures are made ([`super::marble_button`]): a cut of `Win-marble` under the
+    /// bevel and the steel outline, at the button's own width.
+    Composed,
 }
 
-/// The marble button's frame alone (its art, or the plain fallback), without its label.
-fn marble_frame(r: Rect, enabled: bool, hover: bool, quest_red: bool) {
-    let name = if r.w < 110.0 { "Btn1" } else if r.w < 145.0 { "Btn2" } else { "Btn3" };
-    let state = if hover && enabled { "Down" } else { "Up" };
-    let fx = if !enabled { Fx::Grey } else if quest_red { Fx::ButtonRed } else { Fx::Plain };
-    if let Some(t) = win_fx(&format!("{name}{state}"), fx) {
-        three_slice(&t, r, 14.0, WHITE);
-    } else {
-        let bg = match (enabled, hover, quest_red) {
-            (false, _, _) => Color::new(0.2, 0.22, 0.21, 1.0),
-            (true, true, true) => Color::new(0.55, 0.09, 0.04, 1.0),
-            (true, false, true) => Color::new(0.45, 0.06, 0.03, 1.0),
-            (true, true, false) => Color::new(0.16, 0.36, 0.28, 1.0),
-            (true, false, false) => Color::new(0.10, 0.25, 0.19, 1.0),
-        };
-        draw_rectangle(r.x, r.y, r.w, r.h, bg);
-        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
-        draw_rectangle_lines(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
+/// The one choice of how a marble button `w` × `h` px is drawn, for every marble button
+/// ([`marble_frame`]): the game's picture when the button is as wide as one of `arts` (the pictures'
+/// sizes, [`button_art_sizes`]) at the button's height, within [`BUTTON_ART_SLACK`]; else a composed
+/// one. Never a picture stretched or squeezed to another width. Pure.
+pub fn button_plan(w: f32, h: f32, arts: [(f32, f32); 3]) -> ButtonPlan {
+    if w > 0.0 && h > 0.0 {
+        for (i, (aw, ah)) in arts.into_iter().enumerate() {
+            if ah > 0.0 && (w * ah / h - aw).abs() <= BUTTON_ART_SLACK {
+                return ButtonPlan::Whole(i);
+            }
+        }
     }
+    ButtonPlan::Composed
+}
+
+/// The sizes of [`BUTTON_ART`]'s pictures, read from the install's `Up` files (the fallbacks without them).
+pub fn button_art_sizes() -> [(f32, f32); 3] {
+    BUTTON_ART.map(|(name, fallback)| win(&format!("{name}Up")).map_or(fallback, |t| (t.width(), t.height())))
+}
+
+/// The value kept under `key` in `cache` (most recently used first), moved to the front. Pure.
+fn recent_get<V: Clone>(cache: &mut Vec<(String, V)>, key: &str) -> Option<V> {
+    let i = cache.iter().position(|(k, _)| k == key)?;
+    let entry = cache.remove(i);
+    let v = entry.1.clone();
+    cache.insert(0, entry);
+    Some(v)
+}
+
+/// Keeps `v` under `key` at the front of `cache`, dropping the least recently used beyond `keep`. Pure.
+fn recent_put<V>(cache: &mut Vec<(String, V)>, key: String, v: V, keep: usize) {
+    cache.retain(|(k, _)| *k != key);
+    cache.insert(0, (key, v));
+    cache.truncate(keep);
+}
+
+/// A marble button's frame alone (its art, or the plain fallback), without its label: the one place a
+/// marble button's look is chosen ([`button_plan`]). `tint` is its colour as made from the green art
+/// ([`Fx::Plain`]; [`Fx::ButtonRed`], the quest's; [`Fx::RotateRgb`], the defeat's); a disabled button is
+/// grey whatever its tint. `ring`: its outline in that colour instead of the steel (Razdor's chosen tab,
+/// [`super::marble_button::ring`]).
+fn marble_frame(r: Rect, enabled: bool, hover: bool, tint: Fx, ring: Option<Color>) {
+    if let Some(t) = button_texture(r, hover && enabled, enabled, tint, ring) {
+        tex(&t, r, WHITE);
+        return;
+    }
+    let red = tint == Fx::ButtonRed;
+    let bg = match (enabled, hover, red) {
+        (false, _, _) => Color::new(0.2, 0.22, 0.21, 1.0),
+        (true, true, true) => Color::new(0.55, 0.09, 0.04, 1.0),
+        (true, false, true) => Color::new(0.45, 0.06, 0.03, 1.0),
+        (true, true, false) => Color::new(0.16, 0.36, 0.28, 1.0),
+        (true, false, false) => Color::new(0.10, 0.25, 0.19, 1.0),
+    };
+    draw_rectangle(r.x, r.y, r.w, r.h, bg);
+    draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, if enabled { SILVER } else { SILVER_DARK });
+    draw_rectangle_lines(r.x + 2.0, r.y + 2.0, r.w - 4.0, r.h - 4.0, 1.0, Color::new(0.0, 0.0, 0.0, 0.5));
+    if let Some(c) = ring {
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.0, c);
+    }
+}
+
+/// The picture [`marble_frame`] draws over `r`, by [`button_plan`]: the game's file as it is (with `tint` or
+/// grey), or one made at the art's height (36) and `r`'s width at that scale: composed, or a whole picture
+/// ringed. Made ones are kept per size, state, tint and ring ([`BUTTON_CACHE_KEEP`] of them). `None`
+/// without the art (no install).
+fn button_texture(r: Rect, down: bool, enabled: bool, tint: Fx, ring: Option<Color>) -> Option<Texture2D> {
+    use super::marble_button::{self as mb, State};
+    const ART_H: u32 = 36;
+    let state = if down { State::Down } else { State::Up };
+    let fx = if enabled { tint } else { Fx::Grey };
+    let plan = button_plan(r.w, r.h, button_art_sizes());
+    if let (ButtonPlan::Whole(i), None) = (plan, ring) {
+        return win_fx(&format!("{}{state:?}", BUTTON_ART[i].0), fx);
+    }
+    let s = r.h / ART_H as f32;
+    if s <= 0.0 {
+        return None;
+    }
+    let w = ((r.w / s).round() as u32).max(mb::BEVEL_DEPTH * 2);
+    let ring = ring.map(|c| [c.r, c.g, c.b].map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8));
+    let key = format!("{plan:?}:{w}:{state:?}:{fx:?}:{ring:?}");
+    let kept = CHROME.with(|c| c.borrow_mut().as_mut().map(|c| recent_get(&mut c.buttons, &key)));
+    match kept {
+        None => return None,
+        Some(Some(t)) => return t,
+        Some(None) => {}
+    }
+    let img = match plan {
+        ButtonPlan::Whole(i) => image(&format!("Windows/{}{state:?}.lit", BUTTON_ART[i].0)),
+        ButtonPlan::Composed => image("Windows/Win-marble.lit")
+            .zip(image("Windows/SteelLine.lit"))
+            .map(|(marble, steel)| mb::button(&marble, mb::offset(state), w, ART_H, state, &steel)),
+    };
+    let t = img.and_then(|mut img| {
+        // A tint turns the whole picture, then the ring is drawn in its own colour; a disabled one greys both.
+        if fx != Fx::Grey {
+            transform(&mut img, fx);
+        }
+        if let Some(rgb) = ring {
+            mb::ring(&mut img, rgb);
+        }
+        if fx == Fx::Grey {
+            transform(&mut img, Fx::Grey);
+        }
+        to_texture(&img)
+    });
+    CHROME.with(|c| {
+        if let Some(c) = c.borrow_mut().as_mut() {
+            recent_put(&mut c.buttons, key, t.clone(), BUTTON_CACHE_KEEP);
+        }
+    });
+    t
+}
+
+/// A marble button's frame without its label, Down while `down`, its outline in `ring` when given: the row
+/// buttons that draw their own content (the backpack's group buttons, `item_filter`).
+pub fn button_frame(r: Rect, down: bool, ring: Option<Color>) {
+    marble_frame(r, true, down, Fx::Plain, ring);
+}
+
+/// A marble button of any size with `label`, for Razdor's buttons the game has no art for (the tree's «[ ]»,
+/// «Добавить карту…», the new game's «...» and its rules window's buttons). It is [`marble_button`]: every
+/// marble button is the game's picture at the picture's width and composed at any other ([`button_plan`]).
+pub fn composed_button(r: Rect, label: &str, enabled: bool, hover: bool) {
+    marble_button(r, label, enabled, hover);
+}
+
+/// [`composed_button`] with its label drawn at `size` px, as [`marble_button_sized`] draws it, and its outline in
+/// `ring` instead of the steel when given (Razdor's chosen tab).
+pub fn composed_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, size: f32, ring: Option<Color>) {
+    marble_frame(r, enabled, hover, Fx::Plain, ring);
+    button_label_at(r, label, enabled, size);
 }
 
 /// A marble button whose label is drawn at the size `size` (px), not fitted to the button's height
 /// (Razdor's, a phone held upright: the event windows' OK, which must read at a finger's size).
 pub fn marble_button_sized(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
-    marble_frame(r, enabled, hover, false);
+    marble_frame(r, enabled, hover, Fx::Plain, None);
     button_label_at(r, label, enabled, size);
 }
 
@@ -2732,7 +2847,7 @@ pub fn wrap_words(label: &str, width: f32, measure_w: impl Fn(&str) -> f32) -> V
 /// fitted to the button by the caller), centred as a block. Nothing is shrunk or cut off (1552's mod
 /// buttons: the box grows to the words instead).
 pub fn marble_button_lines(r: Rect, lines: &[String], enabled: bool, hover: bool, size: f32) {
-    marble_frame(r, enabled, hover, false);
+    marble_frame(r, enabled, hover, Fx::Plain, None);
     let color = if !enabled { Color::new(0.6, 0.6, 0.58, 1.0) } else { Color::new(1.0, 0.98, 0.94, 1.0) };
     let line_h = size * 1.25;
     let top = r.y + (r.h - lines.len() as f32 * line_h) / 2.0;
@@ -2771,7 +2886,7 @@ fn button_label_at(r: Rect, label: &str, enabled: bool, size: f32) {
 /// face, which draws about a quarter larger at the same size. Razdor's own, for the tree window's phone
 /// buttons; the other buttons keep [`marble_button_sized`].
 pub fn marble_button_plain(r: Rect, label: &str, enabled: bool, hover: bool, size: f32) {
-    marble_frame(r, enabled, hover, false);
+    marble_frame(r, enabled, hover, Fx::Plain, None);
     let color = if !enabled { Color::new(0.6, 0.6, 0.58, 1.0) } else { Color::new(1.0, 0.98, 0.94, 1.0) };
     super::typography::Role::Body.with(|| {
         super::dt_font::legacy_metrics_if(true, || {
@@ -3730,5 +3845,108 @@ mod tests {
         assert_eq!(cover_source((1024.0, 768.0), (1920.0, 1080.0)), None);
         assert_eq!(cover_source((1024.0, 768.0), (2160.0, 1080.0)), None);
         assert_eq!(cover_source((1024.0, 768.0), (800.0, 800.0)), None);
+    }
+
+    /// A button as wide as a picture of the game at its height is that picture, whole: at the art's size, at a
+    /// scale, grown on a phone, and within the slack of a scaled layout's rounding.
+    #[test]
+    fn a_button_as_wide_as_a_picture_is_that_picture() {
+        let arts = BUTTON_ART.map(|(_, size)| size);
+        for (i, (w, h)) in arts.into_iter().enumerate() {
+            assert_eq!(button_plan(w, h, arts), ButtonPlan::Whole(i), "{w} × {h}");
+            for scale in [0.75, 1.333, 2.0, 1.25 * 1.5] {
+                assert_eq!(button_plan(w * scale, h * scale, arts), ButtonPlan::Whole(i), "{w} × {h} times {scale}");
+            }
+            for off in [-BUTTON_ART_SLACK, BUTTON_ART_SLACK] {
+                assert_eq!(button_plan((w + off) * 2.0, h * 2.0, arts), ButtonPlan::Whole(i), "{off} art px off at twice the size");
+            }
+        }
+        let read = [(100.0, 40.0), (130.0, 40.0), (170.0, 40.0)];
+        assert_eq!(button_plan(130.0, 40.0, read), ButtonPlan::Whole(1), "the sizes are the install's");
+        assert_eq!(button_plan(117.0, 36.0, read), ButtonPlan::Whole(1), "130 × 40 at 36 high is 117 wide");
+    }
+
+    /// Any other width is a composed button, never a picture stretched or squeezed to it: the old pick's edges
+    /// (110, 145), a square, a narrow and a wide button, just past the slack, and no size at all.
+    #[test]
+    fn any_other_width_is_a_composed_button() {
+        let arts = BUTTON_ART.map(|(_, size)| size);
+        for (w, h) in [(110.0, 36.0), (145.0, 36.0), (36.0, 36.0), (60.0, 36.0), (300.0, 36.0), (96.0 + BUTTON_ART_SLACK + 0.5, 36.0), (128.0 - BUTTON_ART_SLACK - 0.5, 36.0), (96.0, 48.0), (160.0, 30.0), (0.0, 36.0), (96.0, 0.0), (-96.0, -36.0)] {
+            assert_eq!(button_plan(w, h, arts), ButtonPlan::Composed, "{w} × {h}");
+        }
+    }
+
+    /// The made buttons' cache keeps the most recently used first and at most its bound, whatever the sizes
+    /// asked for; a use moves an entry to the front, so the bound drops the oldest.
+    #[test]
+    fn the_button_cache_keeps_only_the_most_recent() {
+        let mut cache: Vec<(String, u32)> = Vec::new();
+        for w in 0..1000u32 {
+            if recent_get(&mut cache, &format!("w{w}")).is_none() {
+                recent_put(&mut cache, format!("w{w}"), w, 8);
+            }
+            assert!(cache.len() <= 8, "{} kept after {w}", cache.len());
+        }
+        assert_eq!(cache.iter().map(|(_, v)| *v).collect::<Vec<_>>(), (992..1000).rev().collect::<Vec<_>>());
+        assert_eq!(recent_get(&mut cache, "w995"), Some(995));
+        assert_eq!(cache[0].1, 995, "a use moves it to the front");
+        recent_put(&mut cache, "new".into(), 1, 8);
+        assert!(cache.iter().any(|(k, _)| k == "w995") && !cache.iter().any(|(k, _)| k == "w992"), "the oldest goes: {cache:?}");
+        recent_put(&mut cache, "new".into(), 2, 8);
+        assert_eq!(cache.iter().filter(|(k, _)| k == "new").count(), 1, "one entry a key");
+        assert_eq!(recent_get(&mut cache, "absent"), None);
+    }
+
+    /// No button picture is three-sliced (its middle stretched to the button's width) anywhere in the sources:
+    /// every marble button goes through `marble_frame`, which draws the picture whole at its width and a
+    /// composed button at any other (`button_plan`). A function calling `three_slice` that names a button
+    /// picture (a `Btn…` name, or the `Up`/`Down` of one) fails, with its file and line.
+    #[test]
+    fn no_button_picture_is_three_sliced() {
+        // Built so that this test's own text does not match.
+        let call = concat!("three", "_slice(");
+        let names = [concat!("\"", "Btn"), concat!("Btn", "{"), concat!("\"", "Up", "\""), concat!("\"", "Down", "\"")];
+        fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let fn_start = |l: &str| {
+            let mut l = l.trim_start();
+            for pre in ["pub(crate) ", "pub(super) ", "pub ", "const ", "async ", "unsafe "] {
+                l = l.strip_prefix(pre).unwrap_or(l);
+            }
+            l.starts_with("fn ")
+        };
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut all = Vec::new();
+        files(&root.join("src"), &mut all);
+        all.sort();
+        let mut wrong = Vec::new();
+        for path in all {
+            let src = std::fs::read_to_string(&path).unwrap();
+            let rel = path.strip_prefix(root).unwrap().display().to_string();
+            // Code without its comments, cut into functions (from one `fn` line to the next).
+            let code: Vec<&str> = src.lines().map(|l| if l.trim_start().starts_with("//") { "" } else { l.split(" // ").next().unwrap_or(l) }).collect();
+            let mut starts: Vec<usize> = (0..code.len()).filter(|&i| fn_start(code[i])).collect();
+            starts.insert(0, 0);
+            starts.push(code.len());
+            for span in starts.windows(2) {
+                let body = &code[span[0]..span[1]];
+                if body.iter().any(|l| names.iter().any(|n| l.contains(n))) {
+                    for (i, l) in body.iter().enumerate() {
+                        if l.contains(call) {
+                            wrong.push(format!("{rel}:{}: {}", span[0] + i + 1, l.trim()));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(wrong.is_empty(), "button pictures three-sliced (the middle stretched); draw marble buttons through chrome::marble_button and its kin (one choice, chrome::button_plan):\n{}", wrong.join("\n"));
     }
 }
