@@ -537,7 +537,7 @@ pub fn render(sm: &Summary) -> String {
     }
     let _ = write!(
         b,
-        "<h3>Retention</h3><div class=\"scroll\"><table class=\"wide\"><tr><th>cohort</th><th class=\"n\">installs</th><th class=\"n\">came back</th><th class=\"n\">rate</th></tr>\
+        "<h3>Retention</h3><div class=\"scroll\"><table><tr><th>cohort</th><th class=\"n\">installs</th><th class=\"n\">came back</th><th class=\"n\">rate</th></tr>\
          <tr><td>week 1 (first ping 14-20 days ago, back 7-13 days later)</td><td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{}</td></tr>\
          <tr><td>week 4 (first ping 34-40 days ago, back 28-34 days later)</td><td class=\"n\">{}</td><td class=\"n\">{}</td><td class=\"n\">{}</td></tr></table></div>",
         r.week1_cohort,
@@ -758,6 +758,8 @@ const SCRIPT: &str = r#"<script>
   'use strict';
   function all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
   all('[data-js]').forEach(function (el) { el.hidden = false; });
+  // Phones: a chart wider than the screen opens on its newest days.
+  all('.chartwrap .scroll').forEach(function (el) { el.scrollLeft = el.scrollWidth; });
 
   function hideTips() { all('.tip').forEach(function (t) { t.hidden = true; }); }
   function showTip(el) {
