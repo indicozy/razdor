@@ -300,7 +300,7 @@ impl App {
         let today = holiday::today();
         if holiday::start_due(&self.audio.settings, today) {
             // The season start is the switch's turn-on, asked once per season; its welcome opens on success.
-            if let Some(year) = holiday::season(today.0, today.1, today.2) {
+            if let Some(year) = holiday::season_now(today) {
                 self.audio.settings.map_holiday = true;
                 self.audio.settings.holiday_asked = Some(year);
                 self.audio.settings.holiday_pending = true;

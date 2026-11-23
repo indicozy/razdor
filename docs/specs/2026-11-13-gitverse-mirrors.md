@@ -104,6 +104,11 @@ The service info the app needs (the update feed's addresses, the hub's folders, 
   in the primary's order (see «Learned primary»).
   With none, the cache is used, else the built-in lists (`mirror.rs`, today's addresses). The log says which
   one was used (`remote config: using the …`).
+- **Holiday** (optional `holiday` object, 2026-11-23): `on` (default true; `false` stops the New Year season for
+  everyone, the player's own «Новогодний вид» setting is kept) and `from`/`to` (inclusive `YYYY-MM-DD`, the season's
+  window; the season's year is `from`'s year). Both dates are needed, `to` not before `from`, else the built-in
+  window (1 December to 15 January) is used and a log line says so. Read by `remote_config::holiday()`. Example:
+  `"holiday": { "on": true, "from": "2026-11-23", "to": "2027-01-15" }`. Absent: the built-in season, on.
 - **Checks**: schema 1 only (another schema: the whole file is ignored); every address is https, with no
   spaces, control characters or backslashes (a bad one is dropped with a log line; a list left with none is
   the built-in one); the game needs a file name, a 64-digit SHA-256 (kept lower case) and a size up to

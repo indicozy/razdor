@@ -3,7 +3,8 @@
 //!
 //! This module holds the setting's per-frame switch and the pure season logic (tested without a
 //! window). Each effect reads [`on`] / [`cheap`] in the module that draws it. The main menu asks once
-//! per season (from 1 December to 15 January), and the season of a January date is the year before.
+//! per season (by default from 1 December to 15 January, or the window the remote config gives), and the
+//! season of a January date is the year before.
 
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use macroquad::prelude::{FilterMode, Image, Texture2D};
 use razdor::local;
+use razdor::remote_config::{self, parse_date, Holiday, HolidayWindow};
 use razdor::rules::marks::civil;
 
 use super::audio::Settings;
@@ -185,32 +187,34 @@ pub fn season(y: i64, m: u32, d: u32) -> Option<i64> {
     }
 }
 
-/// Whether the season start is due on a date: the date is in a season that the setting `holiday_asked`
-/// (the season year last done) does not name yet.
-pub fn due(asked: Option<i64>, today: (i64, u32, u32)) -> bool {
-    match season(today.0, today.1, today.2) {
-        Some(year) => asked != Some(year),
-        None => false,
+/// The season a date falls in under the remote config's holiday object: `on` false is no season at all, a
+/// `window` (inclusive dates) names the season by its first date's year, and None is the built-in season
+/// ([`season`]).
+pub fn season_in(window: Option<HolidayWindow>, on: bool, y: i64, m: u32, d: u32) -> Option<i64> {
+    if !on {
+        return None;
     }
+    match window {
+        Some(w) => ((y, m, d) >= w.from && (y, m, d) <= w.to).then_some(w.from.0),
+        None => season(y, m, d),
+    }
+}
+
+/// The season of a date under the remote config (`remote_config::holiday`).
+pub fn season_now(today: (i64, u32, u32)) -> Option<i64> {
+    let Holiday { on, window } = remote_config::holiday();
+    season_in(window, on, today.0, today.1, today.2)
+}
+
+/// Whether the season start is due: there is a season (`season`, its year) that the setting `holiday_asked`
+/// (the season year last done) does not name yet.
+pub fn due(asked: Option<i64>, season: Option<i64>) -> bool {
+    season.is_some_and(|year| asked != Some(year))
 }
 
 /// Whether the season start is due now (the settings and today's date, see [`today`]).
 pub fn start_due(s: &Settings, today: (i64, u32, u32)) -> bool {
-    due(s.holiday_asked, today)
-}
-
-/// A date `YYYY-MM-DD` (the test override `RAZDOR_TODAY`), or None when it is not one.
-pub fn parse_date(text: &str) -> Option<(i64, u32, u32)> {
-    let mut parts = text.trim().split('-');
-    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
-    if parts.next().is_some() {
-        return None;
-    }
-    let (y, m, d): (i64, u32, u32) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
-        return None;
-    }
-    Some((y, m, d))
+    due(s.holiday_asked, season_now(today))
 }
 
 /// Today's date (UTC) as (year, month, day). `RAZDOR_TODAY=YYYY-MM-DD` replaces it (tests and
@@ -441,15 +445,34 @@ mod tests {
         assert_eq!(season(2026, 11, 30), None);
     }
 
+    /// The start is due on a built-in date (`due` of its season).
+    fn due_on(asked: Option<i64>, date: (i64, u32, u32)) -> bool {
+        due(asked, season(date.0, date.1, date.2))
+    }
+
     #[test]
     fn the_season_start_is_due_once_per_season() {
-        assert!(due(None, (2026, 12, 1)), "1 December, never done: due");
-        assert!(due(None, (2027, 1, 15)), "15 January: still the season");
-        assert!(!due(None, (2027, 1, 16)), "16 January: no season");
-        assert!(!due(None, (2026, 11, 30)), "30 November: no season");
-        assert!(!due(Some(2026), (2027, 1, 3)), "done for this season: not again");
-        assert!(due(Some(2026), (2027, 12, 1)), "the next December: due again");
-        assert!(!due(None, (2026, 7, 1)), "July: nothing");
+        assert!(due_on(None, (2026, 12, 1)), "1 December, never done: due");
+        assert!(due_on(None, (2027, 1, 15)), "15 January: still the season");
+        assert!(!due_on(None, (2027, 1, 16)), "16 January: no season");
+        assert!(!due_on(None, (2026, 11, 30)), "30 November: no season");
+        assert!(!due_on(Some(2026), (2027, 1, 3)), "done for this season: not again");
+        assert!(due_on(Some(2026), (2027, 12, 1)), "the next December: due again");
+        assert!(!due_on(None, (2026, 7, 1)), "July: nothing");
+    }
+
+    #[test]
+    fn a_remote_window_and_the_stop_switch_move_the_season() {
+        let window = Some(HolidayWindow { from: (2026, 11, 23), to: (2027, 1, 15) });
+        assert_eq!(season_in(window, true, 2026, 11, 23), Some(2026), "the first day");
+        assert_eq!(season_in(window, true, 2027, 1, 15), Some(2026), "the last day, inclusive");
+        assert_eq!(season_in(window, true, 2027, 1, 16), None, "the day after");
+        assert_eq!(season_in(window, true, 2026, 11, 22), None, "the day before");
+        assert_eq!(season_in(window, true, 2026, 12, 25), Some(2026), "Christmas inside");
+        assert_eq!(season_in(window, false, 2026, 12, 25), None, "the stop switch: no season on 25 December");
+        assert_eq!(season_in(None, false, 2026, 12, 25), None, "the stop switch with the built-in window");
+        assert_eq!(season_in(None, true, 2026, 12, 25), Some(2026), "no window: the built-in season");
+        assert!(due(Some(2025), season_in(window, true, 2026, 11, 23)), "the new window is due once");
     }
 
     #[test]
@@ -457,7 +480,6 @@ mod tests {
         assert_eq!(parse_date("2026-12-01"), Some((2026, 12, 1)));
         assert_eq!(parse_date(" 2027-01-15 "), Some((2027, 1, 15)));
         assert_eq!(parse_date("2026-13-01"), None, "no month 13");
-        assert_eq!(parse_date("2026-12-32"), None, "no day 32");
         assert_eq!(parse_date("tomorrow"), None);
     }
 

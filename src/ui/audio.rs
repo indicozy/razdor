@@ -421,7 +421,7 @@ pub struct Settings {
     /// itself, once a season (`holiday_asked`).
     #[serde(default)]
     pub map_holiday: bool,
-    /// The season year (`holiday::season`) the season start (the Christmas mod, the look, the welcome) was
+    /// The season year (`holiday::season_now`) the season start (the Christmas mod, the look, the welcome) was
     /// last done for; `None` until it is done. The look or the mod switched off later is not redone this season.
     #[serde(default)]
     pub holiday_asked: Option<i64>,

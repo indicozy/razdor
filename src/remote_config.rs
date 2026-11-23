@@ -64,6 +64,29 @@ pub struct Config {
     /// The cloud saves a device mirrors (its cap): `cloud_saves_per_device`, 100 by default, and never
     /// more than the server takes (`razdor_wire::limits::SAVES_PER_DEVICE`), nor less than one.
     pub cloud_saves_per_device: usize,
+    /// The holiday season (`holiday`): on by default, the built-in window unless the config gives one.
+    pub holiday: Holiday,
+}
+
+/// The holiday season's window: inclusive dates `(year, month, day)`, `from` no later than `to`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HolidayWindow {
+    pub from: (i64, u32, u32),
+    pub to: (i64, u32, u32),
+}
+
+/// The holiday season as the config gives it. `on: false` is a stop switch: no season for anyone (no start,
+/// no offer, no auto-install); the player's own «Новогодний вид» setting is not changed. `window` is the
+/// season's dates when the config gives a good pair; None is the built-in 1 December to 15 January.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Holiday {
+    pub on: bool,
+    pub window: Option<HolidayWindow>,
+}
+
+impl Holiday {
+    /// The built-in season: on, the built-in window.
+    pub const BUILTIN: Holiday = Holiday { on: true, window: None };
 }
 
 /// The config as the file spells it. Unknown fields are ignored (a newer config keeps working).
@@ -84,6 +107,16 @@ struct Raw {
     cloud: Option<bool>,
     #[serde(default)]
     cloud_saves_per_device: Option<u32>,
+    #[serde(default)]
+    holiday: Option<RawHoliday>,
+}
+
+/// The `holiday` object: every field is optional (a missing `on` is true, a missing or bad window is the built-in one).
+#[derive(Deserialize)]
+struct RawHoliday {
+    on: Option<bool>,
+    from: Option<String>,
+    to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +160,7 @@ impl Config {
             telemetry: false,
             cloud: false,
             cloud_saves_per_device: CLOUD_SAVES_PER_DEVICE,
+            holiday: Holiday::BUILTIN,
         }
     }
 
@@ -165,8 +199,41 @@ impl Config {
                 (n as usize).clamp(1, max)
             }
         };
-        Ok(Config { update_feed, hub, game, api, telemetry, cloud, cloud_saves_per_device })
+        let holiday = holiday_of(raw.holiday);
+        Ok(Config { update_feed, hub, game, api, telemetry, cloud, cloud_saves_per_device, holiday })
     }
+}
+
+/// The `holiday` object as the config gives it. A missing object is the built-in season; a window needs both
+/// dates, each a `YYYY-MM-DD`, with `to` not before `from`, else the built-in window is used (logged).
+fn holiday_of(h: Option<RawHoliday>) -> Holiday {
+    let Some(h) = h else { return Holiday::BUILTIN };
+    Holiday { on: h.on.unwrap_or(true), window: holiday_window(h.from.as_deref(), h.to.as_deref()) }
+}
+
+fn holiday_window(from: Option<&str>, to: Option<&str>) -> Option<HolidayWindow> {
+    let (Some(from), Some(to)) = (from, to) else { return None };
+    match (parse_date(from), parse_date(to)) {
+        (Some(from), Some(to)) if from <= to => Some(HolidayWindow { from, to }),
+        _ => {
+            crate::diag!("remote config: holiday window {from:?}..{to:?} is not two dates in order; the built-in season is used");
+            None
+        }
+    }
+}
+
+/// A date `YYYY-MM-DD` as `(year, month, day)`, or None when it is not one (the month 1..=12, the day 1..=31).
+pub fn parse_date(text: &str) -> Option<(i64, u32, u32)> {
+    let mut parts = text.trim().split('-');
+    let (y, m, d) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some() {
+        return None;
+    }
+    let (y, m, d): (i64, u32, u32) = (y.parse().ok()?, m.parse().ok()?, d.parse().ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    Some((y, m, d))
 }
 
 /// An address the app may fetch: https, with no spaces, control characters or backslashes.
@@ -307,6 +374,11 @@ pub fn cloud_saves_per_device() -> usize {
     current().cloud_saves_per_device
 }
 
+/// The holiday season as the config gives it (`holiday`): the built-in one until a config says otherwise.
+pub fn holiday() -> Holiday {
+    current().holiday
+}
+
 /// The game archive as the config gives it (`gdrive::game`).
 pub fn game_info() -> Game {
     current().game
@@ -427,6 +499,54 @@ mod tests {
         assert_eq!(Config::parse(text.as_bytes()).unwrap().hub, Config::builtin().hub);
         let none = GOOD.replace("\"update_feed\": [\"https://feed.example/releases.json\", \"https://api.example/releases\"]", "\"update_feed\": []");
         assert_eq!(Config::parse(none.as_bytes()).unwrap().update_feed, Config::builtin().update_feed);
+    }
+
+    /// The config's `holiday` value: the GOOD config with the given JSON object (or none).
+    fn with_holiday(object: Option<&str>) -> Config {
+        let text = match object {
+            Some(o) => GOOD.replace("\"schema\": 1,", &format!("\"schema\": 1, \"holiday\": {o},")),
+            None => GOOD.to_string(),
+        };
+        Config::parse(text.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn the_holiday_key_is_optional_and_defaults_to_the_built_in_season() {
+        assert_eq!(good().holiday, Holiday::BUILTIN, "without the key");
+        assert_eq!(with_holiday(Some("{}")).holiday, Holiday::BUILTIN, "an empty object");
+        assert_eq!(with_holiday(Some("{\"on\": true}")).holiday, Holiday::BUILTIN, "on alone");
+        assert_eq!(Config::builtin().holiday, Holiday::BUILTIN, "the built-in config");
+    }
+
+    #[test]
+    fn the_holiday_stop_switch_and_window_are_read() {
+        assert!(!with_holiday(Some("{\"on\": false}")).holiday.on);
+        let window = with_holiday(Some("{\"on\": true, \"from\": \"2026-11-23\", \"to\": \"2027-01-15\"}")).holiday;
+        assert_eq!(window, Holiday { on: true, window: Some(HolidayWindow { from: (2026, 11, 23), to: (2027, 1, 15) }) });
+        let one_day = with_holiday(Some("{\"from\": \"2026-12-24\", \"to\": \"2026-12-24\"}")).holiday;
+        assert!(one_day.window.is_some(), "a window of one day is a window");
+    }
+
+    #[test]
+    fn a_missing_or_bad_window_is_the_built_in_one() {
+        let only_from = with_holiday(Some("{\"from\": \"2026-11-23\"}")).holiday;
+        assert_eq!(only_from, Holiday::BUILTIN, "one date is not a window");
+        let backwards = with_holiday(Some("{\"from\": \"2027-01-15\", \"to\": \"2026-11-23\"}")).holiday;
+        assert_eq!(backwards, Holiday::BUILTIN, "to before from");
+        let bad = with_holiday(Some("{\"from\": \"tomorrow\", \"to\": \"2027-01-15\"}")).holiday;
+        assert_eq!(bad, Holiday::BUILTIN, "not a date");
+        let on_off = with_holiday(Some("{\"on\": false, \"from\": \"2027-01-15\", \"to\": \"2026-11-23\"}")).holiday;
+        assert_eq!(on_off, Holiday { on: false, window: None }, "a bad window keeps the switch");
+    }
+
+    #[test]
+    fn a_date_reads_year_month_day() {
+        assert_eq!(parse_date("2026-12-01"), Some((2026, 12, 1)));
+        assert_eq!(parse_date(" 2027-01-15 "), Some((2027, 1, 15)));
+        assert_eq!(parse_date("2026-13-01"), None, "no month 13");
+        assert_eq!(parse_date("2026-12-32"), None, "no day 32");
+        assert_eq!(parse_date("2026-12"), None);
+        assert_eq!(parse_date("tomorrow"), None);
     }
 
     #[test]
