@@ -2,6 +2,7 @@
   "schema": 1,
   "telemetry": true,
   "cloud": true,
+  "holiday": { "on": true, "from": "2026-11-23", "to": "2027-01-15" },
   "update_feed": [
     "https://indicozy.github.io/razdor-community/releases.json",
     "https://api.github.com/repos/indicozy/razdor/releases?per_page=30",
