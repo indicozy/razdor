@@ -2564,11 +2564,11 @@ fn scroll_button(r: Rect, label: &str, size: Option<f32>) -> bool {
 // desktop, and the buttons drawn this frame (the next frame's outside-click test).
 local! {
     /// The «?» pop-up a click pinned: its text, until a click outside it or Esc.
-    static HELP_PINNED: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+    static HELP_PINNED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     /// The «?» buttons drawn this frame: the next frame's click test takes them.
     static HELP_SPOTS: std::cell::RefCell<Vec<Rect>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The «?» under the pointer this frame (the desktop shows its pop-up without a click).
-    static HELP_HOVER: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+    static HELP_HOVER: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A «?» button's size: the row's button height, at least 44 dp on a phone.
@@ -2578,19 +2578,21 @@ fn help_size(geo: &RowGeo) -> f32 {
 
 /// A row's «?» button (backlog 1508) at the row's right end, its top at `y`: pressed, it pins its
 /// pop-up (pressed again, it unpins); on the desktop the pointer over it shows the pop-up too.
-fn help_button(c: &RowCol, geo: &RowGeo, y: f32, text: &'static str) {
+fn help_button(c: &RowCol, geo: &RowGeo, y: f32, text: &str) {
     let s = help_size(geo);
     let r = Rect::new(c.x + c.w - s, y, s, s);
     HELP_SPOTS.with(|h| h.borrow_mut().push(r));
     let (mx, my) = crate::ui::widgets::pointer();
     if geo.btn_size.is_none() && in_rect((mx, my), r) && in_adv_view(r) {
-        HELP_HOVER.with(|h| h.set(Some(text)));
+        HELP_HOVER.with(|h| *h.borrow_mut() = Some(text.to_string()));
     }
     if scroll_button(r, "?", geo.btn_size) {
         let opened = HELP_PINNED.with(|p| {
-            let next = if p.get() == Some(text) { None } else { Some(text) };
-            p.set(next);
-            next.is_some()
+            let mut p = p.borrow_mut();
+            let next = if p.as_deref() == Some(text) { None } else { Some(text.to_string()) };
+            let open = next.is_some();
+            *p = next;
+            open
         });
         if opened {
             super::analytics::hint_opened();
@@ -2658,7 +2660,7 @@ fn labelled_row_help(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, hel
 
 /// A settings row whose value is plain text, not a button (the cloud's state): beside the label when
 /// both fit, else under it, left-aligned. Its «?» help sits at the right, as in [`labelled_row_help`].
-fn value_text_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: Option<&'static str>) {
+fn value_text_row(c: &mut RowCol, geo: &RowGeo, label: &str, value: &str, help: Option<&str>) {
     let help_w = if help.is_some() { help_size(geo) + geo.gap } else { 0.0 };
     let vw = measure(value, geo.size).width;
     let lw = measure(label, geo.size).width;
@@ -3275,7 +3277,8 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
         }
         Row::CloudState => {
             let v = super::cloud_view::view();
-            value_text_row(c, geo, tr("Cloud state"), &v.state, Some(tr("The cloud holds 20 MB per account: delete old saves to upload new ones.")));
+            let help = super::cloud_view::state_help(v.detail.as_deref());
+            value_text_row(c, geo, tr("Cloud state"), &v.state, Some(&help));
         }
         Row::CloudSpace => {
             let v = super::cloud_view::view();
@@ -3404,14 +3407,14 @@ fn pane_end(top: f32, content_bottom: f32) {
 /// the window's own Esc check sees none). The buttons drawn last frame are the click test's.
 fn help_frame_start() {
     let spots = HELP_SPOTS.with(|h| std::mem::take(&mut *h.borrow_mut()));
-    HELP_HOVER.with(|h| h.set(None));
-    if HELP_PINNED.with(|p| p.get()).is_some() {
+    HELP_HOVER.with(|h| *h.borrow_mut() = None);
+    if HELP_PINNED.with(|p| p.borrow().is_some()) {
         let (mx, my) = crate::ui::widgets::pointer();
         if key(KeyCode::Escape) {
-            HELP_PINNED.with(|p| p.set(None));
+            HELP_PINNED.with(|p| *p.borrow_mut() = None);
             swallow_input();
         } else if clicked() && !spots.iter().any(|r| in_rect((mx, my), *r)) {
-            HELP_PINNED.with(|p| p.set(None));
+            HELP_PINNED.with(|p| *p.borrow_mut() = None);
             swallow_input();
         }
     }
@@ -3420,8 +3423,9 @@ fn help_frame_start() {
 /// The «?» pop-up to draw this frame, last (over the rows): the pinned one, or the one under the
 /// pointer on the desktop.
 fn draw_help_pop(k: f32, phone: bool) {
-    if let Some(text) = HELP_PINNED.with(|p| p.get()).or(HELP_HOVER.with(|h| h.get())) {
-        help_popup(text, k, phone);
+    let shown = HELP_PINNED.with(|p| p.borrow().clone()).or_else(|| HELP_HOVER.with(|h| h.borrow().clone()));
+    if let Some(text) = shown {
+        help_popup(&text, k, phone);
     }
 }
 
@@ -3625,7 +3629,7 @@ fn help_popup(text: &str, k: f32, phone: bool) {
 /// A snapshot scene's «?» pop-up pinned (`RAZDOR_SCENE_HELP=<row>`, the row's name as `Row` spells it).
 pub fn scene_help(row: &str) {
     if let Some(text) = Row::ALL.iter().find(|r| format!("{r:?}") == row).and_then(|r| r.help_text()) {
-        HELP_PINNED.with(|p| p.set(Some(text)));
+        HELP_PINNED.with(|p| *p.borrow_mut() = Some(text.to_string()));
     }
 }
 
@@ -4327,7 +4331,7 @@ pub fn options_window(audio: &mut super::audio::Settings, install_wide: bool, ov
     GROUP.with(|g| g.set(None));
     reset_pane();
     TAB_SCROLL.with(|s| s.set(0.0));
-    HELP_PINNED.with(|p| p.set(None));
+    HELP_PINNED.with(|p| *p.borrow_mut() = None);
     match close {
         Close::Apply => OPENED_WITH.with(|o| *o.borrow_mut() = None),
         Close::Cancel => {
@@ -4887,8 +4891,8 @@ mod tests {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
         assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::Impossible, Row::WideFront, Row::ArmyArrangement, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
         scene_help("AiStrength");
-        assert_eq!(HELP_PINNED.with(|p| p.get()), Row::AiStrength.help_text());
-        HELP_PINNED.with(|p| p.set(None));
+        assert_eq!(HELP_PINNED.with(|p| p.borrow().clone()).as_deref(), Row::AiStrength.help_text());
+        HELP_PINNED.with(|p| *p.borrow_mut() = None);
     }
 
     /// The depth model's row shows only with the 2.5D view, the building cards on, and while a building of the

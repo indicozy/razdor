@@ -316,7 +316,9 @@ The code is `src/cloud/` (no macroquad). The UI phase calls only `cloud::Cloud`;
   Sync, Pull, Push and Refresh (the start, the exit, minimising) and logs each drop. Only the player's
   requests run, through `request_by_player` («Синхронизировать», the recovery phrase, turning the cloud on),
   which lifts the pause; a restart lifts it too (the pause is in memory only). Each failed job is logged.
-  The state line shows the reason (`cloud_view::failure_reason`, the error cut to 80 characters).
+  The state line shows a short reason (`cloud_view::state_line`: «Ошибка синхронизации: …»); the row's «?»
+  shows the detail (`cloud_view::failure_detail`, the server's text cut to 200 characters) and that the game
+  does not retry by itself.
   An installed Hub item may have an empty version: `HubList` validates it with `opt_text`.
 - Tests: `cargo test --profile fasttest cloud::`. `e2e.rs` runs `razdor-server`'s router on a local port with
   two devices (linked by a code): a device's mirror and the other device's list (no download, same names kept

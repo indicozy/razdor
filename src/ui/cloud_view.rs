@@ -2,7 +2,7 @@
 //! tab's rows and the four windows they open (the link code, the code from another device, the recovery
 //! phrase, the delete question). The windows use the map import's frame and buttons, as the
 //! analytics' panels do. Off-screen, `RAZDOR_SNAPSHOT` with `RAZDOR_SCENE_CLOUD=off|synced|offline|
-//! full|working|link|enter|phrase|delete` shows a made-up state instead of the worker's, and
+//! full|working|failed|link|enter|phrase|delete` shows a made-up state instead of the worker's, and
 //! `hub-offer` the «Установить то же самое?» window with made-up items. `RAZDOR_SCENE_CLOUD_ALLOWED=1`
 //! turns the cloud switch on for a snapshot (the «Облако» tab shows; no player's run sets it).
 //!
@@ -51,6 +51,8 @@ pub struct View {
     pub link: Option<(String, u64)>,
     /// The account exists on this device (on or off): the phrase and the delete rows need it.
     pub has_account: bool,
+    /// The failed sync's detail for the state row's «?» (`failure_detail`), while the sync failed.
+    pub detail: Option<String>,
 }
 
 /// The snapshot's made-up state (`RAZDOR_SCENE_CLOUD`), when the snapshots run.
@@ -66,25 +68,30 @@ pub fn view() -> View {
     }
     let on = cloud_store::on();
     let shared = cloud_store::shared();
-    let state = state_line(on, shared.as_ref().map(|s| (s.phase, s.last_sync)), shared.as_ref().and_then(|s| s.last_error.as_ref()));
+    let error = shared.as_ref().and_then(|s| s.last_error.as_ref());
+    let state = state_line(on, shared.as_ref().map(|s| (s.phase, s.last_sync)), error);
     let space = space_line(on, shared.as_ref().map_or(0, |s| s.used_bytes));
+    let detail = shared.as_ref().filter(|s| s.phase == Phase::Failed).map(|s| failure_detail(s.last_error.as_ref()));
     View {
         on,
         state,
         space,
         link: shared.as_ref().and_then(|s| s.link.as_ref()).map(|l| (l.code.as_str().to_string(), l.expires_at)),
         has_account: cloud_store::has_account(),
+        detail,
     }
 }
 
 fn canned_view(scene: &str) -> View {
     let recent = Some(1_700_000_000);
-    let (on, state, used) = match scene {
-        "off" => (false, state_line(false, None, None), 0),
-        "offline" => (true, state_line(true, Some((Phase::Offline, None)), None), 3 << 20),
-        "full" => (true, state_line(true, Some((Phase::Full, recent)), None), 20 << 20),
-        "working" => (true, state_line(true, Some((Phase::Working, recent)), None), 3 << 20),
-        _ => (true, state_line(true, Some((Phase::Idle, recent)), None), 3 << 20),
+    let refused = CloudError::Refused("save meta: map: too long (the limit is 128 characters, this one has 131)".into());
+    let (on, state, used, detail) = match scene {
+        "off" => (false, state_line(false, None, None), 0, None),
+        "offline" => (true, state_line(true, Some((Phase::Offline, None)), None), 3 << 20, None),
+        "full" => (true, state_line(true, Some((Phase::Full, recent)), None), 20 << 20, None),
+        "working" => (true, state_line(true, Some((Phase::Working, recent)), None), 3 << 20, None),
+        "failed" => (true, state_line(true, Some((Phase::Failed, recent)), Some(&refused)), 3 << 20, Some(failure_detail(Some(&refused)))),
+        _ => (true, state_line(true, Some((Phase::Idle, recent)), None), 3 << 20, None),
     };
     View {
         on,
@@ -92,12 +99,13 @@ fn canned_view(scene: &str) -> View {
         space: space_line(on, used),
         link: (scene == "link").then(|| ("4F7K-2Q9M".to_string(), telemetry::now_secs() + 600)),
         has_account: true,
+        detail,
     }
 }
 
-/// The state line: off, syncing, offline, full, a failed sync with its reason, or the time of the last
-/// sync. `shared` is (phase, last sync) from the worker, none before it starts; `error` is the last
-/// request's error, shown with a failed sync.
+/// The state line: off, syncing, offline, full, a failed sync with its short reason, or the time of the
+/// last sync. `shared` is (phase, last sync) from the worker, none before it starts; `error` is the last
+/// request's error, shown with a failed sync (its details are in the row's «?», `failure_detail`).
 pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>, error: Option<&CloudError>) -> String {
     if !on {
         return tr("Off").to_string();
@@ -106,10 +114,10 @@ pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>, error: Option<
     match phase {
         Phase::Full => tr("The cloud is full").to_string(),
         Phase::Offline => tr("No connection").to_string(),
-        Phase::Failed => {
-            let reason = failure_reason(error);
-            razdor::trf!("Sync failed: {reason}. Press «Sync now» to try again", reason = reason)
-        }
+        Phase::Failed => match short_reason(error) {
+            Some(reason) => razdor::trf!("Sync error: {reason}", reason = reason),
+            None => tr("Sync error").to_string(),
+        },
         Phase::Working => tr("Syncing…").to_string(),
         Phase::Off | Phase::Idle => match last {
             Some(t) => razdor::trf!("Synced {time}", time = hhmm(t)),
@@ -118,21 +126,48 @@ pub fn state_line(on: bool, shared: Option<(Phase, Option<u64>)>, error: Option<
     }
 }
 
-/// Why a sync failed, in a few words, with the server's own text (cut to 80 characters).
-fn failure_reason(error: Option<&CloudError>) -> String {
+/// The state line's reason of a failed sync: a short phrase, `None` for an error the line does not name.
+fn short_reason(error: Option<&CloudError>) -> Option<&str> {
     match error {
-        Some(CloudError::Unauthorized) => tr("the account key was not accepted").to_string(),
-        Some(CloudError::NotFound) => tr("the save is no longer in the cloud").to_string(),
-        Some(CloudError::Conflict(text)) => razdor::trf!("conflict ({text})", text = cut_text(text)),
-        Some(CloudError::Refused(text)) => razdor::trf!("the request was refused ({text})", text = cut_text(text)),
-        Some(CloudError::Bad(text)) => razdor::trf!("the server's answer did not check out ({text})", text = cut_text(text)),
-        _ => tr("unknown error").to_string(),
+        Some(CloudError::Unauthorized) => Some(tr("key not accepted")),
+        Some(CloudError::NotFound) => Some(tr("no such save")),
+        Some(CloudError::Conflict(_)) => Some(tr("conflict")),
+        Some(CloudError::Refused(_)) => Some(tr("request refused")),
+        Some(CloudError::Bad(_)) => Some(tr("bad server answer")),
+        _ => None,
     }
 }
 
-/// The text cut to 80 characters, with «…» when it is longer.
+/// The detail of a failed sync for the state row's «?»: the reason with the server's own text (cut to
+/// 200 characters), or the reason alone when the error has no text.
+pub fn failure_detail(error: Option<&CloudError>) -> String {
+    let (head, text) = match error {
+        Some(CloudError::Unauthorized) => (tr("Key not accepted"), None),
+        Some(CloudError::NotFound) => (tr("No such save"), None),
+        Some(CloudError::Conflict(text)) => (tr("Conflict"), Some(text)),
+        Some(CloudError::Refused(text)) => (tr("Request refused"), Some(text)),
+        Some(CloudError::Bad(text)) => (tr("Bad server answer"), Some(text)),
+        _ => (tr("Sync error"), None),
+    };
+    match text {
+        Some(text) => format!("{head}: {}", cut_text(text)),
+        None => head.to_string(),
+    }
+}
+
+/// The state row's «?» text: while the sync failed, its detail and what the player does; then the
+/// storage note, as always.
+pub fn state_help(detail: Option<&str>) -> String {
+    let note = tr("The cloud holds 20 MB per account: delete old saves to upload new ones.");
+    match detail {
+        Some(detail) => format!("{detail}\n{}\n{note}", tr("The game does not try again by itself: press «Sync now».")),
+        None => note.to_string(),
+    }
+}
+
+/// The text cut to 200 characters, with «…» when it is longer.
 fn cut_text(text: &str) -> String {
-    const MAX: usize = 80;
+    const MAX: usize = 200;
     if text.chars().count() <= MAX {
         text.to_string()
     } else {
@@ -633,14 +668,32 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_sync_shows_its_reason_and_that_it_waits_for_the_player() {
-        let line = state_line(true, Some((Phase::Failed, None)), Some(&CloudError::Refused("bad field".into())));
-        assert!(line.contains(&failure_reason(Some(&CloudError::Refused("bad field".into())))));
-        assert!(line.contains("bad field"));
-        let long = "x".repeat(200);
-        let cut = failure_reason(Some(&CloudError::Bad(long)));
-        assert!(cut.contains(&format!("{}…", "x".repeat(80))) && !cut.contains(&"x".repeat(81)), "the text is cut to 80 characters");
-        assert_eq!(failure_reason(None), tr("unknown error"));
+    fn a_failed_sync_shows_a_short_reason_and_the_details_in_its_help() {
+        let refused = CloudError::Refused("save meta: map: too long".into());
+        let line = state_line(true, Some((Phase::Failed, None)), Some(&refused));
+        assert_eq!(line, format!("{}: {}", tr("Sync error"), tr("request refused")));
+        assert!(!line.contains("save meta"), "the technical text is in the help, not the line");
+        assert_eq!(state_line(true, Some((Phase::Failed, None)), None), tr("Sync error"));
+        assert_eq!(state_line(true, Some((Phase::Failed, None)), Some(&CloudError::NotFound)), format!("{}: {}", tr("Sync error"), tr("no such save")));
+
+        let detail = failure_detail(Some(&refused));
+        assert_eq!(detail, format!("{}: save meta: map: too long", tr("Request refused")));
+        let long = "x".repeat(300);
+        let cut = failure_detail(Some(&CloudError::Bad(long)));
+        assert!(cut.ends_with(&format!("{}…", "x".repeat(200))) && !cut.contains(&"x".repeat(201)), "the text is cut to 200 characters");
+        assert_eq!(failure_detail(Some(&CloudError::Unauthorized)), tr("Key not accepted"));
+        assert_eq!(failure_detail(None), tr("Sync error"));
+    }
+
+    #[test]
+    fn the_state_help_adds_the_detail_and_what_the_player_does_only_while_failed() {
+        let note = tr("The cloud holds 20 MB per account: delete old saves to upload new ones.");
+        assert_eq!(state_help(None), note);
+        let help = state_help(Some("Request refused: x"));
+        let mut lines = help.lines();
+        assert_eq!(lines.next(), Some("Request refused: x"));
+        assert_eq!(lines.next(), Some(tr("The game does not try again by itself: press «Sync now».")));
+        assert_eq!(lines.next(), Some(note));
     }
 
     fn hub(items: &[(&str, &str)]) -> HubList {
