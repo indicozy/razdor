@@ -832,7 +832,7 @@ const NOT_PLAYER_GAME: &[&str] = &[
     
     // Setup and tools: a map or a game set up for play, the cheat console's own state, the UI snapshots.
     "set_origin", "set_map", "seed_events", "reveal_area", "reveal", "note_settings",
-    "note_cheat", "keep_run_mark", "set_xp_correction", "set_simulation", "set_building_defence", "auto_arrange",
+    "note_cheat", "keep_run_mark", "adopt_keep_xp", "take_old_keep_xp", "set_xp_correction", "set_simulation", "set_building_defence", "auto_arrange",
     "set_bench", "set_improved_ai", "set_bare_strengths", "set_strength_defence", "reseat_all",
     "apply_carry_over", "from_campaign", "restart",
     "stop", "cut_walk", "cut_wait", "apply_max", "play_max_move", "max_step", "set_max_stakes",
