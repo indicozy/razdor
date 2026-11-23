@@ -309,7 +309,8 @@ impl Validate for HubList {
         check::count("items", &self.items, limits::MAX_HUB_ITEMS)?;
         for it in &self.items {
             check::key("hub id", &it.id, limits::MAX_KEY)?;
-            check::text("hub version", &it.version, limits::MAX_VERSION)?;
+            // An installed community map can have no version: empty is valid, too long is not.
+            check::opt_text("hub version", &it.version, limits::MAX_VERSION)?;
         }
         Ok(())
     }
@@ -369,5 +370,14 @@ mod tests {
         assert_eq!(marks.maps["two"].level, MarkLevel::Yellow);
         assert_eq!(marks.maps["three"].level, MarkLevel::Fixes);
         assert_eq!(serde_json::to_string(&MarkLevel::Fixes).unwrap(), "\"fixes\"");
+    }
+    /// An installed community map with no version is a valid Hub item; a version over the limit is not.
+    #[test]
+    fn a_hub_item_may_have_no_version_but_not_a_too_long_one() {
+        let item = |version: String| HubItem { id: "map-1".into(), kind: HubKind::Map, version };
+        let list = |version: String| HubList { schema: crate::SCHEMA, updated_at: 5, items: vec![item(version)] };
+        assert!(list(String::new()).validate().is_ok(), "an empty version is valid");
+        assert!(list("1.2".into()).validate().is_ok());
+        assert!(list("v".repeat(limits::MAX_VERSION + 1)).validate().is_err(), "over the limit fails");
     }
 }
