@@ -204,6 +204,25 @@ def sums_of(rel):
     return parse_sums(http_get(url).decode("utf-8", "replace"))
 
 
+def linux_name(sums, version):
+    """The Linux program's name in a release: the versioned one (`razdor-X.Y.Z-linux`), or the fixed `razdor`
+    of the releases from before the versioned copies (1.4.0 and older). None when neither is listed."""
+    for name in (f"razdor-{version}-linux", "razdor"):
+        if name in sums:
+            return name
+    return None
+
+
+def cache_format():
+    """The picture cache's entry format the game writes now (`FORMAT` in src/dt/picture_cache.rs), so this
+    check follows a deliberate bump (format 3 since 70ac1c30) instead of failing on it."""
+    src = Path(__file__).resolve().parents[2] / "src" / "dt" / "picture_cache.rs"
+    m = re.search(r"pub const FORMAT: u32 = (\d+);", src.read_text(encoding="utf-8"))
+    if not m:
+        raise ToolError(f"no `pub const FORMAT` in {src}")
+    return int(m.group(1))
+
+
 MNT_SCRATCH = Path("/mnt/ai_models/razdor-scratch")
 ANDROID_SDK_DEFAULT = MNT_SCRATCH / "android-apk" / "sdk"
 
@@ -355,9 +374,10 @@ def check_desktop(frm, to, rel_from, rel_to, scratch, dt_dir, rows, logs):
     base = scratch / "desktop"
     reset(base)
     prog = base / "razdor"  # the program copy; its folder has no `target` part, so it updates
-    prev_name = f"razdor-{vnum(frm)}-linux"
+    sums_prev = sums_of(rel_from)
+    prev_name = linux_name(sums_prev, vnum(frm)) or f"razdor-{vnum(frm)}-linux"
     new_name = f"razdor-{vnum(to)}-linux"
-    exp_prev = sums_of(rel_from).get(prev_name)
+    exp_prev = sums_prev.get(prev_name)
     exp_new = sums_of(rel_to).get(new_name)
     if exp_prev is None:
         raise CheckFail(f"{vtag(frm)} SHA256SUMS has no {prev_name}")
@@ -786,8 +806,9 @@ def check_carry(frm, rel_from, new_bin, new_label, new_version, base, shots, dt_
     app = base / "app"
     app.mkdir()
     prog = app / "razdor"
-    old_name = f"razdor-{vnum(frm)}-linux"
-    exp_old = sums_of(rel_from).get(old_name)
+    sums_old = sums_of(rel_from)
+    old_name = linux_name(sums_old, vnum(frm)) or f"razdor-{vnum(frm)}-linux"
+    exp_old = sums_old.get(old_name)
     if exp_old is None:
         raise CheckFail(f"{vtag(frm)} SHA256SUMS has no {old_name}")
     download(asset_url(rel_from, old_name), prog)
@@ -901,7 +922,8 @@ def check_carry(frm, rel_from, new_bin, new_label, new_version, base, shots, dt_
                      "never touched)" if unmarked_left else
                      f"converted at {t_a['conversion']} s; {count_suffix(game, ('.lz4',))} .lz4 files"))
         cache_new = cache_folders(data)
-        fmt_ok = bool(cache_new) and all(kinds == {(b"RZPC", 2)} for n, kinds in cache_new.values() if n) \
+        fmt = cache_format()
+        fmt_ok = bool(cache_new) and all(kinds == {(b"RZPC", fmt)} for n, kinds in cache_new.values() if n) \
             and any(n for n, _ in cache_new.values())
         rows.append((f"{label}: picture cache in the new format", PASS if fmt_ok else FAIL,
                      "folders " + ", ".join(f"{k}: {n} entries" for k, (n, _) in cache_new.items())))
