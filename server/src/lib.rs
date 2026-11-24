@@ -13,6 +13,7 @@ pub mod config;
 pub mod db;
 pub mod files;
 pub mod http;
+pub mod mirror;
 pub mod retention;
 pub mod schema;
 pub mod state;

@@ -19,6 +19,8 @@ serde_json = "1.0.151"
 sha2 = "0.10.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time", "sync", "io-util", "fs"] }
 toml = "0.8"
+# The mirror's HTTPS client (rustls, no C code). Only the `razdor-mirror` binary calls it.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
 zstd = "0.13"
@@ -29,6 +31,12 @@ tower = { version = "0.5", features = ["util"] }
 [[bin]]
 name = "razdor-server"
 path = "src/main.rs"
+
+# The download mirror's sync tool (docs/specs/own-mirror-2026-11-24.md, section 3.1): pulls the public
+# release files from GitHub into the web root that nginx serves at /hub/.
+[[bin]]
+name = "razdor-mirror"
+path = "src/bin/mirror.rs"
 
 # The load test: hammers a running server with fake installs (not part of the service).
 [[example]]
