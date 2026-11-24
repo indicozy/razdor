@@ -24,6 +24,10 @@ Files in this folder:
 | `razdor-mirror-sync.service`, `.timer` | The mirror's sync every 15 minutes (section 9) |
 | `razdor-mirror-alert.service` | Logs a crit line when a sync fails |
 | `razdor-mirror-sync.polkit.rules` | Lets the deploy user start the sync on demand, without sudo |
+| `root-setup-2026-11-24.sh` | The one-time root setup for sections 9 and 10 (run once through ssh; see below) |
+| `stage-upload.sh` | Builds and uploads the files to the deploy user's staging folder, over one ssh connection |
+| `sudoers-razdor` | The deploy user's sudo rule (`/etc/sudoers.d/razdor`); `vps-user.sh` writes the same text |
+| `test_deploy.py` | Checks the sudo rule, its copy in `vps-user.sh` and the scripts' order (no server needed) |
 
 Nothing here holds a real address or secret. The admin hashes live in `/etc/razdor-api/env` on the
 VPS, never in git.
@@ -406,6 +410,54 @@ live copy stays.
 - Files shared by two releases are not linked across releases (only within one release).
 - The catalog's ad image and the depth model come from their own releases (`ad-thorny-times-1`,
   `depth-model-v1`); when such a tag is not in the newest 100 releases, one extra API lookup is made for it.
+
+## One-time root setup (2026-11-24)
+
+Sections 9 and 10 (the mirror, the site copy, the hub log and the country counters) are set up by one run of
+`root-setup-2026-11-24.sh`. The root script reads only the staging folder, `/home/razdor/stage/`, which the
+deploy user fills first. Nothing here contacts the server except these steps.
+
+1. Upload from the workstation. It builds first with `build.sh` (`SKIP_BUILD=1` uploads what is already built).
+   It uses the key `~/.ssh/razdor_vps_ed25519` and the address 217.117.29.101 (env vars can change both):
+
+       server/deploy/stage-upload.sh
+
+2. Run the root script on the VPS, as root, through ssh:
+
+       ssh root@<vps> bash -s < server/deploy/root-setup-2026-11-24.sh
+
+   It stops at the first error and prints each step. It creates the `razdor-mirror` user and the folders
+   (the old `/var/www/razdor-site` placeholder is moved aside, not deleted). It installs the binaries, the units
+   and timers, the toml, the logrotate file and the polkit rule (for `razdor`). It writes the `/hub/` nginx config
+   with the old file kept under a timestamp, runs `nginx -t` before the reload, and restores the old file if the
+   test fails. It loads the API image and restarts `razdor-api`. It writes `/etc/sudoers.d/razdor` only after
+   `visudo` accepts it. Then it starts the first sync and the GeoIP update in the background. It is safe to run
+   twice. The txwatch threshold (5 GB an hour) is a file on the host, outside git: check it by hand.
+
+3. Checks, after the first sync (`/` answers 404 until its first site step has run):
+
+       curl -s https://razdor.indicozy.dev/hub/status.json          # app and catalog lists, and site once published
+       curl -sI https://razdor.indicozy.dev/ | head -1              # 200
+       curl -sI https://razdor.indicozy.dev/wiki/ | head -1         # 200
+       curl -r 0-99 -o /dev/null -w '%{http_code}\n' https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v1.6.0/razdor-1.6.0-linux   # 206
+       grep -cE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' /var/log/razdor-hub/hub.log     # 0: no address in the hub log
+       journalctl -u razdor-mirror-sync -n 40 --no-pager            # the last runs; read them
+
+4. Routine update afterwards, with no root script. Upload with `stage-upload.sh` (`SKIP_BUILD=1` if the binaries
+   are built). Then the deploy user runs only these lines, which the sudo rule allows and nothing else:
+
+       sudo install -m 0755 -o root -g root /home/razdor/stage/razdor-mirror /usr/local/bin/razdor-mirror
+       sudo systemctl start --no-block razdor-mirror-sync.service
+
+   The next sync runs the new binary. `razdor-server` (the host copy the GeoIP script uses to print the nginx
+   ranges) takes the same line with its own name. For a new API image, load it from the staging folder through
+   the allowed `podman load`, then restart the service:
+
+       sudo /usr/bin/podman load < /home/razdor/stage/razdor-api.tar
+       sudo systemctl restart razdor-api
+
+   The quadlet's tag stays `localhost/razdor-api:0.1.2` until it changes. Nothing else is allowed to razdor:
+   nginx config, units, the sudo rule, users, polkit, the firewall and packages stay with root.
 
 ## AlmaLinux 8 (the current VPS)
 
