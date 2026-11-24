@@ -20,6 +20,10 @@ Files in this folder:
 | `razdor-api.container` | The quadlet: the container, its data folder, port, env file, limits, restart |
 | `nginx.conf` | The host's nginx site for the domain (TLS, `/api`, rate limits, the dashboard rewrite) |
 | `backup.sh` | Daily copy of the SQLite files and the battle, crash and save folders (14 days) |
+| `razdor-mirror.toml` | The download mirror's sync tool config (section 9) |
+| `razdor-mirror-sync.service`, `.timer` | The mirror's sync every 15 minutes (section 9) |
+| `razdor-mirror-alert.service` | Logs a crit line when a sync fails |
+| `razdor-mirror-sync.polkit.rules` | Lets the deploy user start the sync on demand, without sudo |
 
 Nothing here holds a real address or secret. The admin hashes live in `/etc/razdor-api/env` on the
 VPS, never in git.
@@ -279,6 +283,90 @@ only if the logs or `podman stats` show the service held back.
 Data growth: the stats database grew to about 145 MB for 640 000 events (about 220 bytes an event), with
 the events and pings kept at their retention (see the analytics spec).
 
+## 9. The download mirror (`razdor.indicozy.dev/hub/`)
+
+`razdor-mirror` copies the public release files from GitHub into `/var/www/razdor-hub`, which nginx serves at
+`/hub/`. The owner's server is the first download mirror (GitHub the second, GitVerse the fallback for Russia).
+A systemd timer runs it every 15 minutes, and the release skill starts it on demand. It reads public URLs only,
+so it needs no secret on GitHub and no upload by hand. Every file is checked by its SHA-256 (GitHub's digest),
+written to a staging folder, and a release folder appears in one rename. The feed and `latest` move last, so a
+client never reads a file that is not there. Design: `docs/specs/own-mirror-2026-11-24.md`.
+
+What it keeps (`/etc/razdor-mirror.toml`): the newest 3 published app releases, their versioned files (the old
+fixed names stay on GitHub; the translation tools and the iOS package are not copied; the ads zip is); the
+newest 2 catalogs and the game, ad and depth-model releases they name. `status.json` lists what is on disk:
+
+    curl -s https://razdor.indicozy.dev/hub/status.json     # synced_at, app, catalog, errors, ok
+
+GitHub's API allows 60 requests an hour per address. A run makes 2 (the app's list and the catalog's list),
+plus one lookup for a release that the list lacks (rare). A rate limit ends the run quietly; the next one tries again.
+
+### Install (once, as root on the VPS)
+
+1. Copy the binary (built by `server/deploy/build.sh`, `target/x86_64-unknown-linux-musl/release/razdor-mirror`):
+
+       install -m 0755 razdor-mirror /usr/local/bin/razdor-mirror
+
+2. The user and the folders. The staging folder must be on the same filesystem as the web root (the tool checks):
+
+       useradd --system --home /var/lib/razdor-mirror --shell /sbin/nologin razdor-mirror
+       install -d -o razdor-mirror -g nginx -m 0755 /var/www/razdor-hub
+       install -d -o razdor-mirror -g razdor-mirror -m 0750 /var/lib/razdor-mirror/stage
+
+3. The config, the units and the alert:
+
+       install -m 0644 server/deploy/razdor-mirror.toml /etc/razdor-mirror.toml
+       install -m 0644 server/deploy/razdor-mirror-sync.service server/deploy/razdor-mirror-sync.timer server/deploy/razdor-mirror-alert.service /etc/systemd/system/
+       systemctl daemon-reload
+
+4. The first fill, by hand, and watch it (about 1.3 GiB; the first run is the big one):
+
+       systemctl start --no-block razdor-mirror-sync.service
+       journalctl -u razdor-mirror-sync.service -f
+
+   A run that cannot publish something logs `crit` and exits 1; nothing half-written is served.
+
+5. Check it:
+
+       curl -sI https://razdor.indicozy.dev/hub/status.json                       # 200
+       curl -r 0-99 -o /dev/null -w '%{http_code}\n' https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/<tag>/<versioned file>   # 206
+       sha256sum <the same file from GitHub>  # against the digest in the release's API entry
+       grep -c '/hub/' /var/log/nginx/razdor-api.log                              # 0: the mirror has no access log
+
+6. nginx (the `/hub/` location and its cache map are in `nginx.conf`):
+
+       install -m 0644 server/deploy/nginx.conf /etc/nginx/conf.d/razdor.conf
+       nginx -t && systemctl reload nginx
+
+7. The timer:
+
+       systemctl enable --now razdor-mirror-sync.timer
+
+8. The on-demand start for the release skill (no sudo). Install the polkit rule, after changing `"deploy"` in
+   it to the deploy user's name on the host. It allows that one user to start that one unit, and nothing else:
+
+       install -m 0644 server/deploy/razdor-mirror-sync.polkit.rules /etc/polkit-1/rules.d/50-razdor-mirror.rules
+
+   The deploy user then runs `systemctl start --no-block razdor-mirror-sync.service` over ssh and polls
+   `status.json` until it lists the new tag. A sync that is running makes the start a no-op (the lock).
+
+### Operate
+
+- Logs: `journalctl -u razdor-mirror-sync.service` (each run), `journalctl -t razdor-mirror-alert` (a failed run).
+- Stop it: `systemctl disable --now razdor-mirror-sync.timer`. The files stay served; `status.json` stops changing.
+- Space: the tool holds at most `max_bytes` (8 GiB) and keeps `min_free_bytes` (20 GiB) free. Past either, it
+  downloads nothing and logs `crit` (what is served stays).
+- Traffic: the owner's `txwatch` alert (below) now trips above 5 GB sent an hour; the mirror's downloads are
+  not what the players send, but a release day with many players may still trip it.
+
+### What it does not do yet
+
+- A release file with no SHA-256 (no digest in the API and no line in SHA256SUMS) is not served; its release is
+  not published, and the run logs it.
+- Files shared by two releases are not linked across releases (only within one release).
+- The catalog's ad image and the depth model come from their own releases (`ad-thorny-times-1`,
+  `depth-model-v1`); when such a tag is not in the newest 100 releases, one extra API lookup is made for it.
+
 ## AlmaLinux 8 (the current VPS)
 
 The VPS runs AlmaLinux 8. Its hoster's image was 8.3 (kernel 4.18.0-240). The steps above work there
@@ -333,7 +421,7 @@ Known quirks of this host:
 Monitoring on the host (outside this folder):
 
 - vnstat (EPEL) records the traffic per interface.
-- `txwatch.timer` runs `/usr/local/sbin/txwatch` every hour. If eth0 sent more than 1 GB in the last
+- `txwatch.timer` runs `/usr/local/sbin/txwatch` every hour. If eth0 sent more than 5 GB in the last
   hour, it logs at crit and writes `/root/TX-ALERT` with the open connections and the top processes.
 - `netsnap.timer` runs `/usr/local/sbin/netsnap` every minute. It appends the eth0 counters and the open
   connections to `/var/log/netsnap.log` (logrotate keeps 14 days).

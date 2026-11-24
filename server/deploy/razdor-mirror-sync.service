@@ -1,0 +1,24 @@
+[Unit]
+Description=Razdor download mirror: copy the release files from GitHub into /var/www/razdor-hub
+After=network-online.target
+Wants=network-online.target
+OnFailure=razdor-mirror-alert.service
+
+[Service]
+# Type=simple: `systemctl start` returns at once (the release tool starts it over ssh and polls status.json),
+# and a run that is already going is a no-op. The run is capped at two hours.
+Type=simple
+User=razdor-mirror
+Group=razdor-mirror
+ExecStart=/usr/local/bin/razdor-mirror --config /etc/razdor-mirror.toml
+RuntimeMaxSec=2h
+# A background sync must not slow the host: lowest CPU and disk priority, a memory cap.
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=256M
+# Only the web root and the staging folder are writable.
+ProtectSystem=strict
+ReadWritePaths=/var/www/razdor-hub /var/lib/razdor-mirror
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

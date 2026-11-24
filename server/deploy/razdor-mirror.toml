@@ -1,0 +1,22 @@
+# /etc/razdor-mirror.toml: the download mirror's sync tool (razdor-mirror). These are the binary's defaults.
+# See docs/specs/own-mirror-2026-11-24.md, section 3.1, and server/deploy/README.md, section 9.
+
+# The web root nginx serves at /hub/. The staging folder must be on the same filesystem (the tool checks).
+root = "/var/www/razdor-hub"
+stage = "/var/lib/razdor-mirror/stage"
+
+# The owner's address for the mirror: the own copy of the catalog's game address uses it.
+own_base = "https://razdor.indicozy.dev/hub"
+
+# App releases kept (the newest published ones); catalogs kept (the current one and the previous one).
+keep_app_releases = 3
+keep_catalogs = 2
+
+# The most the mirror holds (8 GiB), and the free space the disk keeps after a download (20 GiB).
+max_bytes = 8589934592
+min_free_bytes = 21474836480
+
+# Never mirrored: the translation tools and the iOS package. The old fixed names (razdor, Razdor.exe, ...)
+# are skipped by the tool when a release has versioned files (skip_unversioned).
+exclude = ["razdor-translate*", "Razdor-translate*", "*.ipa"]
+skip_unversioned = true

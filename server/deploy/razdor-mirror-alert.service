@@ -1,0 +1,6 @@
+[Unit]
+Description=Razdor download mirror: a sync failed (writes a crit line to the journal)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -t razdor-mirror-alert -p user.crit "razdor-mirror sync failed: see journalctl -u razdor-mirror-sync.service"

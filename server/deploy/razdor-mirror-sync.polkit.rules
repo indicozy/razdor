@@ -1,0 +1,11 @@
+// Lets the deploy user start the mirror's sync without sudo (the release skill's step 6a2, over ssh).
+// Only that one unit and only the start verb. Install as /etc/polkit-1/rules.d/50-razdor-mirror.rules.
+// Replace "deploy" with the deploy user's name on the host.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "razdor-mirror-sync.service" &&
+        action.lookup("verb") == "start" &&
+        subject.user == "deploy") {
+        return polkit.Result.YES;
+    }
+});

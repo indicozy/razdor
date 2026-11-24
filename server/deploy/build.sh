@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Builds razdor-server as a static musl binary and packs it into the API image (server/deploy/Containerfile).
+# It also builds razdor-mirror (the download mirror's sync tool, a static musl binary for the host, not the image).
 #
 #   server/deploy/build.sh [image-tag]      (default: localhost/razdor-api:<version>)
 #
@@ -24,6 +25,7 @@ CARGO_HOME_DIR="${RAZDOR_CARGO_HOME:-$HOME/.cargo}"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO/server/Cargo.toml" | head -n 1)"
 TAG="${1:-localhost/razdor-api:$VERSION}"
 BIN_OUT="$TARGET_DIR/$TRIPLE/release/razdor-server"
+MIRROR_OUT="$TARGET_DIR/$TRIPLE/release/razdor-mirror"
 
 build_native() {
   rustup target add "$TRIPLE" >/dev/null
@@ -45,7 +47,7 @@ build_container() {
     -e CARGO_TARGET_DIR=/target \
     -e CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-12}" \
     "$BUILDER_IMAGE" \
-    sh -c "cargo build --release --locked -p razdor-server --target $TRIPLE && strip /target/$TRIPLE/release/razdor-server"
+    sh -c "cargo build --release --locked -p razdor-server --target $TRIPLE && strip /target/$TRIPLE/release/razdor-server /target/$TRIPLE/release/razdor-mirror"
 }
 
 if command -v musl-gcc >/dev/null && rustup target list --installed 2>/dev/null | grep -qx "$TRIPLE"; then
@@ -60,8 +62,13 @@ else
 fi
 
 [ -f "$BIN_OUT" ] || { echo "build: no binary at $BIN_OUT" >&2; exit 1; }
-strip "$BIN_OUT" 2>/dev/null || true
-file "$BIN_OUT" | grep -q "static" && ! file "$BIN_OUT" | grep -q "dynamically linked" || { echo "build: $BIN_OUT is not static" >&2; exit 1; }
+[ -f "$MIRROR_OUT" ] || { echo "build: no binary at $MIRROR_OUT" >&2; exit 1; }
+for BIN in "$BIN_OUT" "$MIRROR_OUT"; do
+  strip "$BIN" 2>/dev/null || true
+  file "$BIN" | grep -q "static" && ! file "$BIN" | grep -q "dynamically linked" || { echo "build: $BIN is not static" >&2; exit 1; }
+done
+# The sync tool is not in the image: it writes the host's web root. Install it on the host (see README section 9).
+echo "build: razdor-mirror (host binary) at $MIRROR_OUT"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
