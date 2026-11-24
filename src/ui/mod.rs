@@ -1375,6 +1375,10 @@ impl App {
     /// the not-found block), its picks dropped and its hover off while the conversion runs.
     pub(super) fn draw_menu_while_waiting(&mut self) {
         display::follow_settings(&self.audio.settings);
+        // The screen's orientation from the settings, as `frame` does: the first start after an update waits here,
+        // and without this the phone stayed in the system's orientation until the wait ended (a player's report).
+        #[cfg(target_os = "android")]
+        android::follow_orientation(self.audio.settings.orientation);
         widgets::set_input_blocked(true);
         let _ = main_menu::frame(false, &self.mods, self.active_mod.as_deref(), true);
         widgets::set_input_blocked(false);
