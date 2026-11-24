@@ -297,7 +297,7 @@ fn a_wrong_digest_publishes_nothing() {
     assert!(!out.errors.is_empty());
     assert!(!store::tag_dir(&cfg.root, "razdor", "v1.6.0").exists());
     assert!(out.app.is_empty());
-    assert!(!cfg.stage.join("razdor/v1.6.0/razdor-1.6.0-linux").exists(), "the bad file is not kept");
+    assert!(!cfg.root.join(".stage/razdor/v1.6.0/razdor-1.6.0-linux").exists(), "the bad file is not kept");
 }
 
 #[test]
@@ -359,7 +359,7 @@ fn a_killed_run_leaves_nothing_visible_and_resumes() {
     run(&cfg, &fake, now()).unwrap();
     assert!(!store::tag_dir(&cfg.root, "razdor", "v1.6.0").exists(), "nothing half served");
     assert!(feed_tags(&cfg).is_empty());
-    let part = cfg.stage.join("razdor/v1.6.0/razdor-1.6.0-linux.part");
+    let part = cfg.root.join(".stage/razdor/v1.6.0/razdor-1.6.0-linux.part");
     assert!(part.exists(), "the partial file waits in the stage");
 
     fake.fail.borrow_mut().clear();
@@ -471,19 +471,34 @@ fn an_etag_answers_304_from_the_cached_list() {
 }
 
 #[test]
-fn the_stage_must_share_the_root_filesystem() {
-    let other = Path::new("/dev/shm");
-    let tmp = std::env::temp_dir();
-    if !other.is_dir() || fs::metadata(other).unwrap().dev() == fs::metadata(&tmp).unwrap().dev() {
-        return; // no second filesystem to test against
-    }
-    let (_base, mut cfg) = setup("device");
-    cfg.stage = other.join(format!("razdor-mirror-test-{}", std::process::id()));
+fn a_stage_that_cannot_publish_stops_before_any_download() {
+    // The probe runs before the first download: a destination that is not a folder fails the run, and the
+    // message names it. Nothing is fetched (the fake records every download).
+    let (_base, cfg) = setup("probe");
+    fs::create_dir_all(&cfg.root).unwrap();
+    fs::write(cfg.root.join("indicozy"), b"a file where the folder must be").unwrap();
     let fake = Fake::default();
     world(&fake);
     let err = run(&cfg, &fake, now()).unwrap_err();
-    let _ = fs::remove_dir_all(&cfg.stage);
-    assert!(err.contains("same filesystem"), "{err}");
+    assert!(err.contains("indicozy"), "{err}");
+    assert!(fake.downloads.borrow().is_empty(), "no download before the probe passes");
+    assert!(fake.api_seen.borrow().is_empty(), "not even the release list is read");
+}
+
+#[test]
+fn the_stage_lives_inside_the_web_root_and_leaves_no_probe_file() {
+    let (_base, cfg) = setup("inside");
+    let fake = Fake::default();
+    world(&fake);
+    run(&cfg, &fake, now()).unwrap();
+    let stage = cfg.root.join(".stage");
+    assert!(stage.is_dir(), "the stage is <root>/.stage");
+    for repo in fs::read_dir(&stage).unwrap() {
+        let repo = repo.unwrap().path();
+        assert_eq!(fs::read_dir(&repo).unwrap().count(), 0, "every staged release folder was published: {}", repo.display());
+    }
+    assert!(!cfg.site_dir.join(".stage/site").exists(), "the site archive is dropped once live");
+    assert!(!cfg.stage.join("razdor").exists(), "the lock folder holds no downloads");
 }
 
 #[test]
@@ -623,7 +638,7 @@ fn the_site_copy_is_unpacked_and_current_points_at_it() {
     assert_eq!(live, store::sha256_bytes(&site_archive("home")));
     assert_eq!(fs::read_link(cfg.site_dir.join("current")).unwrap(), PathBuf::from(format!("versions/{live}")));
     assert_eq!(fs::read(cfg.site_dir.join("current/index.html")).unwrap(), b"home");
-    assert!(!cfg.stage.join("site").exists(), "the archive is dropped once it is live");
+    assert!(!cfg.site_dir.join(".stage/site").exists(), "the archive is dropped once it is live");
     // A second run with the same archive downloads nothing and changes nothing.
     let before = fake.downloads_of(&format!("https://github.com/indicozy/razdor/releases/download/{}/{}", site::SITE_TAG, site::SITE_ASSET)).len();
     run(&cfg, &fake, now()).unwrap();

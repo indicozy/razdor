@@ -337,7 +337,11 @@ longer than the sync takes:
     nginx -t && systemctl reload nginx
 
 The unit may write `/var/www/razdor-site` (`ReadWritePaths`); the mirror user owns that folder and nothing else
-under `/var/www`. Check after the install:
+under `/var/www`. Each `ReadWritePaths` entry is its own bind mount, so the mirror stages inside each published
+folder (`/var/www/razdor-hub/.stage`, `/var/www/razdor-site/.stage`, both 0700); `/var/lib/razdor-mirror/stage` holds
+only the lock and the API cache. A start-up probe fails the run before any download when a rename cannot publish.
+The nginx change (`location ~ /\.` answers 404 for dot-named paths, so `.stage` is never served) needs the root
+redeploy of `nginx.conf` above: copy it, `nginx -t`, `systemctl reload nginx`. Check after the install:
 
     curl -sI https://razdor.indicozy.dev/ | head -5          # 200, Cache-Control: no-cache
     curl -sI https://razdor.indicozy.dev/wiki/ | head -5     # 200

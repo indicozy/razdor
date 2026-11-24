@@ -3,7 +3,7 @@
 use std::ffi::CString;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{symlink, MetadataExt};
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -84,7 +84,51 @@ pub fn publish_dir(stage: &Path, dest: &Path) -> io::Result<()> {
     if dest.exists() {
         return fs::remove_dir_all(stage);
     }
-    fs::rename(stage, dest)
+    rename_within_mount(stage, dest)
+}
+
+/// Renames `from` to `to` and never copies: a rename that crosses a mount point fails with EXDEV, and the error
+/// names both paths. (The unit's ProtectSystem bind mounts split the web root and the stage into separate
+/// mounts even on one disk, which st_dev cannot show.)
+pub fn rename_within_mount(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to).map_err(|e| rename_error(from, to, e))
+}
+
+/// The message for a failed rename: EXDEV names both paths and what to change; other errors pass through.
+pub fn rename_error(from: &Path, to: &Path, e: io::Error) -> io::Error {
+    if e.raw_os_error() == Some(libc::EXDEV) {
+        io::Error::new(
+            e.kind(),
+            format!(
+                "cannot rename {} to {}: {e}; both folders must be inside one mount (the unit's ReadWritePaths are separate bind mounts)",
+                from.display(),
+                to.display()
+            ),
+        )
+    } else {
+        e
+    }
+}
+
+/// Makes a stage folder, private to the mirror's user (0700). Its contents are never served (nginx denies dot paths).
+pub fn make_stage(dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+}
+
+/// Proves that a stage folder can publish into its destination folder: a probe file is renamed into `dest` and
+/// back. A cross-mount setup fails here, before any download, with both paths in the message.
+pub fn probe_move(stage: &Path, dest: &Path) -> Result<(), String> {
+    make_stage(stage).map_err(|e| format!("stage {}: {e}", stage.display()))?;
+    fs::create_dir_all(dest).map_err(|e| format!("folder {}: {e}", dest.display()))?;
+    let name = format!(".probe-{}", std::process::id());
+    let here = stage.join(&name);
+    let there = dest.join(&name);
+    fs::write(&here, b"probe").map_err(|e| format!("stage {}: {e}", stage.display()))?;
+    let moved = rename_within_mount(&here, &there).and_then(|()| rename_within_mount(&there, &here));
+    let _ = fs::remove_file(&here);
+    let _ = fs::remove_file(&there);
+    moved.map_err(|e| format!("the download mirror cannot publish from {} to {}: {e}", stage.display(), dest.display()))
 }
 
 /// A hard link, or a copy when the link is not possible (another filesystem).
@@ -93,11 +137,6 @@ pub fn link_or_copy(src: &Path, dst: &Path) -> io::Result<()> {
         Ok(()) => Ok(()),
         Err(_) => fs::copy(src, dst).map(|_| ()),
     }
-}
-
-/// The filesystem's device number of `path` (the folder must exist).
-pub fn device(path: &Path) -> io::Result<u64> {
-    Ok(fs::metadata(path)?.dev())
 }
 
 /// Free bytes available to the mirror's user on the filesystem of `path`.
@@ -151,6 +190,9 @@ pub fn lock(path: &Path) -> io::Result<Option<File>> {
 
 /// Removes the entries of `stage` older than `max_age` (interrupted runs), keeping the lock file.
 pub fn remove_stale(stage: &Path, now: SystemTime, max_age: Duration) -> io::Result<()> {
+    if !stage.exists() {
+        return Ok(());
+    }
     for entry in fs::read_dir(stage)? {
         let entry = entry?;
         if entry.file_name() == ".lock" {
@@ -172,4 +214,73 @@ pub fn remove_stale(stage: &Path, now: SystemTime, max_age: Duration) -> io::Res
 /// Whether `path` names a folder that is a symlink or a plain entry; used by the prune to skip links.
 pub fn is_dir_not_link(path: &Path) -> bool {
     fs::symlink_metadata(path).map(|m| m.is_dir()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("razdor-mirror-store-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_staged_release_is_published_by_one_rename_inside_its_folder() {
+        let root = temp("publish");
+        make_stage(&root.join(".stage")).unwrap();
+        let stage = root.join(".stage/razdor/v1.6.0");
+        fs::create_dir_all(&stage).unwrap();
+        fs::write(stage.join("razdor-1.6.0.apk"), b"apk").unwrap();
+        let dest = root.join("indicozy/razdor/releases/download/v1.6.0");
+        publish_dir(&stage, &dest).unwrap();
+        assert_eq!(fs::read(dest.join("razdor-1.6.0.apk")).unwrap(), b"apk");
+        assert!(!stage.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_stage_folder_is_private_and_the_probe_leaves_nothing() {
+        let root = temp("probe");
+        let stage = root.join(".stage");
+        let dest = root.join("indicozy/razdor/releases/download");
+        probe_move(&stage, &dest).expect("one tree: the probe passes");
+        let mode = fs::metadata(&stage).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        assert_eq!(fs::read_dir(&stage).unwrap().count(), 0, "the probe file is removed from the stage");
+        assert_eq!(fs::read_dir(&dest).unwrap().count(), 0, "and from the folder");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_cross_mount_rename_names_both_paths() {
+        let err = rename_error(Path::new("/a/stage/x"), Path::new("/b/hub/x"), io::Error::from_raw_os_error(libc::EXDEV));
+        let text = err.to_string();
+        assert!(text.contains("/a/stage/x") && text.contains("/b/hub/x"), "{text}");
+        assert!(text.contains("one mount"), "{text}");
+        let other = rename_error(Path::new("/a"), Path::new("/b"), io::Error::from_raw_os_error(libc::ENOENT));
+        assert_eq!(other.raw_os_error(), Some(libc::ENOENT), "other errors pass through unchanged");
+    }
+
+    #[test]
+    fn stale_stage_entries_are_removed_and_fresh_ones_kept() {
+        let root = temp("stale");
+        let stage = root.join("stage");
+        fs::create_dir_all(stage.join("old")).unwrap();
+        fs::write(stage.join("old/f.part"), b"x").unwrap();
+        fs::write(stage.join("fresh.part"), b"y").unwrap();
+        fs::write(stage.join(".lock"), b"").unwrap();
+        let long_ago = SystemTime::now() - Duration::from_secs(3 * 86_400);
+        fs::File::options().write(true).open(stage.join("old/f.part")).unwrap().set_modified(long_ago).unwrap();
+        fs::File::open(stage.join("old")).unwrap().set_modified(long_ago).unwrap();
+        fs::File::options().write(true).open(stage.join(".lock")).unwrap().set_modified(long_ago).unwrap();
+        remove_stale(&stage, SystemTime::now(), Duration::from_secs(86_400)).unwrap();
+        assert!(!stage.join("old").exists());
+        assert!(stage.join("fresh.part").exists());
+        assert!(stage.join(".lock").exists(), "the lock file is never removed");
+        remove_stale(&root.join("missing"), SystemTime::now(), Duration::from_secs(1)).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
 }

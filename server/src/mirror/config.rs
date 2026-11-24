@@ -11,7 +11,8 @@ pub const GIB: u64 = 1024 * 1024 * 1024;
 pub struct MirrorConfig {
     /// The web root nginx serves at `/hub/` (`/var/www/razdor-hub`).
     pub root: PathBuf,
-    /// Where downloads wait until they are verified. Must be on the same filesystem as `root`.
+    /// The lock file and the API cache. Accepted for compatibility; downloads are no longer staged here: each
+    /// publish stages inside its own folder (`root/.stage`, `site_dir/.stage`), so the rename never crosses a mount.
     pub stage: PathBuf,
     /// The owner's site copy (`site.rs`): `site_dir/current` is a symlink to `site_dir/versions/<sha256>`, and
     /// nginx serves `site_dir/current`. The folder holds only the mirror's own versions.

@@ -4,8 +4,9 @@
 # The site copy (site.rs): site_dir/current is a symlink to site_dir/versions/<sha256>; nginx serves current.
 site_dir = "/var/www/razdor-site"
 
-# The web root nginx serves at /hub/. The staging folder must be on the same filesystem (the tool checks).
+# The web root nginx serves at /hub/. Downloads are staged in root/.stage (the tool probes the rename at start).
 root = "/var/www/razdor-hub"
+# The lock file and the API cache only (accepted; not used for staging).
 stage = "/var/lib/razdor-mirror/stage"
 
 # The owner's address for the mirror: the own copy of the catalog's game address uses it.

@@ -118,20 +118,36 @@ struct Sync<'a> {
     missing: HashSet<String>,
 }
 
+/// The hub's stage: `<root>/.stage`. It sits inside the web root, so every publish is a rename within the root's
+/// mount (the unit's bind mounts would make a rename from another folder fail with EXDEV). nginx denies dot paths.
+fn hub_stage(cfg: &MirrorConfig) -> PathBuf {
+    cfg.root.join(".stage")
+}
+
+/// The site's stage: `<site_dir>/.stage`, for the same reason as `hub_stage`.
+fn site_stage(cfg: &MirrorConfig) -> PathBuf {
+    cfg.site_dir.join(".stage")
+}
+
 fn stage_dir(cfg: &MirrorConfig, repo: &str, tag: &str) -> PathBuf {
-    cfg.stage.join(repo).join(tag)
+    hub_stage(cfg).join(repo).join(tag)
 }
 
 impl Sync<'_> {
     fn sync(&mut self, now: SystemTime) -> Result<(), Stop> {
         let cfg = self.cfg;
         fs::create_dir_all(&cfg.root).map_err(io_stop("web root"))?;
+        // The lock folder: the run state and the API cache. Downloads are never staged here (see `hub_stage`).
         fs::create_dir_all(&cfg.stage).map_err(io_stop("stage"))?;
-        let same = store::device(&cfg.root).map_err(io_stop("web root"))? == store::device(&cfg.stage).map_err(io_stop("stage"))?;
-        if !same {
-            return Err(Stop::Fatal("the stage folder must be on the same filesystem as the web root".into()));
+        // Before any download: each stage must publish into its folder (a real rename, not st_dev).
+        for dest in [download_dir(&cfg.root, APP), download_dir(&cfg.root, HUB)] {
+            store::probe_move(&hub_stage(cfg), &dest).map_err(Stop::Fatal)?;
         }
+        store::remove_stale(&hub_stage(cfg), now, DAY).map_err(io_stop("stage cleanup"))?;
         store::remove_stale(&cfg.stage, now, DAY).map_err(io_stop("stage cleanup"))?;
+        if let Err(e) = store::remove_stale(&site_stage(cfg), now, DAY) {
+            self.out.errors.push(format!("site stage cleanup: {e}"));
+        }
 
         // 1. The config: from GitHub Pages (no API quota). Refused unless it is a schema-1 config.
         let reply = self.net.get(CONFIG_URL, &[])?;
@@ -392,7 +408,7 @@ impl Sync<'_> {
         keep.extend(state.previous.clone());
         remove_unlisted(&versions, &keep, &mut self.out.errors);
         if state.live.as_deref() == Some(sha.as_str()) {
-            let _ = fs::remove_dir_all(cfg.stage.join("site"));
+            let _ = fs::remove_dir_all(site_stage(cfg).join("site"));
         }
         Ok(state)
     }
@@ -401,21 +417,18 @@ impl Sync<'_> {
     /// into `versions/<sha>`. Any failure leaves `versions/` as it was.
     fn build_site_version(&self, asset: &Asset, sha: &str) -> Result<(), String> {
         let cfg = self.cfg;
-        let stage = cfg.stage.join("site");
+        let versions = cfg.site_dir.join("versions");
+        // Before the download: the stage must publish into `versions` (a real rename, not st_dev).
+        store::probe_move(&site_stage(cfg), &versions)?;
+        let stage = site_stage(cfg).join("site");
         fs::create_dir_all(&stage).map_err(|e| format!("stage: {e}"))?;
         let spec = Spec { name: site::SITE_ASSET.into(), url: asset.url.clone(), size: asset.size, sha256: sha.into() };
         self.fetch_file(&spec, &stage)?;
-        let versions = cfg.site_dir.join("versions");
-        let same = store::device(&versions).map_err(|e| format!("site folder: {e}"))?
-            == store::device(&stage).map_err(|e| format!("stage: {e}"))?;
-        if !same {
-            return Err("the stage folder must be on the same filesystem as the site folder".into());
-        }
         let unpacked = stage.join(format!("unpacked-{sha}"));
         let _ = fs::remove_dir_all(&unpacked);
         site::unpack(&stage.join(site::SITE_ASSET), &unpacked)?;
         site::check(&unpacked)?;
-        fs::rename(&unpacked, versions.join(sha)).map_err(|e| format!("publish: {e}"))
+        store::rename_within_mount(&unpacked, &versions.join(sha)).map_err(|e| format!("publish: {e}"))
     }
 
     fn prune(&mut self, complete: &[&Release], history: &[String]) -> Result<(), Stop> {
