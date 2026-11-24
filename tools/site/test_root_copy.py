@@ -19,9 +19,19 @@ class RewriteTest(unittest.TestCase):
         self.assertEqual(root_copy.rewrite_text("background:url(/razdor/fonts/a.woff2)"), "background:url(/fonts/a.woff2)")
         self.assertEqual(root_copy.rewrite_text('const b="/razdor/wiki";'), 'const b="/wiki";')
 
-    def test_github_addresses_are_kept(self):
-        html = '<a href="https://indicozy.github.io/razdor/wiki/">w</a> https://github.com/indicozy/razdor'
+    def test_github_addresses_outside_links_are_kept(self):
+        html = 'see https://github.com/indicozy/razdor and https://indicozy.github.io/razdor-tools/'
         self.assertEqual(root_copy.rewrite_text(html), html)
+
+    def test_the_site_own_links_become_root_relative(self):
+        self.assertEqual(
+            root_copy.rewrite_text('<a href="https://indicozy.github.io/razdor/wiki/">w</a>'),
+            '<a href="/wiki/">w</a>',
+        )
+        self.assertEqual(
+            root_copy.rewrite_text('<a href="https://indicozy.github.io/razdor">h</a>'),
+            '<a href="/">h</a>',
+        )
 
     def test_the_wiki_absolute_addresses_go_back_to_github(self):
         html = '<meta property="og:url" content="https://indicozy.github.io/wiki/start/"/>'

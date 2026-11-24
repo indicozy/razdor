@@ -128,9 +128,10 @@ config or catalog. Bound: the timer is 15 minutes, so the server is at most ~15 
 and the API's feed. Releases and a kill switch that must reach players at once: trigger the sync (below) and
 check `status.json`.
 
-**API budget:** 3 API calls a run (releases of `razdor`; the `site-latest` tag of `razdor`, section 3.5; releases of
-`razdor-community`, only when the catalog tag changed or a referenced tag is missing), every 15 min = at most 12 an
-hour against 60 for the IP.
+**API budget:** 2 API calls a run (releases of `razdor`, releases of `razdor-community`, the second only when the
+catalog tag changed or a referenced tag is missing), every 15 min = at most 8 an hour against 60 for the IP. The
+site copy's release (section 3.5) is read from the app list; one `site-latest` tag lookup is made only when that
+list lacks it.
 The big transfers are `github.com/.../releases/download/...` redirects, not API calls. On a 403/429 with
 `x-ratelimit-remaining: 0` or `Retry-After`: stop, exit 0, try next tick; never retry in a loop.
 
@@ -205,8 +206,8 @@ engines index GitHub's copy). The result is packed as `site.tar.gz`, the one ass
 latest release of `razdor-community`). `GITHUB_TOKEN` cannot write to the community repository and no secret exists for
 it, so the release lives here.
 
-The mirror (`server/src/mirror/site.rs`, one step of a run) looks the release up (`releases/tags/site-latest`: one API call
-a run, counted in the budget above), checks the asset's digest, and when the digest differs from the live copy fetches the
+The mirror (`server/src/mirror/site.rs`, one step of a run) finds the release in the app list (or, when the list lacks it, with one `releases/tags/site-latest` lookup), checks
+the asset's digest, and when the digest differs from the live copy fetches the
 archive (verified, resumable), unpacks it into a new folder under `site_dir/versions/<sha256>` (only regular files and
 folders: a symlink, a hard link or any other entry type, or a path with `..` or an absolute name, fails the whole unpack;
 the archive needs `index.html` and `wiki/index.html`; a size and file-count cap), and moves `site_dir/current` to it with

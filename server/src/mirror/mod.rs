@@ -25,7 +25,7 @@ use net::{Net, Reply};
 pub const CONFIG_URL: &str = "https://indicozy.github.io/razdor/config.json";
 pub const APP_API: &str = "https://api.github.com/repos/indicozy/razdor/releases?per_page=30";
 pub const HUB_API: &str = "https://api.github.com/repos/indicozy/razdor-community/releases?per_page=100";
-/// The owner's site copy: the pre-release `site-latest` of this repo (see `site.rs`). Its lookup is one call a run.
+/// The owner's site copy: the pre-release `site-latest` of this repo (see `site.rs`). Read only when the app list lacks it.
 pub const SITE_API: &str = "https://api.github.com/repos/indicozy/razdor/releases/tags/site-latest";
 pub const CATALOG_LATEST: &str = "https://github.com/indicozy/razdor-community/releases/latest/download/index.json";
 /// The depth model's release (`src/depth/fetch.rs`, `DEPTH_MODEL_URL`).
@@ -45,8 +45,8 @@ pub struct Outcome {
     /// The catalog tag `latest` points at after the run.
     pub catalog: Option<String>,
     pub errors: Vec<String>,
-    /// GitHub API requests this run made (the budget is 3 a run: the app list, the site tag, and the catalog list
-    /// when a new catalog needs it; plus one per tag a list lacks).
+    /// GitHub API requests this run made (the budget is 2 a run: the app list, and the catalog list when a new
+    /// catalog needs it; plus one lookup per tag a list lacks, the site release's among them).
     pub api_calls: u32,
     /// GitHub refused for the rate limit: the run ended quietly and changed nothing.
     pub rate_limited: bool,
@@ -279,7 +279,7 @@ impl Sync<'_> {
         }
 
         // 6b. The owner's site copy (`site.rs`): fetched, unpacked and swapped in, or left as it is.
-        let site = self.sync_site(&read_status(&cfg.root))?;
+        let site = self.sync_site(&app_list, &read_status(&cfg.root))?;
 
         // 7. Then `latest` (the catalog's files are on disk), the feed, the config, and status.json.
         if let Some(tag) = latest.as_ref() {
@@ -333,19 +333,35 @@ impl Sync<'_> {
     /// `site_dir/current` names, the archive is fetched (verified), unpacked into a new folder under
     /// `versions/`, and `current` is moved to it with one rename. Nothing is removed before that. A failure
     /// leaves the copy in place and is an error of the run. No release yet is not an error (the first deploy).
-    fn sync_site(&mut self, before: &PreviousStatus) -> Result<SiteState, Stop> {
+    fn sync_site(&mut self, app_list: &[Release], before: &PreviousStatus) -> Result<SiteState, Stop> {
         let cfg = self.cfg;
         let versions = cfg.site_dir.join("versions");
         let current = cfg.site_dir.join("current");
-        fs::create_dir_all(&versions).map_err(io_stop("site folder"))?;
         let live_now = fs::read_link(&current)
             .ok()
             .and_then(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()));
         let mut state = SiteState { live: live_now.clone(), previous: before.site_previous.clone() };
-
-        let found = self.api(SITE_API, "site")?;
-        let Some(rel) = found.iter().find(|r| r.tag == site::SITE_TAG && !r.draft) else {
+        // A failure here is an error of the run, never a reason to stop it: the hub, the feed and the status
+        // are written after this step.
+        if let Err(e) = fs::create_dir_all(&versions) {
+            self.out.errors.push(format!("site: {}: {e}", versions.display()));
             return Ok(state);
+        }
+        // The app list usually holds the site release (the newest pre-release); a tag lookup only when it does not.
+        let listed = app_list.iter().find(|r| r.tag == site::SITE_TAG && !r.draft).cloned();
+        let rel = match listed {
+            Some(r) => r,
+            None => match self.api(SITE_API, "site") {
+                Ok(found) => match found.into_iter().find(|r| r.tag == site::SITE_TAG && !r.draft) {
+                    Some(r) => r,
+                    None => return Ok(state),
+                },
+                Err(Stop::RateLimited) => return Err(Stop::RateLimited),
+                Err(Stop::Fatal(e)) => {
+                    self.out.errors.push(format!("site: {e}"));
+                    return Ok(state);
+                }
+            },
         };
         let Some(asset) = rel.assets.iter().find(|a| a.name == site::SITE_ASSET).cloned() else {
             self.out.errors.push(format!("site: {} has no {}", site::SITE_TAG, site::SITE_ASSET));

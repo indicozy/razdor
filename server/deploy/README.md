@@ -298,9 +298,9 @@ newest 2 catalogs and the game, ad and depth-model releases they name. `status.j
 
     curl -s https://razdor.indicozy.dev/hub/status.json     # synced_at, app, catalog, errors, ok
 
-GitHub's API allows 60 requests an hour per address. A run makes 3 (the app's list, the site copy's release lookup,
-and the catalog's list when a new catalog needs it), plus one lookup for a release that the list lacks (rare). A
-rate limit ends the run quietly; the next one tries again.
+GitHub's API allows 60 requests an hour per address. A run makes 2 (the app's list, and the catalog's list when a
+new catalog needs it), plus one lookup for a release that a list lacks (rare: the site copy's release is one while
+the app list does not hold it). A rate limit ends the run quietly; the next one tries again.
 
 ### The site copy (`razdor.indicozy.dev/`, and the wiki at `/wiki/`)
 
@@ -308,7 +308,8 @@ The Pages site (the hand-made site and the wiki) is also served at the root of t
 `root-copy` job (`.github/workflows/pages.yml`) builds the root copy with `tools/site/root_copy.py` (the wiki with base
 `/wiki`, the `/razdor/` links rewritten, canonical links to GitHub's pages) and packs it as `site.tar.gz` into the
 pre-release `site-latest` of this repository (`GITHUB_TOKEN` cannot write to the community repository, and no
-secret is set). The mirror looks that release up (one call a run) and, when its digest is new, fetches the archive
+secret is set). The mirror finds that release in the app list it reads anyway (one tag lookup only when the list lacks it) and,
+when its digest is new, fetches the archive
 (digest checked), unpacks it into `/var/www/razdor-site/versions/<sha256>` (a link, or a path that leaves the folder,
 fails the unpack) and moves `/var/www/razdor-site/current` to it with one rename. The copy before the live one is
 kept, so a rollback is `ln -sfn versions/<sha256> /var/www/razdor-site/current` by hand.
@@ -321,6 +322,7 @@ Install (once, as root; the old placeholder folder is moved aside, the config ne
 default). Order: the folder and the unit first, then the first sync, then nginx, so the site never answers 404 for
 longer than the sync takes:
 
+    install -m 0755 razdor-mirror /usr/local/bin/razdor-mirror            # the new binary (server/deploy/build.sh)
     mv /var/www/razdor-site /var/www/razdor-site.old                       # the placeholder; delete it later
     install -d -o razdor-mirror -g nginx -m 0755 /var/www/razdor-site /var/www/razdor-site/versions
     install -m 0644 server/deploy/razdor-mirror-sync.service /etc/systemd/system/

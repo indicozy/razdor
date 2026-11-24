@@ -176,7 +176,8 @@ def razdor_releases(raw):
     """Published razdor releases, oldest first, with raw and after-bots downloads per platform."""
     releases, unknown = [], set()
     for rel in raw:
-        if rel.get("draft") or not rel.get("published_at"):
+        # The owner's server pulls the site copy from this pre-release (server/src/mirror/site.rs): not an app release.
+        if rel.get("draft") or not rel.get("published_at") or rel.get("tag_name") == "site-latest":
             continue
         platforms, translate_counts, sums = {}, [], 0
         for asset in rel.get("assets") or []:

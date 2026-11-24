@@ -206,11 +206,28 @@ fn site_archive(front: &str) -> Vec<u8> {
     enc.finish().unwrap()
 }
 
-/// Publishes `archive` as the site release (the lookup of `SITE_API` answers it).
+/// Publishes `archive` as the site release: a pre-release in the app list (as GitHub has it) and at the tag lookup.
 fn publish_site(fake: &Fake, archive: &[u8]) -> Value {
-    let rel = release(fake, "razdor", site::SITE_TAG, &[(site::SITE_ASSET, archive)], false);
+    let mut rel = release(fake, "razdor", site::SITE_TAG, &[(site::SITE_ASSET, archive)], false);
+    rel["prerelease"] = json!(true);
     fake.json(SITE_API, &rel);
+    unlist_site(fake);
+    let body = fake.gets.borrow().get(APP_API).unwrap().body.clone();
+    let mut list: Vec<Value> = serde_json::from_slice(&body).unwrap();
+    list.push(rel.clone());
+    fake.json(APP_API, &Value::Array(list));
     rel
+}
+
+/// Takes the site release out of the app list (GitHub's list holds 30 releases; an old site release falls off it).
+fn unlist_site(fake: &Fake) {
+    let body = fake.gets.borrow().get(APP_API).unwrap().body.clone();
+    let list: Vec<Value> = serde_json::from_slice::<Vec<Value>>(&body)
+        .unwrap()
+        .into_iter()
+        .filter(|r| r["tag_name"] != json!(site::SITE_TAG))
+        .collect();
+    fake.json(APP_API, &Value::Array(list));
 }
 
 fn status_of(cfg: &MirrorConfig) -> Value {
@@ -256,8 +273,8 @@ fn the_sync_makes_two_api_calls_a_run_and_writes_status() {
     let fake = Fake::default();
     world(&fake);
     let out = run(&cfg, &fake, now()).unwrap();
-    assert_eq!(out.api_calls, 3);
-    assert_eq!(fake.api_seen.borrow().len(), 3);
+    assert_eq!(out.api_calls, 2);
+    assert_eq!(fake.api_seen.borrow().len(), 2);
     let status: Value = serde_json::from_slice(&fs::read(cfg.root.join("status.json")).unwrap()).unwrap();
     assert_eq!(status["app"], json!(["v1.6.0"]));
     assert_eq!(status["catalog"], json!("catalog-2026-11-24-1"));
@@ -672,6 +689,7 @@ fn a_site_archive_with_a_wrong_digest_is_not_published() {
     let live = status_of(&cfg)["site"].as_str().unwrap().to_string();
     let mut rel = publish_site(&fake, &site_archive("home two"));
     rel["assets"][0]["digest"] = json!(format!("sha256:{}", "0".repeat(64)));
+    unlist_site(&fake);
     fake.json(SITE_API, &rel);
     let out = run(&cfg, &fake, now()).unwrap();
     assert!(out.errors.iter().any(|e| e.starts_with("site:")), "{:?}", out.errors);
@@ -684,9 +702,37 @@ fn no_site_release_yet_is_not_an_error() {
     let (_base, cfg) = setup("site-none");
     let fake = Fake::default();
     world(&fake);
+    unlist_site(&fake);
     fake.gets.borrow_mut().remove(SITE_API);
     let out = run(&cfg, &fake, now()).unwrap();
     assert!(out.errors.is_empty(), "{:?}", out.errors);
     assert!(status_of(&cfg)["site"].is_null());
     assert!(!cfg.site_dir.join("current").exists());
+}
+
+#[test]
+fn a_site_release_missing_from_the_app_list_is_looked_up_by_its_tag() {
+    let (_base, cfg) = setup("site-lookup");
+    let fake = Fake::default();
+    world(&fake);
+    unlist_site(&fake);
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    assert_eq!(out.api_calls, 3, "the app list, the catalog list and the site's tag");
+    assert!(status_of(&cfg)["site"].as_str().is_some());
+}
+
+#[test]
+fn a_site_folder_that_cannot_be_made_does_not_stop_the_sync() {
+    let (_base, mut cfg) = setup("site-blocked");
+    cfg.site_dir = cfg.root.parent().unwrap().join("not-a-folder");
+    fs::write(&cfg.site_dir, b"a file, not a folder").unwrap();
+    let fake = Fake::default();
+    world(&fake);
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.iter().any(|e| e.starts_with("site:")), "{:?}", out.errors);
+    assert_eq!(out.app, vec!["v1.6.0".to_string()]);
+    assert_eq!(out.catalog.as_deref(), Some("catalog-2026-11-24-1"));
+    assert!(cfg.root.join("pages/razdor-community/releases.json").exists(), "the feed is still written");
+    assert!(cfg.root.join("status.json").exists(), "the status is still written");
 }

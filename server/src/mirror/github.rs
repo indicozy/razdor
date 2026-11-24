@@ -80,7 +80,10 @@ fn parse_asset(a: &Value) -> Option<Asset> {
 
 /// The newest `keep` releases that are neither drafts nor pre-releases (the client skips both too).
 pub fn newest_published(list: &[Release], keep: usize) -> Vec<&Release> {
-    list.iter().filter(|r| !r.draft && !r.prerelease).take(keep).collect()
+    list.iter()
+        .filter(|r| !r.draft && !r.prerelease && r.tag != super::site::SITE_TAG)
+        .take(keep)
+        .collect()
 }
 
 /// The release's version: the tag without its `v`.

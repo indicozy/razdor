@@ -23,6 +23,8 @@ from pathlib import Path
 GITHUB_SITE = "https://indicozy.github.io/razdor"
 TEXT_SUFFIXES = {".html", ".htm", ".css", ".js", ".mjs", ".json", ".xml", ".txt", ".webmanifest", ".svg"}
 
+# An attribute that names the site's own GitHub address (a link, a script or a form): made root-relative.
+ABS_RAZDOR_LINK = re.compile(r"""(?P<attr>\b(?:href|src|action)=["'])https://indicozy\.github\.io/razdor(?P<rest>/[^"']*)?(?=["'])""")
 # A root-relative /razdor/ (not the one after a host name): preceded by a quote, a bracket, a space, = or a comma.
 ROOT_RAZDOR = re.compile(r"""(?P<pre>["'(=\s,])/razdor/""")
 # Astro's absolute addresses for the wiki when the base is /wiki (Open Graph and similar tags).
@@ -32,6 +34,7 @@ CANONICAL = re.compile(r"""<link\s+rel=["']canonical["'][^>]*>\s*""", re.IGNOREC
 
 def rewrite_text(text: str) -> str:
     """The root-copy rewrite of one text file (no canonical link; see canonical_for)."""
+    text = ABS_RAZDOR_LINK.sub(lambda m: m.group("attr") + (m.group("rest") or "/"), text)
     text = ROOT_RAZDOR.sub(lambda m: m.group("pre") + "/", text)
     return ABS_WIKI.sub(GITHUB_SITE + "/wiki", text)
 
