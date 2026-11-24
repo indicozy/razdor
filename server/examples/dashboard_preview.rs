@@ -127,6 +127,7 @@ fn main() {
             crashes_prev_7d: 28,
         },
         players_per_day,
+        adoption: vec![],
         versions_per_day,
         releases: vec![
             Release { version: "1.5.0".into(), first_day: "2026-09-14".into() },

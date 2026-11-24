@@ -4,12 +4,14 @@
 
 pub mod abuse;
 pub mod admin;
+pub mod adoption;
 pub mod analytics;
 pub mod budget;
 pub mod civil;
 pub mod clock;
 pub mod cloud;
 pub mod config;
+pub mod crash_view;
 pub mod db;
 pub mod files;
 pub mod http;
@@ -97,6 +99,7 @@ pub fn router(state: AppState) -> Router {
             get(cloud::get_bench).post(cloud::post_bench).layer(DefaultBodyLimit::max(limits::MAX_BENCH_BODY)),
         )
         .route("/admin", get(admin::page_get))
+        .route("/admin/crash", get(crash_view::page_get))
         .route("/admin/login", post(admin::login).layer(small))
         .route("/admin/logout", post(admin::logout))
         .route("/admin/unban", post(admin::unban).layer(small))

@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rusqlite::params;
 use serde::Serialize;
 
+use crate::adoption::{self, AdoptionDay};
 use crate::budget::Figures;
 use crate::civil::{day_of, ymd};
 use crate::http::ApiError;
@@ -129,6 +130,9 @@ pub struct Summary {
     pub overview: Overview,
     /// Installs that pinged, per day (the chart range).
     pub players_per_day: Vec<Named>,
+    /// Installs per day on each razdor version and platform, from the daily ping (raw pings and the
+    /// per-day aggregates, so it reaches past 90 days).
+    pub adoption: Vec<AdoptionDay>,
     /// Distinct installs per day and razdor version (the chart range).
     pub versions_per_day: Vec<VersionDay>,
     /// The versions whose first day is in the chart range, by day.
@@ -188,6 +192,7 @@ pub async fn build(st: &AppState, range_days: i64) -> Result<Summary, ApiError> 
     let from = today - (range - 1);
     let month = today - 29;
     let week = today - 6;
+    let adoption = st.stats.read(move |c| Ok(adoption::days(c, from)?)).await?;
     let stats = st
         .stats
         .read(move |c| {
@@ -501,6 +506,7 @@ pub async fn build(st: &AppState, range_days: i64) -> Result<Summary, ApiError> 
         range_days: range,
         overview,
         players_per_day,
+        adoption,
         versions_per_day,
         releases,
         latest_version,

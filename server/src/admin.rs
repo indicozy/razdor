@@ -83,7 +83,7 @@ pub fn page_html(title: &str, body: &str) -> String {
     )
 }
 
-fn page(status: StatusCode, title: &str, body: &str) -> Response {
+pub fn page(status: StatusCode, title: &str, body: &str) -> Response {
     (status, Html(page_html(title, body))).into_response()
 }
 
@@ -449,7 +449,7 @@ fn range_links(current: i64) -> String {
 }
 
 const MENU: &str = "<nav class=\"menu\" aria-label=\"Sections\">\
-<a href=\"#overview\">Overview</a><a href=\"#players\">Players</a><a href=\"#maps\">Maps</a>\
+<a href=\"#overview\">Overview</a><a href=\"#players\">Players</a><a href=\"#adoption\">Adoption</a><a href=\"#maps\">Maps</a>\
 <a href=\"#crashes\">Crashes</a><a href=\"#performance\">Performance</a><a href=\"#cloud\">Cloud</a>\
 <a href=\"#admin\">Admin</a></nav>";
 
@@ -598,6 +598,9 @@ pub fn render(sm: &Summary) -> String {
     b.push_str(&named_table("experiment", &sm.experiments));
     b.push_str("</section>");
 
+    // Adoption: installs per version and per platform, per day (the daily ping).
+    b.push_str(&crate::adoption::section(&sm.adoption));
+
     // Crashes: the groups, the new ones marked, and the crash rate per version.
     b.push_str("<section id=\"crashes\"><h2>Crashes (last 30 days, grouped by location and message)</h2>");
     b.push_str("<div class=\"scroll\"><table class=\"wide\">");
@@ -620,13 +623,14 @@ pub fn render(sm: &Summary) -> String {
         let _ = write!(
             b,
             "<tr><td class=\"n\">{}</td><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td><td>{status}<span class=\"muted\">first seen {}</span></td>\
-             <td><button type=\"button\" data-js hidden data-copy=\"{}\">Copy</button></td></tr>",
+             <td><a href=\"{}\">Reports</a> <button type=\"button\" data-js hidden data-copy=\"{}\">Copy</button></td></tr>",
             c.count,
             esc(&c.location),
             esc(&c.message),
             esc(&c.last_day),
             esc(&c.last_version),
             esc(&c.first_version),
+            esc(&crate::crash_view::group_href(&c.location, &c.message)),
             esc(&copy)
         );
     }
@@ -859,15 +863,20 @@ pub async fn page_get(
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     if !session_ok(&st, &headers) {
-        return Ok(page(
-            StatusCode::OK,
-            "Razdor stats",
-            "<h1>Razdor stats</h1><form method=\"post\" action=\"/admin/login\">\
-             <label>Password <input type=\"password\" name=\"password\" autofocus></label> <button>Enter</button></form>",
-        ));
+        return Ok(login_page());
     }
     let sm = summary::build(&st, days_param(&q)).await?;
     Ok(page(StatusCode::OK, "Razdor stats", &render(&sm)))
+}
+
+/// The password form the dashboard and the crash pages show without a session.
+pub fn login_page() -> Response {
+    page(
+        StatusCode::OK,
+        "Razdor stats",
+        "<h1>Razdor stats</h1><form method=\"post\" action=\"/admin/login\">\
+         <label>Password <input type=\"password\" name=\"password\" autofocus></label> <button>Enter</button></form>",
+    )
 }
 
 #[derive(Deserialize)]
@@ -1011,6 +1020,7 @@ mod tests {
             latest_version: "1.5.3".into(),
             previous_version: "1.5.2".into(),
             crash_rates: vec![CrashRate { version: "1.5.3".into(), crashes: 2, installs: 10 }],
+            adoption: vec![],
             week_by_version: vec![],
             week_by_platform: vec![],
             week_by_game: vec![],
@@ -1035,7 +1045,7 @@ mod tests {
     #[test]
     fn render_has_sections_and_range_links() {
         let html = render(&sample(7, "Ashen Ford", "plain"));
-        for id in ["overview", "players", "maps", "crashes", "performance", "cloud", "admin"] {
+        for id in ["overview", "players", "adoption", "maps", "crashes", "performance", "cloud", "admin"] {
             assert!(html.contains(&format!("id=\"{id}\"")), "missing section {id}");
         }
         for days in [7, 30, 90] {
@@ -1059,6 +1069,13 @@ mod tests {
     fn new_crash_groups_get_a_badge() {
         let html = render(&sample(30, "Ashen Ford", "plain"));
         assert_eq!(html.matches("<span class=\"badge bad\">new</span>").count(), 1);
+    }
+
+    #[test]
+    fn crash_rows_link_to_their_group_page() {
+        let html = render(&sample(30, "Ashen Ford", "a & <b>"));
+        assert!(html.contains("<a href=\"/admin/crash?loc=battle.rs%3A10&amp;msg=a%20%26%20%3Cb%3E\">Reports</a>"));
+        assert!(!html.contains("a & <b>"), "the raw message must not reach the page");
     }
 
     #[test]
