@@ -198,6 +198,11 @@ fn ground_blend_default() -> bool {
     true
 }
 
+/// «Снегопад» is on for an older file too (`Settings::map_snowfall`).
+fn map_snowfall_default() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -421,6 +426,11 @@ pub struct Settings {
     /// itself, once a season (`holiday_asked`).
     #[serde(default)]
     pub map_holiday: bool,
+    /// Razdor's, on by default: «Снегопад». The falling snow of the holiday look on the map and in the main
+    /// menu, and the weather's snow spells (`holiday::snowfall`, `weather::without_snowfall`). Off: no falling snow
+    /// anywhere; the snow on the land stays. «Низкое» quality turns it off (`quality_preset`). Style only.
+    #[serde(default = "map_snowfall_default")]
+    pub map_snowfall: bool,
     /// The season year (`holiday::season_now`) the season start (the Christmas mod, the look, the welcome) was
     /// last done for; `None` until it is done. The look or the mod switched off later is not redone this season.
     #[serde(default)]
@@ -515,7 +525,7 @@ pub fn must_request(asked: Option<i32>, want: i32) -> bool {
 
 impl Default for Settings {
     fn default() -> Settings {
-        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), crt: super::crt::Strength::Off, crt_quality: None, crt_curve: false, menu_frame: Default::default(), map_weather: false, map_living: false, map_holiday: false, holiday_asked: None, holiday_pending: false, holiday_previous: None, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
+        Settings { music_volume: 0.6, sfx_volume: 0.8, music_muted: false, sfx_muted: false, show_fps: false, touchpad: None, orientation: None, expert_ai: None, max_ai: false, max_guard: true, wide_row: None, display: Default::default(), ui_scale: 0.0, text_size: super::display::default_text_size(), large_windows: super::display::default_large_windows(), layout_version: LAYOUT_VERSION, minimap_size: None, minimap_corner: Default::default(), bottom_bar_size: Default::default(), keep_xp_on_promotion: false, keep_formation: true, hit_shake: false, battle_marks: true, army_list: false, map_tilt: false, map_first_person: false, map_horizon: false, map_globe: false, map_eyes: false, map_third_tune: super::view25::THIRD_TUNE, map_first_tune: super::view25::FIRST_TUNE, map_auto_turn: false, map_light: Default::default(), map_light_cycle: 24, map_light_hour: 18, map_steady: true, map_shadows: Default::default(), map_light_quality: None, map_mist: Default::default(), map_sprite_size: super::world_view::DEFAULT_SPRITE_SIZE, map_render_scale: 1.0, frame_cap: 0, map_twist: false, leader_caption: true, updates: Default::default(), map_zoom: 1.0, zoom_locked: false, map_extended: false, anim_speed: None, font: Default::default(), scroll_speed: None, walk_speed: None, no_sound: None, hints_off: None, pursue: None, autosave: None, impossible: None, formation_controls: Default::default(), keys: Vec::new(), map_live_water: false, map_ground_blend: true, map_natural_ground: Default::default(), map_cloud_shadows: false, map_decor: Default::default(), crt: super::crt::Strength::Off, crt_quality: None, crt_curve: false, menu_frame: Default::default(), map_weather: false, map_living: false, map_holiday: false, map_snowfall: true, holiday_asked: None, holiday_pending: false, holiday_previous: None, chronicle_summary: true, battery_saver: false, map_anim: Default::default(), map_water_rate: default_water_rate(), map_water_quality: Default::default(), record_game: true, debug_mode: false }
     }
 }
 
@@ -1581,6 +1591,16 @@ mod tests {
         let on = Settings { map_living: true, ..Settings::default() };
         let back: Settings = serde_json::from_str(&serde_json::to_string(&on).unwrap()).unwrap();
         assert!(back.map_living);
+    }
+
+    #[test]
+    fn map_snowfall_defaults_on_and_survives_serialization() {
+        let old: Settings = serde_json::from_str("{}").unwrap();
+        assert!(old.map_snowfall, "an older file: the falling snow stays on, as before");
+        assert!(Settings::default().map_snowfall);
+        let off = Settings { map_snowfall: false, ..Settings::default() };
+        let back: Settings = serde_json::from_str(&serde_json::to_string(&off).unwrap()).unwrap();
+        assert!(!back.map_snowfall, "a player's «Снегопад» off survives a save and load");
     }
 
     #[test]

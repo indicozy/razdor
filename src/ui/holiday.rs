@@ -34,6 +34,8 @@ local! {
     /// Counts up on each change of the game played or of the look: the main menu reloads when it moves
     /// (`game_generation`).
     static GENERATION: Cell<u64> = Cell::new(0);
+    /// «Снегопад» (`Settings::map_snowfall`), taken in every frame (`set_snowfall`): on by default.
+    static SNOWFALL: Cell<bool> = Cell::new(true);
 }
 
 /// Whether `RAZDOR_HOLIDAY=1` forces the setting on (test builds and screenshots).
@@ -58,6 +60,17 @@ pub fn set_pref(setting: bool, cheap: bool) {
 /// The setting as the game sees it (`wanted`), this frame.
 pub fn setting() -> bool {
     ON.get()
+}
+
+/// Takes «Снегопад» (`Settings::map_snowfall`) in, every frame (from `display::follow_settings`). Off: no falling
+/// snow on the map or in the main menu, the holiday's or the weather's; the snow on the land stays.
+pub fn set_snowfall(on: bool) {
+    SNOWFALL.set(on);
+}
+
+/// Whether falling snow is shown (`set_snowfall`, on by default). Read by the map's weather and the menu's snow.
+pub fn snowfall() -> bool {
+    SNOWFALL.get()
 }
 
 /// The look is on this frame: the setting is on and the Christmas mod is the game played (`look_active`).

@@ -523,12 +523,13 @@ enum Backdrop {
 /// The backdrop's layers in drawing order, as the original's (the ruins 0x4c7834, the menu's fire
 /// 0x4c7a02, the logo up to 0x4c7774; the buttons' frames after all of them, 0x4c7d40). Only the main
 /// menu (`main_menu`) has the fire: under the logo, under every button. The snow is the main menu's
-/// too, and only while the holiday look is on (`holiday`: the setting and the Christmas mod played).
-fn backdrop_layers(main_menu: bool, holiday: bool) -> Vec<Backdrop> {
+/// too, and only while the holiday look is on (`holiday`: the setting and the Christmas mod played) with
+/// «Снегопад» on (`snowfall`).
+fn backdrop_layers(main_menu: bool, holiday: bool, snowfall: bool) -> Vec<Backdrop> {
     [Backdrop::Ruins, Backdrop::Snow, Backdrop::MenuFire, Backdrop::Logo, Backdrop::Foot]
         .into_iter()
         .filter(|l| match l {
-            Backdrop::Snow => main_menu && holiday,
+            Backdrop::Snow => main_menu && holiday && snowfall,
             Backdrop::MenuFire => main_menu,
             _ => true,
         })
@@ -540,7 +541,7 @@ fn draw_backdrop(main_menu: bool) {
     // the window's frame, `window_layout::title_scale`) does not reach them.
     let _scale = super::display::enter_window_scale(None);
     // Timed for the other screens too (`ui::hub_view`, `new_game`, `saves`, ...): their stage lines name them.
-    for layer in backdrop_layers(main_menu, super::holiday::on()) {
+    for layer in backdrop_layers(main_menu, super::holiday::on(), super::holiday::snowfall()) {
         match layer {
             Backdrop::Ruins => frame_probe::time(frame_probe::Stage::MenuBackground, background),
             // The snow is the map's snow pass: its cost is the menu's frame time.
@@ -2084,7 +2085,7 @@ impl Group {
     /// The rows the group shows, top to bottom. Every row is in exactly one group (a test checks it).
     pub fn rows(self) -> &'static [Row] {
         match self {
-            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
+            Group::Map => &[Row::GraphicsQuality, Row::MapZoom, Row::ScrollSpeed, Row::MapResolution, Row::FrameCap, Row::MapView, Row::SpriteSize, Row::TwoFingerTurn, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::CurveReset, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::LightCycle, Row::LightHour, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::WaterRate, Row::WaterQuality, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::Snowfall, Row::DepthModel, Row::MapBattles, Row::ArmyList, Row::LeaderName, Row::MinimapCorner, Row::MinimapReset],
             Group::Battle => &[Row::AiStrength, Row::Impossible, Row::WideFront, Row::WalkSpeed, Row::AnimSpeed, Row::KeepFormation, Row::MaxGuard, Row::ArmyArrangement, Row::HitShake],
             Group::Screen => &[Row::Screen, Row::InterfaceScale, Row::BottomBar, Row::Font, Row::TextSize, Row::LargeWindows, Row::MenuFrame, Row::CrtEffect, Row::CrtQuality, Row::CrtCurve, Row::Orientation],
             Group::Other => &[Row::Keys, Row::Updates, Row::Import, Row::OldSaves, Row::SendLog, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::Bench, Row::Telemetry, Row::TelemetryId, Row::TelemetryDelete, Row::TelemetryNewId],
@@ -2132,6 +2133,9 @@ pub enum Row {
     LivingMap,
     /// Advanced, Razdor's, off by default: «Новогодний вид» (`holiday`): the winter and holiday look. Style only.
     Holiday,
+    /// Razdor's, on by default: «Снегопад» (`map_snowfall`): the falling snow of the holiday look on the map and in
+    /// the main menu, and the weather's snow spells. Off: no falling snow; the snow on the land stays.
+    Snowfall,
     DepthModel,
     MapBattles,
     ArmyList,
@@ -2205,7 +2209,7 @@ pub enum Row {
 
 impl Row {
     /// Every row (the group table's test checks each is in one group; `scene_help` looks rows up).
-pub const ALL: [Row; 84] = [
+pub const ALL: [Row; 85] = [
         Row::GraphicsQuality,
         Row::MapZoom,
         Row::ScrollSpeed,
@@ -2241,6 +2245,7 @@ pub const ALL: [Row; 84] = [
         Row::CloudShadows,
         Row::LivingMap,
         Row::Holiday,
+        Row::Snowfall,
         Row::DepthModel,
         Row::MapBattles,
         Row::ArmyList,
@@ -2323,6 +2328,7 @@ pub const ALL: [Row; 84] = [
             Row::MapDecor => Some(tr("Razdor's: grass, flowers, reeds by the water and bushes at the forest's edge, from the game's own sprites. Only the look: nothing is written into the map and nothing blocks the way.")),
             Row::LivingMap => Some(tr("Razdor's: smoke rises from chimneys, flags wave, birds cross the sky. Style only.")),
             Row::Holiday => Some(tr("Razdor's: snow on the land, roofs and trees, frozen water, snowfall, garlands and festive hats on the heroes, and a Christmas menu theme from the Hub. Style only.")),
+            Row::Snowfall => Some(tr("Razdor's: the falling snow of the holiday look on the map and in the menu, and the weather's snow. Off makes the map and the menu lighter on phones; the snow on the land stays. Style only.")),
             Row::DepthModel => Some(tr("Razdor's: buildings from mods that bring their own art stand in 2.5D on their own ground too. The model (Depth Anything V2 Small, Apache-2.0) is downloaded once, about 50 MB, and runs on this device.")),
             Row::AiStrength => Some(tr("Maximum: before each move the enemy of your battles weighs every move and answer ahead and plays each out to the end of the battle. Maximum is a Razdor rule: the mark will carry the letter R.")),
             Row::Impossible | Row::WideFront => Some(tr("A setting of DT itself. It does not affect the run's mark.")),
@@ -3045,6 +3051,12 @@ fn draw_row(row: Row, c: &mut RowCol, geo: &RowGeo, audio: &mut super::audio::Se
             // Razdor's, off by default: the winter and holiday look (`holiday`), style only.
             if labelled_row_help(c, geo, tr("Holiday look"), yes_no(audio.map_holiday), Row::Holiday.help_text()).0 {
                 audio.map_holiday = !audio.map_holiday;
+            }
+        }
+        Row::Snowfall => {
+            // Razdor's, on by default: the falling snow (`holiday::snowfall`); the snow on the land is the look's own.
+            if labelled_row_help(c, geo, tr("Snowfall"), yes_no(audio.map_snowfall), Row::Snowfall.help_text()).0 {
+                audio.map_snowfall = !audio.map_snowfall;
             }
         }
         Row::MapBattles => {
@@ -4532,8 +4544,8 @@ mod tests {
     #[test]
     fn the_menus_one_fire_goes_under_the_logo_and_every_button() {
         use Backdrop::*;
-        assert_eq!(backdrop_layers(true, false), vec![Ruins, MenuFire, Logo, Foot]);
-        assert_eq!(backdrop_layers(false, false), vec![Ruins, Logo, Foot]);
+        assert_eq!(backdrop_layers(true, false, true), vec![Ruins, MenuFire, Logo, Foot]);
+        assert_eq!(backdrop_layers(false, false, true), vec![Ruins, Logo, Foot]);
     }
 
     /// The holiday snow lies over the ruins and under the fire and the logo, and only on the main
@@ -4541,9 +4553,16 @@ mod tests {
     #[test]
     fn the_holiday_snow_is_between_the_ruins_and_the_fire_on_the_main_menu_only() {
         use Backdrop::*;
-        assert_eq!(backdrop_layers(true, true), vec![Ruins, Snow, MenuFire, Logo, Foot]);
-        assert_eq!(backdrop_layers(false, true), vec![Ruins, Logo, Foot]);
-        assert_eq!(backdrop_layers(true, false), vec![Ruins, MenuFire, Logo, Foot]);
+        assert_eq!(backdrop_layers(true, true, true), vec![Ruins, Snow, MenuFire, Logo, Foot]);
+        assert_eq!(backdrop_layers(false, true, true), vec![Ruins, Logo, Foot]);
+        assert_eq!(backdrop_layers(true, false, true), vec![Ruins, MenuFire, Logo, Foot]);
+    }
+
+    /// «Снегопад» off: the look's menu has no falling snow (the other layers stay).
+    #[test]
+    fn with_snowfall_off_the_menu_has_no_falling_snow() {
+        use Backdrop::*;
+        assert_eq!(backdrop_layers(true, true, false), vec![Ruins, MenuFire, Logo, Foot]);
     }
 
     /// The fire's rect is the original's 400 × 590 at x 312, y 150 (of 1024 × 768) on the desktop's
@@ -4889,7 +4908,7 @@ mod tests {
     #[test]
     fn the_long_hints_are_behind_a_question_mark() {
         let with: Vec<Row> = Row::ALL.into_iter().filter(|r| r.help_text().is_some()).collect();
-        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::DepthModel, Row::AiStrength, Row::Impossible, Row::WideFront, Row::ArmyArrangement, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
+        assert_eq!(with, vec![Row::GraphicsQuality, Row::MapZoom, Row::MapView, Row::FarGround, Row::AutoTurn, Row::CurveStart, Row::CurveStrength, Row::CameraHeight, Row::CameraPitch, Row::CameraFov, Row::MapEdge, Row::Lighting, Row::SteadyBrightness, Row::Shadows, Row::LightQuality, Row::MapAnim, Row::GroundBlend, Row::NaturalGround, Row::MapDecor, Row::Mist, Row::LiveWater, Row::Weather, Row::CloudShadows, Row::LivingMap, Row::Holiday, Row::Snowfall, Row::DepthModel, Row::AiStrength, Row::Impossible, Row::WideFront, Row::ArmyArrangement, Row::HitShake, Row::MenuFrame, Row::CrtEffect, Row::Language, Row::Updates, Row::ChronicleSummary, Row::BatterySaver, Row::RecordGame, Row::DebugMode, Row::SendLog, Row::Telemetry]);
         scene_help("AiStrength");
         assert_eq!(HELP_PINNED.with(|p| p.borrow().clone()).as_deref(), Row::AiStrength.help_text());
         HELP_PINNED.with(|p| *p.borrow_mut() = None);

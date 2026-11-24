@@ -1,8 +1,8 @@
 //! Razdor's «Качество графики» (the owner's decision, 2026-11-12): one row of the map group sets the map's look in one
 //! go: its resolution, the light, the shadows, the mist, the moving water and its rate and quality, the weather, the
 //! living map, the map's animation, and (the owner's table, 2026-11-19) the natural ground, the cloud shadows and the
-//! decorations. Nothing stores the choice. The row shows the first preset whose values all hold
-//! in the settings, or «Своё» when none does, so a setting changed by hand shows «Своё» by itself, and an install that
+//! decorations, and «Снегопад» (the falling snow, off on «Низкое»). Nothing stores the choice. The row shows the first
+//! preset whose values all hold in the settings, or «Своё» when none does, so a setting changed by hand shows «Своё» by itself, and an install that
 //! has its settings keeps them as they are. A new install's settings are the original's look («Оригинал»).
 
 use razdor::i18n::tr;
@@ -51,6 +51,8 @@ struct Look {
     clouds: Option<bool>,
     /// «Украшения карты» (`Settings::map_decor`).
     decor: Option<DecorLevel>,
+    /// «Снегопад» (`Settings::map_snowfall`): off on «Низкое», on from «Среднее» up; «Оригинал» does not say.
+    snowfall: Option<bool>,
 }
 
 /// The values of each preset (the owner's decisions, 2026-11-12).
@@ -71,6 +73,7 @@ fn look(p: Preset) -> Look {
             natural: Some(NaturalGround::Off),
             clouds: Some(false),
             decor: Some(DecorLevel::Off),
+            snowfall: None,
         },
         Preset::Low => Look {
             render_scale: Some(0.75),
@@ -87,6 +90,7 @@ fn look(p: Preset) -> Look {
             natural: Some(NaturalGround::Off),
             clouds: Some(false),
             decor: Some(DecorLevel::Off),
+            snowfall: Some(false),
         },
         Preset::Medium => Look {
             render_scale: Some(1.0),
@@ -103,6 +107,7 @@ fn look(p: Preset) -> Look {
             natural: Some(NaturalGround::Soft),
             clouds: Some(true),
             decor: Some(DecorLevel::Few),
+            snowfall: Some(true),
         },
         Preset::High => Look {
             render_scale: Some(1.0),
@@ -119,6 +124,7 @@ fn look(p: Preset) -> Look {
             natural: Some(NaturalGround::Strong),
             clouds: Some(true),
             decor: Some(DecorLevel::Normal),
+            snowfall: Some(true),
         },
     }
 }
@@ -141,6 +147,7 @@ impl Look {
             && self.natural.is_none_or(|n| s.map_natural_ground == n)
             && self.clouds.is_none_or(|on| s.map_cloud_shadows == on)
             && self.decor.is_none_or(|d| s.map_decor == d)
+            && self.snowfall.is_none_or(|on| s.map_snowfall == on)
     }
 }
 
@@ -199,6 +206,9 @@ pub fn set(s: &mut Settings, p: Preset) {
     }
     if let Some(d) = l.decor {
         s.map_decor = d;
+    }
+    if let Some(on) = l.snowfall {
+        s.map_snowfall = on;
     }
 }
 
@@ -276,12 +286,36 @@ mod tests {
     }
 
     #[test]
+    fn the_low_preset_turns_the_snowfall_off() {
+        // «Снегопад» is off on «Низкое», on from «Среднее» up; «Оригинал» does not say (not compared, not set).
+        let mut s = Settings { map_snowfall: true, ..Settings::default() };
+        set(&mut s, Preset::Low);
+        assert!(!s.map_snowfall, "Low turns the falling snow off");
+        assert_eq!(current(&s), Some(Preset::Low));
+        for p in [Preset::Medium, Preset::High] {
+            set(&mut s, p);
+            assert!(s.map_snowfall, "{p:?} turns the falling snow on");
+            assert_eq!(current(&s), Some(p));
+        }
+        set(&mut s, Preset::High);
+        s.map_snowfall = false;
+        assert_eq!(current(&s), None, "High with the snowfall off shows custom");
+        let mut s = Settings { map_snowfall: false, ..Settings::default() };
+        set(&mut s, Preset::Original);
+        assert!(!s.map_snowfall, "Original does not set the snowfall");
+        assert_eq!(current(&s), Some(Preset::Original), "and Original holds with it off");
+    }
+
+    #[test]
     fn an_install_from_before_the_effects_keeps_its_low_and_original_look() {
-        // An older file has none of the three keys: the defaults (no effects). «Оригинал» and «Низкое» still hold;
-        // an old «Среднее» or «Высокое» (no effects) shows «Своё» until the player picks it again.
+        // An older file has none of the keys: the defaults (no effects, snowfall on). «Оригинал» still holds; an old
+        // «Низкое», «Среднее» or «Высокое» shows «Своё» until the player picks it again (the plain comparison).
+        let s = Settings::default();
+        assert_eq!(current(&s), Some(Preset::Original));
         let mut s = Settings::default();
         set(&mut s, Preset::Low);
-        assert_eq!(current(&s), Some(Preset::Low));
+        s.map_snowfall = true;
+        assert_eq!(current(&s), None, "an old «Низкое» has the falling snow on, which Low says off");
         let mut s = Settings::default();
         set(&mut s, Preset::Medium);
         s.map_natural_ground = NaturalGround::Off;

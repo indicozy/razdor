@@ -3,6 +3,7 @@
 //! `RAZDOR_SNAPSHOT_FRAMES` frames (default 20) and quits. Meant for an invisible display,
 //! e.g. `xvfb-run -s "-screen 0 1024x768x24" razdor` with `RAZDOR_SIZE=1024x768`.
 //! `RAZDOR_LOADER=holiday|catalog` shows the main menu's bottom-left loader as that background job runs (`holiday_start::loader_label`).
+//! `RAZDOR_SNOWFALL=0` turns the falling snow off (the setting «Снегопад»; the snow on the land stays) on the map and in the menu.
 //!
 //! Scenes (`<map>` is a map file name of the install without `.DTm`, e.g. `РК3-Столица`):
 //! `title`, `fonts` (sample lines in many scripts), `update` (a made-up release on offer), `authors[:<seconds>]`, `options[:<group>]`, `scenarios[:<map>]`, `import-notice` (the scenario list with «Добавить карту…»'s notice), `tutorial`, `holiday-welcome` (the main menu with the holiday look's welcome window up), `load[:manual|auto[:<row>]]`, `editor[:<map>[:<text to find>]]`, `classes:<map>`, `map:<map>[:x,y]`, `minimap:<map>`, `clash:<map>` (the first two armies fight on the explored map), `walk:<map>:dx,dy` (the

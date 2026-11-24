@@ -25,9 +25,25 @@ pub fn set_pref(on: bool) {
     ON.store(on, Ordering::Relaxed);
 }
 
-/// Whether the weather is drawn (the setting, or `RAZDOR_WEATHER=1`; the holiday look always draws it).
+/// Whether the weather is drawn (the setting, or `RAZDOR_WEATHER=1`; the holiday look draws it while «Снегопад» is on).
 pub fn on() -> bool {
-    ON.load(Ordering::Relaxed) || holiday::on()
+    pass_wanted(ON.load(Ordering::Relaxed), holiday::on(), holiday::snowfall())
+}
+
+/// Whether the weather pass is drawn (pure): the setting «Погода», or the holiday look for its snow. With «Снегопад»
+/// off the look alone draws no pass: the snow on the land is the terrain's own (`terrain/holiday.glsl`), not the pass's.
+pub fn pass_wanted(weather: bool, look: bool, snowfall: bool) -> bool {
+    weather || (look && snowfall)
+}
+
+/// The levels with the falling snow taken out when «Снегопад» is off (pure): the snow spell, and the holiday's snow
+/// floor, is falling snow, so it goes. The rain, the heat and the ash keep the schedule's levels.
+pub fn without_snowfall(levels: Levels, snowfall: bool) -> Levels {
+    if snowfall {
+        levels
+    } else {
+        Levels { snow: 0.0, ..levels }
+    }
 }
 
 /// The weather kinds. Each has its own spell per day; the land decides where each one falls.
@@ -416,6 +432,7 @@ pub fn frame_levels(schedule: &Schedule, t: f64, now: f64) -> Option<Levels> {
     }
     let target = Levels::at(schedule, t);
     let target = if holiday::on() { holiday_levels(target) } else { target };
+    let target = without_snowfall(target, holiday::snowfall());
     let (shown, at) = SHOWN.get().unwrap_or((target, now));
     let shown = shown.eased_toward(target, (now - at).clamp(0.0, 1.0) as f32);
     SHOWN.set(Some((shown, now)));
@@ -1218,6 +1235,21 @@ mod tests {
         assert_eq!(scissor_of([10.5, 3.0, 4.0, 5.0], 2.0), (21, 6, 8, 10));
         // A fraction of a physical pixel still counts as a pixel.
         assert_eq!(scissor_of([0.2, 0.2, 0.3, 0.3], 1.0), (0, 0, 1, 1));
+    }
+
+    #[test]
+    fn the_look_forces_the_pass_only_with_snowfall() {
+        assert!(pass_wanted(true, false, false), "the setting alone");
+        assert!(pass_wanted(false, true, true), "the look with its snow");
+        assert!(!pass_wanted(false, true, false), "the look without falling snow: no pass");
+        assert!(!pass_wanted(false, false, true), "neither the setting nor the look");
+    }
+
+    #[test]
+    fn without_snowfall_the_snow_goes_and_the_rest_stays() {
+        let l = Levels { snow: 0.6, swamp: 0.3, lowland: 0.5, heat: 0.9, ash: 0.7 };
+        assert_eq!(without_snowfall(l, true), l, "snowfall on: the levels as they are");
+        assert_eq!(without_snowfall(l, false), Levels { snow: 0.0, ..l }, "snowfall off: no snow, the other weathers stay");
     }
 
     #[test]

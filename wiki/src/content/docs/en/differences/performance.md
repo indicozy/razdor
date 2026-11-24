@@ -62,6 +62,8 @@ The **"Graphics quality"** row is the first one on the **"Map"** tab. A click st
 | Medium | 100% | on, medium light quality | "From the sun" | "Simple" | on, every second frame, medium quality | on | "Near only" | "Soft" | "Few" | on |
 | High | 100% | on, high light quality | "From the sun" | "Clouds" | on, every frame, high quality | on | "On" | "Strong" | "Normal" | on |
 
+**Snowfall** is the falling snow of the holiday look. It is off on "Low" and on for "Medium" and "High". "Original" does not change it. The separate "Snowfall" row on the "Map" tab turns off the falling snow on the map, in the menu and the weather's snow. The snow on the ground stays. On phones this makes the map lighter.
+
 On a weak phone, start with "Low". Changing any one of these settings by itself makes the row show "Custom settings".
 
 ## Map drawing speed

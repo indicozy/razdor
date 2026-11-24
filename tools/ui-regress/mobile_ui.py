@@ -102,6 +102,8 @@ SCREENS = [
     # The settings group windows (backlog 1559): the Map window is the longest and scrolls; its rows are
     # measured in the view.
     ("options-group-map", "options:map", {}),
+    # «Снегопад» (the falling snow, after «Новогодний вид») sits low in the Map list: the scroll shows it.
+    ("options-map-snowfall", "options:map", {"RAZDOR_SCENE_SCROLL": "1900"}),
     ("options-group-battle", "options:battle", {}),
     ("options-group-screen", "options:screen", {}),
     ("options-group-cloud", "options:cloud", {"RAZDOR_SCENE_CLOUD": "synced", "RAZDOR_SCENE_CLOUD_ALLOWED": "1"}),

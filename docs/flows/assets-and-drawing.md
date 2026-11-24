@@ -314,6 +314,7 @@ The three looks of the owner's table (2026-11-19) are set by the «Качест�
 «Низкое» have none of them, «Среднее» has the natural ground Soft, the cloud shadows and the decorations Few, «Высокое» the
 natural ground Strong, the cloud shadows and the decorations Normal. A hand change of one shows «Своё». An older file has none of
 the three keys (no effects), so its «Низкое» and «Оригинал» still show; an old «Среднее» or «Высокое» shows «Своё».
+«Снегопад» (`Settings::map_snowfall`, on by default) is the fourth effect: «Низкое» sets it off, «Среднее» and «Высокое» on, «Оригинал» does not say. The plain comparison means an older file's «Низкое» (snowfall on, the default) shows «Своё» until it is picked again.
 
 **A moving camera (backlog 1618, B2).** `TerrainLayer::ground_target` returns a `GroundStep`: `Moving` when the cache key
 differs from the last frame's (`draw_ground` then draws `Mode::Full` straight to the screen and leaves the cache alone),
@@ -968,7 +969,7 @@ per biome is `spell`, a hash of the map's seed (`map_seed`), the day and the bio
 swamp rain 45 %, lowland rain 20 %, heat 80 %, ash 70 %), heavy on 40 % of those days. No clouds: Razdor's cloud shade
 is the separate «Тени облаков» pass (`cloud_shadow`, below), so the weather never draws it twice. `Schedule::level`
 blends each midnight over one game hour; `frame_levels` eases the shown levels in real time (`LEVEL_TAU`) and
-forgets them when the weather is off or the map is forgotten (`forget`). `world_view::draw_weather` runs once a
+forgets them when the weather is off or the map is forgotten (`forget`). «Снегопад» off (`holiday::snowfall`, `without_snowfall`) takes the snow spells out of the levels: no falling snow, the rain, heat and ash keep their schedule. `world_view::draw_weather` runs once a
 frame after the flat fog and the daylight, before the clash marks and the UI: the projection maps each pixel to
 its ground cell (`Projection::matrix`: a homography, flat from the camera's scale, 2.5D the ground plane's fit to
 `view25::ground_homography`, four corner picks by `TiltCamera::pick`), the

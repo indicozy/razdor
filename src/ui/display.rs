@@ -885,6 +885,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
         crate::ui::living::set_prefs(false);
         // `RAZDOR_HOLIDAY=1` (the snapshots' «Новогодний вид»); the setting is not read here, the cheap look follows the light level in use.
         crate::ui::holiday::set_pref(false, crate::ui::lights::quality() == crate::ui::lights::Quality::Low);
+        // `RAZDOR_SNOWFALL=0` (the snapshots' «Снегопад» off: no falling snow on the map or in the menu); on otherwise.
+        crate::ui::holiday::set_snowfall(env_switch("RAZDOR_SNOWFALL").unwrap_or(true));
         // `RAZDOR_LIGHT_MODE=game|cycle` (the snapshots' light clock; the lighting is off otherwise): the game's
         // clock (the hour moves while the army travels), or the real-time cycle of `RAZDOR_LIGHT_CYCLE` minutes a
         // day (24 by default), which runs on the snapshot clock, so one run can show several hours.
@@ -934,6 +936,8 @@ pub fn follow_settings(settings: &crate::ui::audio::Settings) {
     // «Новогодний вид»: the cheap path on «Низкое» light or with the battery saver (`holiday::cheap`).
     // The level in use (`lights::quality`: a snapshot's `RAZDOR_LIGHT_QUALITY` wins over the setting).
     crate::ui::holiday::set_pref(settings.map_holiday, crate::ui::lights::quality() == crate::ui::lights::Quality::Low || settings.battery_saver);
+    // «Снегопад» (`map_snowfall`): the falling snow of the look and the weather's snow spells.
+    crate::ui::holiday::set_snowfall(settings.map_snowfall);
     follow(settings.display.for_device(dp_px().is_some()));
 }
 
