@@ -135,8 +135,15 @@ impl Geo {
     pub fn nginx_ranges(&self) -> String {
         let mut out = String::new();
         for (s, e, code) in &self.v4 {
+            // nginx's parser (ngx_inet_addr) returns INADDR_NONE (0xffffffff) for 255.255.255.255, so a range
+            // that ends there is an "invalid range" and nginx refuses the whole include. Such a range stops at
+            // 255.255.255.254; a range that is only 255.255.255.255 is skipped.
+            let end = (*e).min(u32::MAX - 1);
+            if *s > end {
+                continue;
+            }
             let cc = std::str::from_utf8(code).unwrap_or("ZZ");
-            out.push_str(&format!("{}-{} {};\n", Ipv4Addr::from(*s), Ipv4Addr::from(*e), cc));
+            out.push_str(&format!("{}-{} {};\n", Ipv4Addr::from(*s), Ipv4Addr::from(end), cc));
         }
         out
     }
@@ -208,6 +215,14 @@ not a line
     fn nginx_export_is_ascending_ipv4_ranges() {
         let text = table().nginx_ranges();
         assert_eq!(text, "1.0.0.0-1.0.0.255 AU;\n1.0.1.0-1.0.3.255 CN;\n");
+    }
+
+    #[test]
+    fn the_nginx_ranges_never_end_on_the_broadcast_address() {
+        let g = Geo::parse("224.0.0.0,255.255.255.255,ZZ\n255.255.255.255,255.255.255.255,US\n").expect("parses");
+        let text = g.nginx_ranges();
+        assert_eq!(text, "224.0.0.0-255.255.255.254 ZZ;\n");
+        assert!(!text.contains("255.255.255.255"));
     }
 
     #[test]
