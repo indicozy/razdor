@@ -98,6 +98,13 @@ pub fn falloff(d: f32, r: f32) -> f32 {
     t * t
 }
 
+/// The glow factor of a building's windows (0 dark … 1 lit) from the fog's visibility of each of its footprint
+/// cells (`seen`, 0 black … 1 lit, as the ground shows it): the least of them, so one cell under the fog keeps
+/// the whole building's windows dark. 1 when there are no cells.
+pub fn glow_in_fog(seen: &[f32]) -> f32 {
+    seen.iter().copied().fold(1.0, f32::min)
+}
+
 /// What a light belongs to: a building (by its location index, which casts no shadow of its own) or a
 /// figure's torch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,6 +244,14 @@ mod tests {
         let off = torch_offset(Vec2::ZERO, 100.0);
         assert!(off.x.abs() < 1e-5, "{off:?}");
         assert!(off.y < -60.0, "above the head: {off:?}");
+    }
+
+    #[test]
+    fn a_light_in_the_unexplored_fog_does_not_glow() {
+        assert_eq!(glow_in_fog(&[1.0, 1.0]), 1.0, "all lit: full glow");
+        assert_eq!(glow_in_fog(&[1.0, 0.0]), 0.0, "one cell in the unexplored fog: no glow");
+        assert_eq!(glow_in_fog(&[0.5, 1.0]), 0.5, "a half-shown cell halves it");
+        assert_eq!(glow_in_fog(&[]), 1.0, "no cells: nothing hides it");
     }
 
     #[test]

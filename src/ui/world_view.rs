@@ -8122,16 +8122,18 @@ fn draw_building_windows(game: &Game, assets: &Assets, cam: &Camera, veil: Veil)
                 if l.kind.is_bridge() || !location_explored(game, i) || !l.windows_lit(occupied[i]) {
                     continue;
                 }
-                let n = l.cells().count().max(1) as f32;
-                let (sx, sy) = l.cells().fold((0.0f32, 0.0f32), |(x, y), t| {
-                    let (cx, cy) = map.center(t);
-                    (x + cx, y + cy)
-                });
-                if fog_visible(game, c, vec2(sx / n, sy / n)) < 0.01 {
+                // The glow is the least visibility over the footprint's cells (`lights::glow_in_fog`): a building half under
+                // the fog keeps its windows dark over the hidden half, as a dark cell does.
+                let seen: Vec<f32> = l.cells().map(|t| {
+                    let (x, y) = map.center(t);
+                    fog_visible(game, c, vec2(x, y))
+                }).collect();
+                let glow = lights::glow_in_fog(&seen);
+                if glow < 0.01 {
                     continue;
                 }
                 let foot = building_foot(l, c);
-                let vis = shade(c, foot);
+                let vis = shade(c, foot).min(glow);
                 // The flat view's sprites take no fade (`standing` draws them as they are): a window in the fade band is left out there.
                 if vis <= 0.0 || (c.tilt.is_none() && vis < 1.0) {
                     continue;
