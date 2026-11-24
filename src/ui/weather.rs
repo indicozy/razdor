@@ -489,6 +489,8 @@ pub struct Pass<'a> {
     pub explored: [i32; 4],
     /// The masks' boxes (`mask_boxes`).
     pub boxes: Boxes,
+    /// The main menu's snow (`draw_menu_snow`): every pixel snowy, no fog, no mask taps (the shader's `Menu`).
+    pub menu: bool,
 }
 
 /// The loop of every particle, in seconds: each speed times it is a whole number of cells, and the
@@ -535,6 +537,8 @@ uniform float Phase;
 uniform vec3 Tint;
 uniform float Layers;
 uniform float Sun;
+// 1 for the main menu's snow: every pixel is snowy (red 1), no lowland, no fog, so no mask or fog taps.
+uniform float Menu;
 
 // The loop's angular speed: one whole cycle in the period (32 s), and the multiples used below.
 const float W = 0.19634954;
@@ -573,13 +577,25 @@ vec4 mask4(sampler2D t, vec2 p) {
 // Soft round flakes (or specks) in square cells of `size` px. The field drifts by `vel` px/s (vel times
 // the 32 s period is a whole number of cells, so the loop is seamless). Each cell holds one flake with
 // probability `density`, at a hashed place, swaying by `wob` px. Radius `radius` px (scaled by Zoom).
+//
+// Only the 2x2 cells nearest the pixel are visited: the pixel's own cell and its neighbour on each axis
+// toward the pixel's side of the cell's middle. Why this is exact: a flake's centre lies in [0.15, 0.85]
+// of its cell, so a cell two steps away, or the far neighbour on an axis, has its centres at least
+// 0.65 * size from the pixel along that axis, less the sway (|sway| <= wob, x only). Every flake's
+// reach is at most 1.25 * radius * Zoom, and Zoom <= 2 (`world_view::ZOOM_RANGE`). For the three layers
+// (size, radius, wob) of 48/2.6/4, 32/1.7/3, 16/1.1/1.5 and the ash's 32/2.4/2, 0.65 * size - wob is
+// 27.2, 17.8, 8.9 and 18.8 px, against reaches of at most 6.5, 4.25, 2.75 and 6.0 px: the test
+// `the_nearest_2x2_cells_hold_every_flake_that_can_reach_a_pixel` checks it.
 float flakes(vec2 px, float size, vec2 vel, float radius, float density, float seed, float wob) {
     vec2 q = px - vel * Phase;
-    vec2 c0 = floor(q / size);
+    vec2 f = q / size;
+    vec2 c0 = floor(f);
+    // The side of the cell's middle the pixel is on, per axis: -1 (the cell before) or +1 (the cell after).
+    vec2 side = vec2(f.x - c0.x < 0.5 ? -1.0 : 1.0, f.y - c0.y < 0.5 ? -1.0 : 1.0);
     float acc = 0.0;
-    for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-            vec2 c = c0 + vec2(float(i), float(j));
+    for (int j = 0; j < 2; j++) {
+        for (int i = 0; i < 2; i++) {
+            vec2 c = c0 + vec2(float(i), float(j)) * side;
             float h = hash12(c + seed);
             if (h > density) {
                 continue;
@@ -671,16 +687,23 @@ void main() {
         return;
     }
     vec2 uv = (p + 0.5) / MapSize;
-    // Only the explored ground: the fog's shown darkness (0 lit, 1 black) masks the weather. The fog
-    // texture is filtered linearly, so its edge is a smooth ramp, not a cell step. Tested before the
-    // masks, so an unexplored pixel takes no mask tap.
-    float vis = 1.0 - texture2D(Fog, uv).a;
-    if (vis < 0.01) {
-        gl_FragColor = vec4(0.0);
-        return;
+    // The menu's snow (`Menu`) is the same everywhere: red 1 (snowy), no lowland, no fog. Its pass skips the
+    // fog and the eight mask taps, which would read the same constant texels.
+    float vis = 1.0;
+    vec4 bw = vec4(1.0, 0.0, 0.0, 0.0);
+    float lowl = 0.0;
+    if (Menu < 0.5) {
+        // Only the explored ground: the fog's shown darkness (0 lit, 1 black) masks the weather. The fog
+        // texture is filtered linearly, so its edge is a smooth ramp, not a cell step. Tested before the
+        // masks, so an unexplored pixel takes no mask tap.
+        vis = 1.0 - texture2D(Fog, uv).a;
+        if (vis < 0.01) {
+            gl_FragColor = vec4(0.0);
+            return;
+        }
+        bw = mask4(Weather, p);
+        lowl = mask4(LowlandMask, p).r;
     }
-    vec4 bw = mask4(Weather, p);
-    float lowl = mask4(LowlandMask, p).r;
     // Everything is an overlay (premultiplied colour `ov`, alpha `oa`) except the darkening `dark`.
     float dark = 0.0;
     float oa = 0.0;
@@ -803,6 +826,7 @@ fn load() -> Option<Material> {
         ("Sun", UniformType::Float1),
         ("Zoom", UniformType::Float1),
         ("RowHeight", UniformType::Float1),
+        ("Menu", UniformType::Float1),
     ];
     let params = MaterialParams {
         uniforms: uniforms.iter().map(|(n, t)| UniformDesc::new(n, *t)).collect(),
@@ -852,6 +876,7 @@ pub fn draw(pass: &Pass) {
         m.set_uniform("Sun", pass.sun);
         m.set_uniform("Zoom", pass.zoom);
         m.set_uniform("RowHeight", pass.row_height);
+        m.set_uniform("Menu", if pass.menu { 1.0f32 } else { 0.0 });
         let one = ONE.with(|t| t.clone());
         let d = pass.draw;
         if let Some(c) = cut {
@@ -904,6 +929,7 @@ pub fn draw_menu_snow(w: f32, h: f32, cheap: bool, t: f64) {
         row_height: 1.0,
         explored: whole,
         boxes: Boxes { snow: Some(whole), ..Default::default() },
+        menu: true,
     };
     draw(&pass);
 }
@@ -1146,6 +1172,43 @@ mod tests {
         let tilted = Projection::Tilted { h: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 0.0, -5.0]] };
         assert_eq!(pixel_rect(&tilted, 1.0, [0, 0, 10, 2], [0.0, 0.0, 100.0, 100.0]), None);
         assert!(pixel_rect(&tilted, 1.0, [2, 0, 5, 2], [0.0, 0.0, 100.0, 100.0]).is_some(), "one side: a rectangle");
+    }
+
+    #[test]
+    fn the_nearest_2x2_cells_hold_every_flake_that_can_reach_a_pixel() {
+        // `flakes` visits the pixel's cell and its neighbour toward the pixel's side on each axis, not the 3x3.
+        // Every skipped cell must be out of reach for any hash and any sway: the centre box of a cell (i, j)
+        // is x in [(i + 0.15) s - wob, (i + 0.85) s + wob] (the sway is x only), y in [(j + 0.15) s, (j + 0.85) s],
+        // and a flake reaches at most 1.25 radius Zoom, with Zoom at most the map's largest.
+        let zoom = crate::ui::world_view::ZOOM_RANGE.1;
+        // (size, radius, wob): the snow's three depths and the ash, as the shader calls them.
+        let layers = [(48.0f32, 2.6f32, 4.0f32), (32.0, 1.7, 3.0), (16.0, 1.1, 1.5), (32.0, 2.4, 2.0)];
+        // The distance from p to the interval [lo, hi] (0 inside it).
+        let gap = |p: f32, lo: f32, hi: f32| if p < lo { lo - p } else if p > hi { p - hi } else { 0.0 };
+        for (size, radius, wob) in layers {
+            let reach = 1.25 * radius * zoom;
+            for a in 0..=40 {
+                for b in 0..=40 {
+                    let (fx, fy) = (a as f32 / 40.0, b as f32 / 40.0);
+                    // The kept neighbour on each axis: -1 before the cell, +1 after it, by the cell's middle.
+                    let sx: i32 = if fx < 0.5 { -1 } else { 1 };
+                    let sy: i32 = if fy < 0.5 { -1 } else { 1 };
+                    for i in -1i32..=1 {
+                        for j in -1i32..=1 {
+                            let kept = (i == 0 || i == sx) && (j == 0 || j == sy);
+                            if kept {
+                                continue;
+                            }
+                            let (i, j) = (i as f32, j as f32);
+                            let dx = gap(fx * size, (i + 0.15) * size - wob, (i + 0.85) * size + wob);
+                            let dy = gap(fy * size, (j + 0.15) * size, (j + 0.85) * size);
+                            let d = (dx * dx + dy * dy).sqrt();
+                            assert!(d >= reach, "size {size}: the pixel at ({fx}, {fy}) of its cell reaches a skipped cell at {d} < {reach}");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -974,7 +974,7 @@ its ground cell (`Projection::matrix`: a homography, flat from the camera's scal
 `view25::ground_homography`, four corner picks by `TiltCamera::pick`), the
 fog's shown darkness masks the weather to explored ground (`minimap::fog_layer_lit`: the texels below alpha 255 are the
 explored box), and `weather::draw` draws only the window rectangle over the cells that can show (`weather::reach`: the
-explored box, cut to the boxes of the levels on, `Boxes` made with the masks; grown by two cells; `pixel_rect` maps it to the window; nothing is drawn when it is empty). The pass
+explored box, cut to the boxes of the levels on, `Boxes` made with the masks; grown by two cells; `pixel_rect` maps it to the window; nothing is drawn when it is empty). The flakes visit only the 2x2 cells nearest the pixel (exact: a flake reaches at most 1.25 radius × Zoom, Zoom at most 2, and a skipped cell's centres lie at least 0.65 size − wob away; the test `the_nearest_2x2_cells_hold_every_flake_that_can_reach_a_pixel`). The main menu's snow (`draw_menu_snow`, `Pass::menu`, the shader's `Menu`) skips the fog and the mask taps. The pass
 composes snow, rain, heat haze
 and ash in one fragment pass (the layers at level 0 are skipped; two particle depths on a phone,
 three on the desktop, `display::dp_px`; the flakes and streaks grow with the zoom). The cell coordinate is centred on whole numbers (cells span ±½), so a mask lookup is
