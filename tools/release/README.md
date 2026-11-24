@@ -114,16 +114,24 @@ Prints the older releases the update check runs against, newest first (`--args`:
    free display (never the owner's `:0`), `-gpu host` (Mesa is forced on the X server, so the software renderer
    draws and no GPU is used), `-no-window -no-audio -no-snapshot`, pinned to `ai-resources cpus` at nice 19.
 3. The old APK is installed (after an uninstall, so the data starts empty), started, and its log
-   (`files/Razdor/razdor.log` in the app's folder) names its version. Data is made the way a player's is:
-   `settings.json` with a test marker and `saves/carry-test.txt`, pushed with `adb push`. A release APK is not
-   debuggable, so `run-as` does not work; `adb push` into the app's folder does.
-4. The old app runs 30 s and its crash lines are recorded (log and logcat). The data must read back as pushed,
-   after a `sync`, before the emulator stops. The emulator is then booted again: the new version gets a fresh GL
-   session (see the emulator notes).
+   (`files/Razdor/razdor.log` in the app's folder) names its version. Then it is stopped, and the data is made the
+   way a player's is: the game's own settings file `saves/audio.json` (`music_volume` 0.37 and `orientation`
+   `landscape`, not the defaults; the game reads only these keys and takes the rest as defaults) and
+   `saves/carry-test.txt`, pushed with `adb push`. A push writes files as the shell user, and then the app cannot
+   read them (`Permission denied`, and the game silently ignores the setting), so the saves folder is given to the
+   app's uid (`pm list packages -U`) with `adb root` and `chown -R`. A release APK is not debuggable, so
+   `run-as` does not work; `adb push` into the app's folder does.
+4. The old app starts again (it reads its settings at start) and runs 30 s; its crash lines are recorded (log and
+   logcat). It must read the test's `audio.json`: the two values must still be there after its run, and its log
+   must have no permission error for `audio.json` (else the test cannot run: exit 2). The data must read back as
+   pushed, after a `sync`, before the emulator stops. The emulator is then booted again: the new version gets a
+   fresh GL session (see the emulator notes), and `adb root` is run again for the reads.
 5. The new APK is installed over the old one (`adb install -r`); the package reports the new version; the app
    starts and its log names the new version; it runs 30 s. A crash line that only the new version shows fails
-   the check; one that both versions show is an emulator limit (INFO). The saves file must be unchanged; the
-   settings file unchanged, or rewritten by the app with the test's marker still set.
+   the check; one that both versions show is an emulator limit (INFO). The saves file must be unchanged. The
+   row `settings kept (saves/audio.json)` names the fields it checks: each must still be there with its value
+   (the volume within 0.005); extra fields and a rewrite by the app are fine. A missing file, a changed value, or a
+   permission error for `audio.json` in the new log fails it.
 
 Exit: 0 every check passed, 1 a check failed (the install, the version, a new crash, the data), 2 the check
 could not run (no SDK, no emulator boot, no network, a device already on the port).

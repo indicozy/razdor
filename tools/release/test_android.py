@@ -60,25 +60,57 @@ class ParserTests(unittest.TestCase):
         self.assertIn("panicked at egl.rs:209:5", au.signature(a))
 
 
-class SettingsTests(unittest.TestCase):
-    before = json.dumps(au.SETTINGS_TEST).encode()
+class AudioTests(unittest.TestCase):
+    def test_the_test_file_loads_as_partial_settings_keys(self):
+        # Settings is serde(default): the two keys alone are a valid file (the defaults fill the rest)
+        self.assertEqual(json.loads(au.audio_bytes().decode()), au.AUDIO_TEST)
+        self.assertEqual(au.AUDIO_TEST, {"music_volume": 0.37, "orientation": "landscape"})
 
-    def test_unchanged(self):
-        self.assertEqual(au.settings_check(self.before, self.before)[0], uc.PASS)
+    def test_kept(self):
+        result, detail = au.audio_check(au.audio_bytes().decode())
+        self.assertEqual(result, uc.PASS)
+        self.assertIn("music_volume = 0.37", detail)
+        self.assertIn("orientation = 'landscape'", detail)
 
-    def test_rewritten_with_the_marker_kept(self):
-        after = json.dumps({"language": "ru", "carry_test": 1, "volume": 3}).encode()
-        self.assertEqual(au.settings_check(self.before, after)[0], uc.PASS)
+    def test_rewritten_by_the_app_with_more_fields_is_kept(self):
+        after = json.dumps({"music_volume": 0.37, "orientation": "landscape", "layout_version": 1, "sfx_volume": 0.8})
+        self.assertEqual(au.audio_check(after)[0], uc.PASS)
 
-    def test_marker_lost(self):
-        after = json.dumps({"language": "ru"}).encode()
-        self.assertEqual(au.settings_check(self.before, after)[0], uc.FAIL)
+    def test_the_volume_is_compared_within_one_step_of_rounding(self):
+        self.assertEqual(au.audio_check(json.dumps({"music_volume": 0.372, "orientation": "landscape"}))[0], uc.PASS)
+        self.assertEqual(au.audio_check(json.dumps({"music_volume": 0.38, "orientation": "landscape"}))[0], uc.FAIL)
 
-    def test_not_json(self):
-        self.assertEqual(au.settings_check(self.before, b"\x00\x01")[0], uc.FAIL)
+    def test_the_default_volume_is_a_change(self):
+        result, detail = au.audio_check(json.dumps({"music_volume": 0.6, "orientation": "landscape"}))
+        self.assertEqual(result, uc.FAIL)
+        self.assertIn("music_volume is 0.6", detail)
 
-    def test_missing_file(self):
-        self.assertEqual(au.settings_check(self.before, b"")[0], uc.FAIL)
+    def test_a_value_lost_fails(self):
+        result, detail = au.audio_check(json.dumps({"music_volume": 0.37}))
+        self.assertEqual(result, uc.FAIL)
+        self.assertIn("orientation is None", detail)
+
+    def test_a_bool_is_not_a_volume(self):
+        self.assertEqual(au.audio_check(json.dumps({"music_volume": True, "orientation": "landscape"}))[0], uc.FAIL)
+
+    def test_missing_file_fails(self):
+        self.assertEqual(au.audio_check(None)[0], uc.FAIL)
+
+    def test_not_json_and_not_an_object_fail(self):
+        self.assertEqual(au.audio_check("\x00\x01")[0], uc.FAIL)
+        self.assertEqual(au.audio_check("[1, 2]")[0], uc.FAIL)
+
+    def test_a_permission_denied_line_names_the_file(self):
+        log = ("[ 1.0] /storage/emulated/0/Android/data/x/files/Razdor/saves/audio.json: Permission denied (os error 13)\n"
+               "[ 2.0] something else\n")
+        self.assertEqual(len(au.denied_lines(log)), 1)
+        self.assertEqual(au.denied_lines("[ 2.0] Permission denied for carry-test.txt\n"), [])
+        self.assertEqual(au.denied_lines(None), [])
+
+    def test_the_app_uid_comes_from_pm(self):
+        self.assertEqual(au.parse_user_id("package:io.github.indicozy.razdor uid:10123\n"), 10123)
+        self.assertIsNone(au.parse_user_id("package:io.github.indicozy.other uid:10999\n"))
+        self.assertIsNone(au.parse_user_id(""))
 
 
 class CommandTests(unittest.TestCase):
@@ -152,6 +184,15 @@ class FakeDevice:
     def pid(self):
         return 4242
 
+    def app_uid(self):
+        return 10123
+
+    def root(self):
+        FakeDevice.calls.append("root")
+
+    def give_to_app(self, remote_dir, uid):
+        FakeDevice.calls.append(("give", remote_dir, uid))
+
     def push(self, local, remote):
         self.files[remote] = Path(local).read_bytes().decode("utf-8")
 
@@ -219,9 +260,11 @@ class EmulatorRunTests(HermeticTestCase):
         results = {name: res for name, res, _ in rows}
         self.assertIn(("install", "old.apk"), FakeDevice.calls)
         self.assertIn(("install", "new.apk"), FakeDevice.calls)
-        self.assertEqual(FakeDevice.calls.count("force-stop"), 1)
+        self.assertEqual(FakeDevice.calls.count("force-stop"), 2)  # before the data is pushed, and after the old run
         self.assertEqual(results["android: updated app starts"], uc.PASS)
-        self.assertEqual(results["android: settings kept"], uc.PASS)
+        self.assertEqual(results["android: settings kept (saves/audio.json)"], uc.PASS)
+        self.assertEqual(results["android: v1.5.3 reads the test's saves/audio.json"], uc.PASS)
+        self.assertIn(("give", au.REMOTE_SAVES, 10123), FakeDevice.calls)
         self.assertEqual(results["android: saves folder file kept"], uc.PASS)
         self.assertNotIn(uc.FAIL, results.values())
         self.assertIn("kill", FakeDevice.calls)
@@ -245,17 +288,30 @@ class EmulatorRunTests(HermeticTestCase):
             with mock.patch.object(au, "RUN_SECONDS", 0), self.assertRaises(uc.CheckFail):
                 au.emulator_run(self.old_apk, self.new_apk, "1.5.3", "1.5.4", self.scratch, self.opts, rows, [])
 
-    def test_a_marker_lost_from_settings_fails(self):
+    def test_a_setting_lost_in_the_update_fails(self):
         class Lossy(FakeDevice):
             def cat(self, remote):
-                if remote == au.REMOTE_SETTINGS:
-                    return '{"language": "en"}'
+                if remote == au.REMOTE_AUDIO and self.version_name == "1.5.4":
+                    return '{"orientation": "landscape"}'
                 return super().cat(remote)
 
         with mock.patch.object(au, "Device", Lossy):
             rows = []
             with mock.patch.object(au, "RUN_SECONDS", 0), self.assertRaises(uc.CheckFail):
                 au.emulator_run(self.old_apk, self.new_apk, "1.5.3", "1.5.4", self.scratch, self.opts, rows, [])
+        results = {name: res for name, res, _ in rows}
+        self.assertEqual(results["android: settings kept (saves/audio.json)"], uc.FAIL)
+
+    def test_the_old_app_not_reading_the_test_file_is_an_error(self):
+        class Unread(FakeDevice):
+            def cat(self, remote):
+                if remote == au.REMOTE_AUDIO and self.version_name == "1.5.3":
+                    return '{"music_volume": 0.6}'
+                return super().cat(remote)
+
+        with mock.patch.object(au, "Device", Unread):
+            with mock.patch.object(au, "RUN_SECONDS", 0), self.assertRaises(uc.ToolError):
+                au.emulator_run(self.old_apk, self.new_apk, "1.5.3", "1.5.4", self.scratch, self.opts, [], [])
 
     def test_a_crash_only_the_new_version_shows_fails(self):
         class Crashy(FakeDevice):
@@ -332,6 +388,43 @@ class DeviceTests(HermeticTestCase):
 
         au.Device("adb", "emulator-5560", runner=runner).booted()
         self.assertEqual(seen[0][:3], ["adb", "-s", "emulator-5560"])
+
+
+class RootTests(HermeticTestCase):
+    def test_root_then_the_shell_must_be_root(self):
+        seen = []
+
+        def runner(argv, t):
+            seen.append(argv[3:])
+            if argv[3:] == ["shell", "id -u"]:
+                return 0, "0\n", ""
+            return 0, "restarting adbd as root\n", ""
+
+        au.Device("adb", "emulator-5554", runner=runner).root()
+        self.assertEqual(seen[0], ["root"])
+        self.assertEqual(seen[1], ["wait-for-device"])
+
+    def test_root_refused_is_an_error(self):
+        dev = au.Device("adb", "emulator-5554", runner=lambda argv, t: (1, "", "adbd cannot run as root in production builds"))
+        with self.assertRaises(uc.ToolError):
+            dev.root()
+
+    def test_give_to_app_checks_the_owner(self):
+        ok = au.Device("adb", "emulator-5554", runner=lambda argv, t: (0, "10123\n", ""))
+        ok.give_to_app("/x/saves", 10123)
+        wrong = au.Device("adb", "emulator-5554", runner=lambda argv, t: (0, "2000\n", ""))
+        with self.assertRaises(uc.ToolError):
+            wrong.give_to_app("/x/saves", 10123)
+
+    def test_the_chown_names_the_app_uid_and_the_folder(self):
+        seen = []
+
+        def runner(argv, t):
+            seen.append(argv[-1])
+            return 0, "10123\n", ""
+
+        au.Device("adb", "emulator-5554", runner=runner).give_to_app("/x/saves", 10123)
+        self.assertEqual(seen[0], "chown -R 10123:10123 /x/saves && stat -c %u /x/saves")
 
 
 class ReadTests(HermeticTestCase):

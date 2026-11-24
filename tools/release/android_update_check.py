@@ -17,14 +17,16 @@ What it checks:
    its SHA256SUMS line; with `--new-apk` the new one is a local file (a local build is not signed
    with the release key, so its certificate is INFO, and the install decides).
 2. On a private headless emulator (a copy of the AVD; a private Xvfb, never the owner's display;
-   `-gpu swiftshader_indirect`, the software renderer, unless `--gpu` says otherwise; pinned to the
-   `ai-resources cpus` at nice 19): the old APK is installed, started, and its log names its version.
-   Data is made the way a player's is: a settings file and a file in the saves folder, pushed with
-   `adb push` (a release APK is not debuggable, so `run-as` does not work).
-3. The new APK is installed over it with `adb install -r`; the package reports the new version; it
-   starts, its log names the new version, and no panic or fatal exception shows in the log or in
-   logcat for its process; the data is still there (the save-folder file unchanged; the settings file
-   unchanged, or rewritten by the app with the test's key still set).
+   `-gpu host`, Mesa, the software renderer; pinned to the `ai-resources cpus` at nice 19): the old APK is
+   installed and started, its log names its version. Then the data is made the way a player's is: the game's
+   own settings file `saves/audio.json` with two values the game keeps (`music_volume` 0.37, `orientation`
+   landscape, not the defaults) and a file in the saves folder, pushed with `adb push`, then given to the app's
+   uid (`adb root`, `chown`: the push writes files as the shell user, and the app then cannot read them). The old
+   app is started again to read them; it must read them (the values survive its own run, no permission error).
+3. The new APK is installed over it with `adb install -r`; the package reports the new version; it starts, its
+   log names the new version, and no panic or fatal exception shows in the log or in logcat for its process; the
+   saves file is unchanged, and `saves/audio.json` still holds the two values (compared field by field: the new
+   version may add fields or migrate the file; a missing file or a changed value fails).
 
 Exit codes: 0 every check passed (INFO rows allowed), 1 a check failed (the install or the data),
 2 the check could not run (network, the SDK, the emulator would not boot, an input error).
@@ -55,10 +57,14 @@ from update_check import CheckFail, ToolError, PASS, INFO, FAIL, ERROR, EXIT_OK,
 PKG = "io.github.indicozy.razdor"
 APP_FILES = f"/storage/emulated/0/Android/data/{PKG}/files/Razdor"
 REMOTE_LOG = f"{APP_FILES}/razdor.log"
-REMOTE_SETTINGS = f"{APP_FILES}/settings.json"
-REMOTE_SAVE_FILE = f"{APP_FILES}/saves/carry-test.txt"
+REMOTE_SAVES = f"{APP_FILES}/saves"  # the game's saves folder (rules::save::default_dir)
+REMOTE_SAVE_FILE = f"{REMOTE_SAVES}/carry-test.txt"
+REMOTE_AUDIO = f"{REMOTE_SAVES}/audio.json"  # the game's settings (ui::audio::Settings::path)
 SAVE_FILE_TEXT = b"carry-over test: a file in the saves folder\n"
-SETTINGS_TEST = {"language": "ru", "carry_test": 1}  # the marker the test sets, as a player's settings file holds it
+# The settings the test sets: two values the game keeps, both away from their defaults (music 0.6, orientation Auto).
+# Settings is serde(default), so a file with only these keys loads; the other keys take their defaults.
+AUDIO_TEST = {"music_volume": 0.37, "orientation": "landscape"}
+AUDIO_EPS = 0.005  # the volume is saved in 1% steps; a float's round trip stays well inside this
 AVD_NAME = "razdor"
 DEFAULT_AVD = uc.MNT_SCRATCH / "android-apk" / "avd"
 DEFAULT_PORT = 5554
@@ -77,6 +83,13 @@ def parse_dumpsys_version(text):
     name = re.search(r"^\s*versionName=(\S+)", text, re.M)
     code = re.search(r"^\s*versionCode=(\d+)", text, re.M)
     return (name.group(1) if name else None, int(code.group(1)) if code else None)
+
+
+def parse_user_id(text):
+    """The app's uid from `pm list packages -U <pkg>` (`package:<pkg> uid:<n>`), or None. (dumpsys has no
+    `userId=` line on this Android: it shows `appId=` in some versions.)"""
+    m = re.search(rf"package:{re.escape(PKG)}\s+uid:(\d+)", text or "")
+    return int(m.group(1)) if m else None
 
 
 def parse_pid(text):
@@ -116,21 +129,43 @@ def signature(line):
     return re.sub(r"^\S+\s+\S+\s+\d+\s+\d+\s+\S+\s+\S+\s*:?\s*", "", line.strip())
 
 
-def settings_check(before, after):
-    """(result, detail) for the settings file: kept byte for byte, or rewritten by the app with the
-    test's marker still set, else a failure. `before`/`after` are bytes."""
-    if after == before:
-        return PASS, "settings file unchanged"
+def audio_bytes(values=None):
+    """The test's `saves/audio.json`: the values as the game's JSON (the other settings take their defaults)."""
+    return (json.dumps(AUDIO_TEST if values is None else values, indent=2) + "\n").encode("utf-8")
+
+
+def audio_check(text, values=None):
+    """(result, detail) for the test's values in the game's `saves/audio.json` after an update. `text` is the file's
+    text, or None when it is missing. Each field must be there and equal (the volume within AUDIO_EPS); extra
+    fields and a rewrite by the app (new fields, a migrated layout) are fine. The detail names the fields kept."""
+    want = AUDIO_TEST if values is None else values
+    if text is None:
+        return FAIL, "saves/audio.json is missing after the update"
     try:
-        got = json.loads(after.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return FAIL, "settings file is no longer JSON after the update"
+        got = json.loads(text)
+    except ValueError:
+        return FAIL, "saves/audio.json is no longer JSON after the update"
     if not isinstance(got, dict):
-        return FAIL, "settings file is not a JSON object after the update"
-    for key, want in SETTINGS_TEST.items():
-        if got.get(key) != want:
-            return FAIL, f"settings key {key!r} lost after the update (was {want!r})"
-    return PASS, "settings file rewritten by the app; the test's keys are still set"
+        return FAIL, "saves/audio.json is not a JSON object after the update"
+    kept, lost = [], []
+    for key, value in want.items():
+        now = got.get(key)
+        if isinstance(value, float):
+            ok = isinstance(now, (int, float)) and not isinstance(now, bool) and abs(now - value) <= AUDIO_EPS
+        else:
+            ok = now == value
+        if ok:
+            kept.append(f"{key} = {value!r}")
+        else:
+            lost.append(f"{key} is {now!r}, want {value!r}")
+    if lost:
+        return FAIL, "settings lost or changed after the update: " + "; ".join(lost)
+    return PASS, "kept: " + ", ".join(kept)
+
+
+def denied_lines(text):
+    """The app's own log lines that report a file it could not read or write (its diag line names the path)."""
+    return [ln.strip() for ln in (text or "").splitlines() if "Permission denied" in ln and "audio.json" in ln]
 
 
 def emulator_command(sdk, avd_home, avd_name, port, cpus, gpu=GPU, nice=19):
@@ -242,6 +277,31 @@ class Device:
         rc, out, err = self.call(["push", str(local), remote], 120)
         if rc != 0:
             raise ToolError(f"adb push failed: {(out + err).strip()[-200:]}")
+
+    def root(self):
+        """`adb root` (the emulator image lets adbd run as root): the shell is root from here, until the next boot."""
+        rc, out, err = self.call(["root"], 60)
+        if rc != 0:
+            raise ToolError(f"adb root refused: {(out + err).strip()[-200:]}")
+        self.call(["wait-for-device"], 120)
+        rc, out = self.shell("id -u", 30)
+        if out.strip() != "0":
+            raise ToolError("adb root did not give a root shell")
+
+    def app_uid(self):
+        """The app's uid (`pm list packages -U`)."""
+        rc, out = self.shell(f"pm list packages -U {PKG}", 60)
+        uid = parse_user_id(out)
+        if uid is None:
+            raise ToolError(f"no uid for {PKG} in `pm list packages -U`: {out.strip()[-200:]}")
+        return uid
+
+    def give_to_app(self, remote_dir, uid):
+        """Gives a folder and everything in it to the app's uid. The push and the mkdir make them as the shell user,
+        and then the app cannot read or write them (`Permission denied`; the game ignores the setting). Needs root."""
+        rc, out = self.shell(f"chown -R {uid}:{uid} {remote_dir} && stat -c %u {remote_dir}", 60)
+        if out.strip() != str(uid):
+            raise ToolError(f"could not give {remote_dir} to uid {uid}: {out.strip()[-200:]}")
 
     def pull(self, remote, local):
         rc, out, err = self.call(["pull", remote, str(local)], 120)
@@ -386,15 +446,22 @@ def emulator_run(old_apk, new_apk, old_name, new_name, scratch, opts, rows, logs
             raise CheckFail(f"the old app's log does not name {old_name} (first line: {(text or '')[:120]!r})")
         rows.append(("android: old app starts", PASS, f"its log names Razdor {old_name}"))
 
-        # data, the way a player's is made: a settings file and a file in the saves folder
-        settings_bytes = json.dumps(SETTINGS_TEST, ensure_ascii=False).encode("utf-8")
+        # data, the way a player's is made: the game's settings and a file in its saves folder. The app made its
+        # folder on the first start, so it is stopped, the data is pushed and given to its uid, and it is started
+        # again (the game reads its settings at start).
+        dev.force_stop()
         data_dir = scratch / "data"
         data_dir.mkdir(exist_ok=True)
-        (data_dir / "settings.json").write_bytes(settings_bytes)
+        (data_dir / "audio.json").write_bytes(audio_bytes())
         (data_dir / "carry-test.txt").write_bytes(SAVE_FILE_TEXT)
-        dev.push(data_dir / "settings.json", REMOTE_SETTINGS)
+        dev.push(data_dir / "audio.json", REMOTE_AUDIO)
         dev.push(data_dir / "carry-test.txt", REMOTE_SAVE_FILE)
-        rows.append(("android: data made (settings, a saves file)", PASS, "pushed with adb"))
+        uid = dev.app_uid()
+        dev.root()
+        dev.give_to_app(REMOTE_SAVES, uid)
+        rows.append(("android: data made (saves/audio.json, a saves file)", PASS,
+                     f"pushed with adb, given to the app's uid {uid}"))
+        dev.start()
 
         time.sleep(RUN_SECONDS)
         old_pid = dev.pid()
@@ -408,6 +475,13 @@ def emulator_run(old_apk, new_apk, old_name, new_name, scratch, opts, rows, logs
         old_sigs = {signature(ln) for ln in old_crashes}
         rows.append((f"android: v{old_name} runs {RUN_SECONDS} s", PASS if not old_crashes else INFO,
                      "no crash line" if not old_crashes else f"its own crash lines: {old_crashes[0][:140]}"))
+        old_audio = dev.cat(REMOTE_AUDIO)
+        result, detail = audio_check(old_audio)
+        if result == PASS and denied_lines(old_log):
+            result, detail = FAIL, f"the app cannot write it: {denied_lines(old_log)[0][:160]}"
+        if result != PASS:
+            raise ToolError(f"the old app did not read the test's saves/audio.json (the test cannot run): {detail}")
+        rows.append((f"android: v{old_name} reads the test's saves/audio.json", PASS, detail))
         dev.force_stop()
         # the data must be on the device before the emulator stops: flushed, and read back as pushed
         dev.shell("sync", 60)
@@ -418,6 +492,7 @@ def emulator_run(old_apk, new_apk, old_name, new_name, scratch, opts, rows, logs
         wait_for(lambda: not dev.listed(), 60, "the emulator's shutdown")
         secs = boot(2)
         rows.append(("android: emulator restarted for the new version (a fresh GL session)", PASS, f"{secs} s"))
+        dev.root()
 
         # the new APK over the old one
         dev.install(new_apk)
@@ -457,9 +532,12 @@ def emulator_run(old_apk, new_apk, old_name, new_name, scratch, opts, rows, logs
             raise CheckFail("the saves folder's test file changed or is gone after the update; the folder now: "
                             + " | ".join(ln for ln in listing.splitlines() if ln.strip())[:400])
         rows.append(("android: saves folder file kept", PASS, "unchanged"))
-        settings_now = dev.cat(REMOTE_SETTINGS)
-        result, detail = settings_check(settings_bytes, (settings_now or "").encode("utf-8"))
-        rows.append(("android: settings kept", result, detail))
+        audio_now = dev.cat(REMOTE_AUDIO)
+        result, detail = audio_check(audio_now)
+        new_denied = denied_lines(new_log)
+        if result == PASS and new_denied:
+            result, detail = FAIL, f"the new version cannot write it: {new_denied[0][:160]}"
+        rows.append(("android: settings kept (saves/audio.json)", result, detail))
         if result == FAIL:
             raise CheckFail(detail)
     finally:
