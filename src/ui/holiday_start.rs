@@ -415,6 +415,35 @@ impl App {
         }
     }
 
+    /// The game played changed (`refresh_mods`): the setting follows the Christmas mod both ways
+    /// (`holiday::follow_mod_change`). A player's switch to it turns the look on, counts this season's welcome as
+    /// answered and remembers the game played before (`previous`). A switch away turns the look off with nothing
+    /// pending, and `holiday_seen` is moved so the setting's edge does not switch the mod back (no loop).
+    pub(super) fn follow_christmas_mod(&mut self, was: bool, previous: Option<String>) {
+        let now = holiday::mod_running();
+        match holiday::follow_mod_change(was, now, self.audio.settings.map_holiday) {
+            Some(true) => {
+                self.audio.settings.map_holiday = true;
+                if let Some(year) = holiday::season_now(holiday::today()) {
+                    self.audio.settings.holiday_asked = Some(year);
+                }
+                self.audio.settings.holiday_previous = previous;
+                self.audio.settings.save();
+                razdor::diag!("holiday: the Christmas mod is played; the look is on");
+            }
+            Some(false) => {
+                self.audio.settings.map_holiday = false;
+                self.audio.settings.holiday_pending = false;
+                self.audio.settings.holiday_previous = None;
+                self.audio.settings.save();
+                self.holiday_awaiting = None;
+                self.holiday_seen = holiday::wanted(self.audio.settings.map_holiday);
+                razdor::diag!("holiday: another game is played; the look is off");
+            }
+            None => {}
+        }
+    }
+
     /// The switch is turned off: nothing is pending any more. When the Christmas mod is the game played, the
     /// game goes back to the one remembered (None: the base game). Otherwise the game stays as it is.
     fn holiday_switched_off(&mut self) {

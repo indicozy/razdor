@@ -591,8 +591,11 @@ impl App {
     /// Reads the installed mods and the one played again (after the hub or a switch changed them).
     fn refresh_mods(&mut self) {
         self.mods = hub_mods();
+        let previous = self.active_mod.clone();
+        let was = holiday::mod_running();
         self.active_mod = hub_active();
         holiday::set_running_mod(self.active_mod.as_deref());
+        self.follow_christmas_mod(was, previous);
         self.record_played_mod();
     }
 

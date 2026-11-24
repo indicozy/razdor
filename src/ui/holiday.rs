@@ -163,6 +163,18 @@ pub fn off_target(christmas_played: bool, previous: Option<String>) -> Option<Op
     christmas_played.then_some(previous)
 }
 
+/// What a change of the game played does to the setting «Новогодний вид» (pure), from whether the Christmas mod
+/// was played before and is played now, and the setting. A player's switch to the Christmas mod turns the setting on
+/// (`Some(true)`); a switch away from it while the setting is on turns it off (`Some(false)`); None otherwise. The
+/// look's own switches already leave the setting in the state they need, so they give None too.
+pub fn follow_mod_change(was_christmas: bool, now_christmas: bool, map_holiday: bool) -> Option<bool> {
+    match (was_christmas, now_christmas) {
+        (false, true) if !map_holiday => Some(true),
+        (true, false) if map_holiday => Some(false),
+        _ => None,
+    }
+}
+
 /// Where a switch to the Christmas mod `id` stands (pure): done when the game plays it, still owed while a
 /// mod switch runs or is queued (`busy`), and missed otherwise (the switch failed or was refused). A missed
 /// switch keeps the switch pending for the next launch or turn-on.
@@ -570,6 +582,26 @@ mod tests {
         assert_eq!(off_target(true, Some("evolution".into())), Some(Some("evolution".into())), "back to the mod before");
         assert_eq!(off_target(true, None), Some(None), "the base game was played before");
         assert_eq!(off_target(false, Some("evolution".into())), None, "another game played: it stays");
+    }
+
+    #[test]
+    fn picking_the_christmas_mod_turns_the_look_on() {
+        assert_eq!(follow_mod_change(false, true, false), Some(true), "the mod picked by hand: the look on");
+        assert_eq!(follow_mod_change(false, true, true), None, "the look already on: nothing to do");
+    }
+
+    #[test]
+    fn leaving_the_christmas_mod_turns_the_look_off() {
+        assert_eq!(follow_mod_change(true, false, true), Some(false), "another mod or the base game picked: the look off");
+        assert_eq!(follow_mod_change(true, false, false), None, "the look already off: nothing to do");
+    }
+
+    #[test]
+    fn the_looks_own_switch_does_not_loop() {
+        assert_eq!(follow_mod_change(false, true, true), None, "the look's own switch on: the setting is already on");
+        assert_eq!(follow_mod_change(true, false, false), None, "the look's own switch off: the setting is already off");
+        assert_eq!(follow_mod_change(true, true, true), None, "the same mod played: no change");
+        assert_eq!(follow_mod_change(false, false, true), None, "another game played: no change");
     }
 
     #[test]
