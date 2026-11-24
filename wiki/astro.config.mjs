@@ -2,11 +2,12 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
-// The wiki is published under the main site's gh-pages branch (see .github/workflows/wiki.yml):
-// https://indicozy.github.io/razdor/wiki/
+// The wiki is published under the main site's gh-pages branch (see .github/workflows/pages.yml):
+// https://indicozy.github.io/razdor/wiki/. The owner's server serves the same wiki at /wiki/: the root
+// copy is built with RAZDOR_WIKI_BASE=/wiki (tools/site/root_copy.py rewrites the links that name /razdor/).
 export default defineConfig({
 	site: 'https://indicozy.github.io',
-	base: '/razdor/wiki',
+	base: process.env.RAZDOR_WIKI_BASE || '/razdor/wiki',
 	integrations: [
 		starlight({
 			title: 'Razdor — вики',

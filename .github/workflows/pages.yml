@@ -3,6 +3,8 @@
 # (https://indicozy.github.io/razdor/wiki/). Pages' source is "GitHub Actions", so nothing is
 # pushed to any branch (the "indicozy only" ruleset lets no bot push). A push to gh-pages starts
 # this workflow through gh-pages' own .github/workflows/deploy.yml (a workflow_dispatch).
+# The job root-copy makes the same site for the owner's server (razdor.indicozy.dev, /wiki/ at the root) and publishes
+# it as the one asset of the pre-release site-latest; the server pulls it (docs/specs/own-mirror-2026-11-24.md).
 name: Pages
 
 on:
@@ -58,6 +60,63 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+  # The owner's server's copy of the same site, at the root of https://razdor.indicozy.dev/ (and /wiki/). The wiki is
+  # built with base /wiki, tools/site/root_copy.py makes the copy, and the copy is packed as site.tar.gz, the one asset of
+  # the pre-release site-latest in this repository (GITHUB_TOKEN cannot write to the community repository, and no secret
+  # is set). The owner's server pulls it (server/src/mirror/site.rs): no secret, no push to the server. The release is a
+  # pre-release that is not the latest, so the Hub's catalog (the latest release of razdor-community) and the app's
+  # releases are not affected.
+  root-copy:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    concurrency:
+      group: site-latest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: wiki/package-lock.json
+
+      - name: Build the wiki for the root (base /wiki)
+        working-directory: wiki
+        env:
+          RAZDOR_WIKI_BASE: /wiki
+        run: npm ci && npm run build
+
+      - name: Check out the site (gh-pages)
+        uses: actions/checkout@v5
+        with:
+          ref: gh-pages
+          path: site
+
+      - name: Assemble the site as the Pages build does
+        run: |
+          rm -rf site/.git site/.github
+          rsync -a --delete wiki/dist/ site/wiki/
+          cp data/remote/config.json site/config.json
+
+      - name: Make the root copy
+        run: python3 -I tools/site/root_copy.py site root-site
+
+      - name: Pack it
+        run: tar -C root-site -czf site.tar.gz .
+
+      - name: Publish it as the site-latest pre-release (the owner's server pulls it)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view site-latest >/dev/null 2>&1; then
+            gh release create site-latest --prerelease --latest=false \
+              --title "Site copy for the owner's server" \
+              --notes "The root copy of the Pages site, pulled by the owner's server. Not an app release."
+          fi
+          gh release upload site-latest site.tar.gz --clobber
 
   deploy:
     needs: build

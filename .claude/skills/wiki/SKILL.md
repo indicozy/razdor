@@ -17,6 +17,9 @@ copy of Discord Times' content (no unit, spell, item or map data or texts; CLAUD
   `gh-pages` with the wiki built into its `wiki/`, pushing nothing. A push to `gh-pages` (site
   edits) redeploys through `gh-pages`' own `.github/workflows/deploy.yml`, which dispatches
   `pages.yml`; by hand: `gh workflow run pages.yml --ref main`.
+  The same wiki is also at https://razdor.indicozy.dev/wiki/: the `root-copy` job builds it with
+  `RAZDOR_WIKI_BASE=/wiki` and `tools/site/root_copy.py` rewrites its `/razdor/` links (a page must
+  not rely on other absolute `/razdor/` paths; relative links and the base-aware links are fine).
 - Screenshots: WebP under `wiki/src/assets/shots/` (the one place Razdor screenshots may be
   committed; the owner's decision, 2026-10-27). Keep each under ~150 KB.
 
