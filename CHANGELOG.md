@@ -14,6 +14,32 @@
 
 ## 1.6.1 — 2026-11-24
 
+Коммит `daea99a3` (тег `v1.6.1`).
+
+SHA-256 выпущенных программ (собраны конвейером выпуска):
+
+```
+6bf239490cd21a87924b5f51b8082ebaa1ee29653d2a2f1953c83dd1b7a4f13c  razdor
+b3ce434563a12083e2459224c203cf6f4778577033d0aa0ed86fa2460ace61f9  Razdor.exe
+2fe257bf4265386ab56e1b58e06da086c7a15f679b7018b2848a0a4233db1ad9  razdor-macos
+17f79e74606406eebabddb9c3987a34660bafb2a323e455493ee4fdd3e36f982  razdor-translate
+d04548f7e11b192acb878e8b520400436b85620dbd8c8ba21a8dbf3bc9795bb4  Razdor-translate.exe
+edee2771499f3d1152f81f0310f99c7b2b72f1ca1e5f177b51955e1709e43c2d  razdor-translate-macos
+7868641c9d1f0bf2c153dc3071eeaa79046e28fae49f9203243c10e4c9fc0c28  razdor.apk
+82006c22802994e70ed5fe60372722d6dd6fe07c6ecddcdeae3b81f096d5203d  razdor.ipa
+6bf239490cd21a87924b5f51b8082ebaa1ee29653d2a2f1953c83dd1b7a4f13c  razdor-1.6.1-linux
+b3ce434563a12083e2459224c203cf6f4778577033d0aa0ed86fa2460ace61f9  Razdor-1.6.1.exe
+2fe257bf4265386ab56e1b58e06da086c7a15f679b7018b2848a0a4233db1ad9  razdor-1.6.1-macos
+7868641c9d1f0bf2c153dc3071eeaa79046e28fae49f9203243c10e4c9fc0c28  razdor-1.6.1.apk
+82006c22802994e70ed5fe60372722d6dd6fe07c6ecddcdeae3b81f096d5203d  razdor-1.6.1.ipa
+17f79e74606406eebabddb9c3987a34660bafb2a323e455493ee4fdd3e36f982  razdor-translate-1.6.1-linux
+d04548f7e11b192acb878e8b520400436b85620dbd8c8ba21a8dbf3bc9795bb4  Razdor-translate-1.6.1.exe
+edee2771499f3d1152f81f0310f99c7b2b72f1ca1e5f177b51955e1709e43c2d  razdor-translate-1.6.1-macos
+9dda005de6446f7149e76f3c3d96d84f8435d63f241e2dd7c62f39d80b718c99  razdor-ads-1.6.1.zip
+1ca9e42e386cce8d25bab7f2b4ec0a181b451790c92faa97d728dedcfabea543  Razdor-win7.exe
+e1211e94242e805b47cb1c0fb4aec427e771e5b1600499e4addcda7c45863a99  razdor-1.6.1-windows7.zip
+```
+
 ### Добавлено
 
 - Настройка «Снегопад»: падающий снег новогоднего вида можно выключить. На «Низком» качестве графики он выключен.
