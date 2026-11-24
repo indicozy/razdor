@@ -90,6 +90,12 @@ while IFS= read -r url; do
   rc=0
   check_one "$url" "$n" || rc=$?
   [ "$rc" -eq 0 ] && alive=$((alive + 1))
+  # The owner's own server is a fallback mirror and never a reason to hold a release (the owner's decision,
+  # 2026-11-24): its failure is a warning; GitHub's address must pass.
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ] && [[ "$url" == https://razdor.indicozy.dev/* ]]; then
+    echo "check-game-link: warning: the own mirror's copy is not served yet ($url); not blocking" >&2
+    rc=3
+  fi
   # A dead link (1) outranks a network error on this machine (2); a throttle (3) counts as neither.
   if [ "$rc" -eq 1 ] || { [ "$rc" -eq 2 ] && [ "$worst" -eq 0 ]; }; then
     worst=$rc
