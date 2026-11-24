@@ -251,6 +251,11 @@ local! {
 }
 
 local! {
+    /// The refused orientation requests so far (see [`orientation_failed`]).
+    static ORIENTATION_FAILS: Cell<u32> = const { Cell::new(0) };
+}
+
+local! {
     /// The input subscriber that watches the activity's resume (see [`resumed_since_last`]).
     static RESUME_SUB: Cell<Option<usize>> = const { Cell::new(None) };
 }
@@ -290,6 +295,7 @@ pub fn orientation_stale() {
 pub fn follow_orientation(setting: Option<super::audio::Orientation>) {
     if resumed_since_last() {
         orientation_stale();
+        razdor::diag!("orientation: the cache is reset by a resume");
         // The display may have changed while the app was away: the performance log writes it again.
         super::perf_log::on_resume();
     }
@@ -297,16 +303,43 @@ pub fn follow_orientation(setting: Option<super::audio::Orientation>) {
     if !super::audio::must_request(ORIENTATION.with(|o| o.get()), want) {
         return;
     }
-    ORIENTATION.with(|o| o.set(Some(want)));
     // SAFETY: as in `text_call`; the activity exists once the frames run.
-    unsafe {
+    let done = unsafe {
         let env = attach_jni_env();
         let set = method(env, activity_class(env).obj, "setRequestedOrientation", "(I)V", false);
-        if set.is_null() || cleared(env) {
-            return;
+        // A failed lookup leaves a pending exception (NoSuchMethodError): it is cleared here, so no later
+        // JNI call runs with it pending.
+        let lookup_threw = cleared(env);
+        if set.is_null() || lookup_threw {
+            orientation_failed(want, "setRequestedOrientation not found");
+            false
+        } else {
+            ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, set, want);
+            if cleared(env) {
+                orientation_failed(want, "setRequestedOrientation threw");
+                false
+            } else {
+                true
+            }
         }
-        ((**env).CallVoidMethod.unwrap())(env, ACTIVITY, set, want);
-        cleared(env);
+    };
+    // Cached only once the call went through: a failed one is tried again on the next frame.
+    if done {
+        ORIENTATION.with(|o| o.set(Some(want)));
+        razdor::diag!("orientation: requested {want} (setting {setting:?})");
+    }
+}
+
+/// Logs a refused orientation request. Each frame retries it, so the log names the first failure and then
+/// every power of two of them.
+fn orientation_failed(want: i32, why: &str) {
+    let n = ORIENTATION_FAILS.with(|f| {
+        let n = f.get() + 1;
+        f.set(n);
+        n
+    });
+    if n.is_power_of_two() {
+        razdor::diag!("orientation: {want} not requested ({why}), failure {n}");
     }
 }
 

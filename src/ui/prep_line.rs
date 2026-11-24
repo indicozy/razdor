@@ -44,18 +44,28 @@ pub fn start() -> (Option<DtArt>, Option<Receiver<Result<DtInstall, DtError>>>) 
 /// Waits for the install a [`Start::Waiting`] job reads, drawing the menu and the line each frame. Then the
 /// install is adopted by the app. A reader that failed or ended without one leaves the app as it is.
 pub async fn wait(app: &mut super::App, job: Receiver<Result<DtInstall, DtError>>) {
+    let started = web_time::Instant::now();
+    // The wait's frames: their count and the longest one, for the log's timeline (with the orientation requests).
+    let mut frames = 0u32;
+    let mut longest_ms = 0.0f64;
+    let mut last = started;
+    let mut first_frame = true;
     loop {
         match job.try_recv() {
             Ok(Ok(install)) => {
                 app.adopt_started_install(install);
-                return;
+                break;
             }
             Ok(Err(e)) => {
                 razdor::diag!("Discord Times install not usable, using placeholders: {e}");
-                return;
+                break;
             }
-            Err(TryRecvError::Disconnected) => return,
+            Err(TryRecvError::Disconnected) => break,
             Err(TryRecvError::Empty) => {}
+        }
+        if first_frame {
+            razdor::diag!("prep wait: first wait frame, settings orientation {:?}", app.audio.settings.orientation);
+            first_frame = false;
         }
         super::frame_state::refresh();
         clear_background(BLACK);
@@ -64,7 +74,15 @@ pub async fn wait(app: &mut super::App, job: Receiver<Result<DtInstall, DtError>
         draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.10));
         draw_line_and_bar();
         next_frame().await;
+        frames += 1;
+        let now = web_time::Instant::now();
+        longest_ms = longest_ms.max((now - last).as_secs_f64() * 1000.0);
+        last = now;
     }
+    razdor::diag!(
+        "prep wait: {frames} frames, longest {longest_ms:.1} ms, ended after {:.0} ms",
+        started.elapsed().as_secs_f64() * 1000.0
+    );
 }
 
 /// The line and the bar, centred on a dark plate over the menu.
