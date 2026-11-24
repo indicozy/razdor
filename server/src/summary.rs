@@ -155,6 +155,10 @@ pub struct Summary {
     pub cloud: CloudStats,
     /// The stored files against the storage budget (see `budget`).
     pub storage: Figures,
+    /// Installs per country over the chart range (install-days; `downloads::countries`).
+    pub countries: Vec<Named>,
+    /// The download counters of the chart range (`downloads::downloads`).
+    pub downloads: crate::downloads::Downloads,
 }
 
 fn named(rows: Vec<(String, i64)>) -> Vec<Named> {
@@ -501,6 +505,8 @@ pub async fn build(st: &AppState, range_days: i64) -> Result<Summary, ApiError> 
             Ok(CloudStats { accounts, used_bytes, syncs_per_day })
         })
         .await?;
+    let countries = crate::downloads::countries(st, from).await?;
+    let downloads = crate::downloads::downloads(st, from).await?;
     Ok(Summary {
         generated_at: now,
         range_days: range,
@@ -523,6 +529,8 @@ pub async fn build(st: &AppState, range_days: i64) -> Result<Summary, ApiError> 
         bans,
         cloud,
         storage: st.budget.figures(),
+        countries,
+        downloads,
     })
 }
 

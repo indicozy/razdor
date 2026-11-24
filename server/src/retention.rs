@@ -75,6 +75,13 @@ pub async fn run_once(st: &AppState) -> Result<Report, ApiError> {
                  ON CONFLICT (day, razdor, platform, game, lang) DO UPDATE SET installs = installs + excluded.installs",
                 params![pings_before],
             )?;
+            tx.execute(
+                "INSERT INTO daily_country (day, country, installs)
+                 SELECT day, country, COUNT(DISTINCT install_id) FROM pings
+                 WHERE day < ?1 AND quarantined = 0 GROUP BY day, country
+                 ON CONFLICT (day, country) DO UPDATE SET installs = installs + excluded.installs",
+                params![pings_before],
+            )?;
             report.pings = tx.execute("DELETE FROM pings WHERE day < ?1", params![pings_before])?;
 
             tx.execute(

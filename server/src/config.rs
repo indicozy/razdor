@@ -102,6 +102,12 @@ pub struct Config {
     pub blocking_threads: usize,
     /// Requests with a large or unknown-length body that the router runs at once. The rest wait.
     pub large_body_permits: usize,
+    /// The DB-IP country table (CSV, `geo.rs`). Default: `geo/dbip-country-lite.csv` in the data folder.
+    pub geo_csv: Option<PathBuf>,
+    /// The folder of the own `/hub/` log (`hub.log`, `hub.log.N`, read by the daily fold). Unset: no fold.
+    pub hub_log_dir: Option<PathBuf>,
+    /// Poll GitHub's release counters once a day (`downloads.rs`).
+    pub github_poll: bool,
     pub limits: Limits,
 }
 
@@ -117,6 +123,9 @@ impl Default for Config {
             allowed_versions: Vec::new(),
             blocking_threads: 8,
             large_body_permits: 4,
+            geo_csv: None,
+            hub_log_dir: None,
+            github_poll: true,
             limits: Limits::default(),
         }
     }
@@ -149,6 +158,15 @@ impl Config {
         }
         if let Some(v) = env("RAZDOR_ADMIN_TOKEN_SHA256") {
             cfg.admin_token_sha256 = Some(v);
+        }
+        if let Some(v) = env("RAZDOR_GEO_CSV") {
+            cfg.geo_csv = Some(PathBuf::from(v));
+        }
+        if let Some(v) = env("RAZDOR_HUB_LOG_DIR") {
+            cfg.hub_log_dir = Some(PathBuf::from(v));
+        }
+        if let Some(v) = env("RAZDOR_GITHUB_POLL") {
+            cfg.github_poll = !(v == "0" || v.eq_ignore_ascii_case("false"));
         }
         if let Some(v) = env("RAZDOR_ALLOWED_VERSIONS") {
             cfg.allowed_versions = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();

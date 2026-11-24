@@ -24,6 +24,7 @@ use crate::admin;
 use crate::budget;
 use crate::civil;
 use crate::files::{self, BATTLES, CRASHES};
+use crate::geo;
 use crate::http::{client_ip, json, release_ok, ApiError, Peer};
 use crate::state::{sha256_hex, AppState};
 
@@ -168,7 +169,10 @@ pub async fn ping(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ApiError> {
-    let adm = admit(&st, ip_of(&st, &headers, peer), &body, false, false).await?;
+    let ip = ip_of(&st, &headers, peer);
+    // The address is used for this lookup only: the country is stored, the address is not.
+    let country = st.geo.as_ref().map_or_else(|| geo::UNKNOWN.to_string(), |g| g.country(ip));
+    let adm = admit(&st, ip, &body, false, false).await?;
     let p: Ping = typed(&st, &adm.install, adm.value, 1).await?;
     release(&st, &adm.install, &p.razdor).await?;
     let now = st.clock.now();
@@ -202,9 +206,9 @@ pub async fn ping(
                 return Ok(PingOutcome::Over);
             }
             c.execute(
-                "INSERT INTO pings (install_id, day, received_at, razdor, platform, game, lang)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![install, day, now, p.razdor, p.platform, p.game, p.lang],
+                "INSERT INTO pings (install_id, day, received_at, razdor, platform, game, lang, country)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![install, day, now, p.razdor, p.platform, p.game, p.lang, country],
             )?;
             Ok(PingOutcome::Stored)
         })

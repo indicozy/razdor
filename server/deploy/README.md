@@ -432,10 +432,54 @@ Monitoring on the host (outside this folder):
 
 The service logs its own events (startup, bans with their reason, retention counts) and no client
 addresses. The IP address is used in memory for the rate limits and hashed (with a salt kept in `ip_salt`
-in the data folder) for the IP bans. The website has no access log.
+in the data folder) for the IP bans. The website has no access log. The download mirror (`/hub/`) has a log of its own, `/var/log/razdor-hub/hub.log`:
+one line a request with the time, the file, the status, the bytes sent, the file's size and the country (section 10); no address and no user agent. It is kept 14 days raw, then only daily totals remain.
 
 The API has its own nginx log, `/var/log/nginx/razdor-api.log`. It has one line for each request. Each
 line has these fields, in this order: the time (ISO 8601), the method, the path, the status, the request
 time, the request size, the response size, the app version and the app commit. The path has no query
 string. The log keeps no client address and no user agent. It is kept for 14 days, then rotated and
 compressed.
+
+## 10. Country and download counters
+
+Three things use a country: the daily ping (the server stores the country of the address, never the address),
+and each `/hub/` download line in the mirror's log. Both use one table, DB-IP's IP to Country Lite (CC BY 4.0,
+"IP Geolocation by DB-IP", https://db-ip.com). It is downloaded each month, never committed. The privacy page
+(`wiki/src/content/docs/faq/what-we-send.md`) says what is kept.
+
+Choices, for the owner to check:
+
+- **CSV, not MMDB.** The CSV needs no binary parser and no new crate, and its tests write a small table as text.
+- **nginx `geo` for `/hub/`, not the geoip2 module.** The module is not in the AlmaLinux 8 nginx 1.24 stream as far
+  as we know (not verified on the host). The core `geo` module with `ranges` reads the same table, held in nginx's
+  memory; nginx keeps no address. IPv6 clients get "ZZ" (no country): the `ranges` form is documented for IPv4.
+  Check the nginx worker memory after the first reload (`ps -o rss,cmd -C nginx`); the table is a few tens of MB.
+- **The GitHub poll and the log fold run inside the API** (a daily job, `downloads.rs`), not as timers: the API
+  reads `/var/log/razdor-hub` read-only and writes its own database.
+
+### One-time steps (as root on the VPS)
+
+1. Build (on the workstation): `server/deploy/build.sh`. It makes `razdor-server` (musl) in the image and the
+   stage folder. Copy the static `razdor-server` to the host (the table script calls it to print the nginx ranges):
+   `install -m 0755 <build output>/razdor-server /usr/local/bin/razdor-server`.
+2. Load the new API image (the version stays 0.1.2 in the quadlet, so `podman load` replaces the tag), then:
+   `install -d -o nginx -g nginx -m 0755 /var/log/razdor-hub`.
+3. `install -m 0644 razdor-hub.logrotate /etc/logrotate.d/razdor-hub`.
+4. Make the nginx include exist before the new `nginx.conf` is loaded (an empty file is valid):
+   `touch /etc/nginx/razdor-geo-country.conf`.
+5. `install -m 0644 nginx.conf /etc/nginx/conf.d/razdor.conf; nginx -t; systemctl reload nginx`.
+6. Quadlet: `install -m 0644 razdor-api.container /etc/containers/systemd/`, `systemctl daemon-reload`,
+   `systemctl restart razdor-api`.
+7. The table: `install -m 0755 geo-update.sh /usr/local/sbin/razdor-geo-update`, then
+   `install -m 0644 razdor-geo-update.service razdor-geo-update.timer /etc/systemd/system/`,
+   `systemctl daemon-reload`, `systemctl start razdor-geo-update` and watch `journalctl -u razdor-geo-update`.
+   The URL pattern `https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.csv.gz` was NOT checked against the
+   live site from here: if the first run says the download failed, check the month's file name on db-ip.com and
+   edit `URL` in the script.
+8. `systemctl enable --now razdor-geo-update.timer`.
+
+The daily job starts ten minutes after the API starts. Its first GitHub poll is the baseline (no day's downloads
+yet); the second day gives the first daily figures. The API stores nothing for the country until the table is
+loaded: until then every ping says "unknown", which is the designed fallback.
+

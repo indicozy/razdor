@@ -17,7 +17,9 @@ exception is the daily ping (see below).
 - the interface language.
 - a random install ID. It is made at the first start and is not tied to the device.
 
-The server does not keep your IP address. It works out only the country from it and drops the address at once.
+The server does not keep your IP address. It finds the country for the address once, in a DB-IP country table kept on the server, and stores only the country code, such as RU, or "unknown" if it cannot tell. The address is dropped at once and never written down.
+
+**Downloads from the Razdor server** (razdor.indicozy.dev/hub/). The server keeps a log with one line per request: the time, the file's path, the status code, the bytes sent, the file's size and the country. The log has no address and no browser or program name. This is ordinary file serving, so no consent is needed.
 
 **Everything else is sent only after "Yes".** You can switch it off in the settings at any time:
 
@@ -48,6 +50,8 @@ The server does not keep your IP address. It works out only the country from it 
 
 ## How long it is kept
 
+- The downloads log from the server: 14 days, then only daily totals per file and country.
+- The address behind a ban is kept in the ban list as a salted hash, not as the address itself. The entry stays until the ban is lifted by hand.
 - Raw events and performance data: 180 days. Raw pings: 90 days. After that only daily totals are kept, with no ID.
 - Battle records: forever. They hold no personal data.
 - Crash reports: 1 year. Saves from crash reports: 90 days.

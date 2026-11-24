@@ -43,7 +43,34 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("geo-nginx") => geo_nginx(args.get(1).map(String::as_str)),
         _ => serve(&args),
+    }
+}
+
+/// `razdor-server geo-nginx TABLE`: prints the table's IPv4 ranges as nginx `geo` lines (the `ranges` mode,
+/// see `deploy/geo-update.sh`). Fails on a file with no ranges, so a bad download is never installed.
+fn geo_nginx(path: Option<&str>) -> ExitCode {
+    let Some(path) = path else {
+        eprintln!("geo-nginx needs the table's file");
+        return ExitCode::FAILURE;
+    };
+    let file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("geo-nginx: {path}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match razdor_server::geo::Geo::parse_reader(std::io::BufReader::new(file)) {
+        Ok(g) => {
+            print!("{}", g.nginx_ranges());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("geo-nginx: {path}: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 

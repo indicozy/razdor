@@ -707,6 +707,7 @@ pub fn render(sm: &Summary) -> String {
     );
 
     // Admin: storage, bans, the links and logout.
+    b.push_str(&crate::downloads::section_html(&sm.countries, &sm.downloads));
     b.push_str("<section id=\"admin\"><h2>Admin</h2><h3>Storage</h3>");
     let state = if s.over {
         "<span class=\"bad\">over the budget: no new uploads</span>"
@@ -1039,6 +1040,8 @@ mod tests {
             }],
             cloud: CloudStats { accounts: 2, used_bytes: 1000, syncs_per_day: vec![] },
             storage: Figures { used_bytes: 850, max_bytes: 1000, free_bytes: 900, min_free_bytes: 100, over: false },
+            countries: Vec::new(),
+            downloads: Default::default(),
         }
     }
 

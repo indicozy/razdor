@@ -175,6 +175,8 @@ fn main() {
         ],
         cloud: CloudStats { accounts: 340, used_bytes: 96_000_000, syncs_per_day },
         storage: Figures { used_bytes: 1_700_000_000, max_bytes: 2_000_000_000, free_bytes: 900_000_000, min_free_bytes: 500_000_000, over: false },
+        countries: Vec::new(),
+        downloads: Default::default(),
     };
 
     std::fs::write(&out, page_html("Razdor stats", &render(&sm))).expect("write the preview page");

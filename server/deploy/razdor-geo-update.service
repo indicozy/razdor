@@ -1,0 +1,8 @@
+[Unit]
+Description=Razdor country table (DB-IP Lite) for the API and the /hub/ log
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/razdor-geo-update

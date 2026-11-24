@@ -20,6 +20,11 @@ User=10001:10001
 # (Fedora, RHEL); other distributions ignore it.
 Volume=/var/lib/razdor-api:/var/lib/razdor:Z
 
+# The download log of /hub/ (only the hub.log files are read, by the daily fold). Its own folder: never the
+# nginx log folder, which holds the error log with client addresses. Read-only.
+Volume=/var/log/razdor-hub:/var/log/razdor-hub:ro
+Environment=RAZDOR_HUB_LOG_DIR=/var/log/razdor-hub
+
 # Listens on the host's loopback only. nginx (on the host) is the one client; nothing else can reach it.
 PublishPort=127.0.0.1:8080:8080
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Razdor country table: monthly update
+
+[Timer]
+# DB-IP publishes a month's file in the first days of the month; the run is on the second, and a missed run
+# is caught up at the next boot.
+OnCalendar=*-*-02 04:30:00
+Persistent=true
+RandomizedDelaySec=900
+Unit=razdor-geo-update.service
+
+[Install]
+WantedBy=timers.target

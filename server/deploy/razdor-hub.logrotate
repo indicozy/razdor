@@ -1,0 +1,12 @@
+/var/log/razdor-hub/hub.log {
+    daily
+    # Fourteen days of raw lines, plain (not compressed): the daily fold reads them (server/src/downloads.rs).
+    rotate 14
+    nocompress
+    missingok
+    notifempty
+    sharedscripts
+    postrotate
+        /bin/kill -USR1 $(cat /run/nginx.pid 2>/dev/null) 2>/dev/null || true
+    endscript
+}

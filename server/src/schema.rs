@@ -145,7 +145,53 @@ CREATE TABLE IF NOT EXISTS daily_cloud (
     count INTEGER NOT NULL,
     PRIMARY KEY (day, op)
 );
+-- Installs per country and day (the pings' country, folded with the rest; see `migrate_stats`).
+CREATE TABLE IF NOT EXISTS daily_country (
+    day INTEGER NOT NULL,
+    country TEXT NOT NULL,
+    installs INTEGER NOT NULL,
+    PRIMARY KEY (day, country)
+);
+-- The own /hub/ downloads per day, file and country (`downloads::fold_dir`): whole files as a real number.
+CREATE TABLE IF NOT EXISTS daily_hub (
+    day INTEGER NOT NULL,
+    file TEXT NOT NULL,
+    country TEXT NOT NULL,
+    requests INTEGER NOT NULL,
+    bytes INTEGER NOT NULL,
+    whole_files REAL NOT NULL,
+    PRIMARY KEY (day, file, country)
+);
+-- GitHub's release asset counters as of the last poll (the baseline of the next one).
+CREATE TABLE IF NOT EXISTS github_counts (
+    repo TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    name TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    PRIMARY KEY (repo, tag, name)
+);
+-- GitHub's downloads per day: the differences between two polls.
+CREATE TABLE IF NOT EXISTS daily_github (
+    day INTEGER NOT NULL,
+    repo TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    name TEXT NOT NULL,
+    downloads INTEGER NOT NULL,
+    PRIMARY KEY (day, repo, tag, name)
+);
 ";
+
+/// The stats database's migrations, run after `STATS` (which creates the tables of a new file). An old
+/// file has `pings` without `country`: the column is added, every old ping reads "unknown".
+pub fn migrate_stats(c: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let has_country = c
+        .prepare("SELECT 1 FROM pragma_table_info('pings') WHERE name = 'country'")?
+        .exists([])?;
+    if !has_country {
+        c.execute_batch("ALTER TABLE pings ADD COLUMN country TEXT NOT NULL DEFAULT 'unknown';")?;
+    }
+    c.execute_batch("CREATE INDEX IF NOT EXISTS pings_country ON pings(day, country);")
+}
 
 pub const CLOUD: &str = "
 CREATE TABLE IF NOT EXISTS accounts (
@@ -222,4 +268,36 @@ pub fn migrate_cloud(c: &rusqlite::Connection, now: i64) -> rusqlite::Result<()>
     }
     c.execute_batch("CREATE INDEX IF NOT EXISTS saves_device ON saves(account_id, device_id);")?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_old_pings_table_gains_the_country_and_keeps_its_rows() {
+        let c = rusqlite::Connection::open_in_memory().expect("a database");
+        // The table as it was before the country column existed.
+        c.execute_batch(
+            "CREATE TABLE pings (id INTEGER PRIMARY KEY, install_id TEXT NOT NULL, day INTEGER NOT NULL,
+             received_at INTEGER NOT NULL, razdor TEXT NOT NULL, platform TEXT NOT NULL, game TEXT NOT NULL,
+             lang TEXT NOT NULL, quarantined INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO pings (install_id, day, received_at, razdor, platform, game, lang)
+             VALUES ('a', 1, 1, '1.6.0', 'linux', 'cu', 'ru');",
+        )
+        .expect("the old table");
+        c.execute_batch(STATS).expect("the schema");
+        migrate_stats(&c).expect("the migration");
+        migrate_stats(&c).expect("a second run changes nothing");
+        let old: String = c.query_row("SELECT country FROM pings", [], |r| r.get(0)).expect("the old row");
+        assert_eq!(old, "unknown");
+        c.execute(
+            "INSERT INTO pings (install_id, day, received_at, razdor, platform, game, lang, country)
+             VALUES ('b', 1, 1, '1.6.0', 'linux', 'cu', 'ru', 'DE')",
+            [],
+        )
+        .expect("a new ping with a country");
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM pings WHERE country = 'DE'", [], |r| r.get(0)).expect("count");
+        assert_eq!(n, 1);
+    }
 }

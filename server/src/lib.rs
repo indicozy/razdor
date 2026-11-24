@@ -13,7 +13,9 @@ pub mod cloud;
 pub mod config;
 pub mod crash_view;
 pub mod db;
+pub mod downloads;
 pub mod files;
+pub mod geo;
 pub mod http;
 pub mod mirror;
 pub mod retention;
@@ -121,6 +123,7 @@ pub async fn serve(state: AppState) -> std::io::Result<()> {
     tracing::info!("listening on {}", state.cfg.bind);
     retention::spawn(state.clone());
     retention::spawn_minutely(state.clone());
+    downloads::spawn(state.clone());
     let app = router(state.clone()).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     for db in [&state.stats, &state.cloud] {

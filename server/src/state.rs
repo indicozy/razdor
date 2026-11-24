@@ -15,6 +15,7 @@ use crate::clock::Clock;
 use crate::config::Config;
 use crate::db::Db;
 use crate::files;
+use crate::geo::Geo;
 use crate::schema;
 
 pub struct Inner {
@@ -30,6 +31,8 @@ pub struct Inner {
     pub sessions: Mutex<HashMap<String, i64>>,
     /// The stored files' running total and the disk's free space (see `budget`).
     pub budget: Budget,
+    /// The country table (`geo`), or none: pings then store "unknown".
+    pub geo: Option<Geo>,
     /// Permits for the requests with a large or unknown-length body (`config.large_body_permits`).
     pub body_gate: Arc<Semaphore>,
     /// One argon2 check at a time: a password check costs tens of megabytes and a CPU's worth of time.
@@ -60,6 +63,7 @@ impl AppState {
             std::fs::create_dir_all(root.join(folder))?;
         }
         let stats = Db::open(&root.join("stats.sqlite"), schema::STATS)?;
+        stats.setup(schema::migrate_stats)?;
         let cloud = Db::open(&root.join("cloud.sqlite"), schema::CLOUD)?;
         let now = clock.now();
         cloud.setup(|c| schema::migrate_cloud(c, now))?;
@@ -68,6 +72,8 @@ impl AppState {
         let used = budget::scan(&root);
         let budget = Budget::new(used, cfg.limits.max_data_bytes, cfg.limits.min_free_bytes, free);
         let body_gate = Arc::new(Semaphore::new(cfg.large_body_permits));
+        let geo_path = cfg.geo_csv.clone().unwrap_or_else(|| root.join("geo").join("dbip-country-lite.csv"));
+        let geo = Geo::load(&geo_path);
         Ok(AppState(Arc::new(Inner {
             cfg,
             stats,
@@ -78,6 +84,7 @@ impl AppState {
             abuse: Mutex::new(Abuse::with_bans(bans)),
             sessions: Mutex::new(HashMap::new()),
             budget,
+            geo,
             body_gate,
             hash_gate: Arc::new(Semaphore::new(1)),
         })))

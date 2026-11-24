@@ -97,12 +97,6 @@ pub fn client_ip(st: &AppState, headers: &HeaderMap, peer: Option<SocketAddr>) -
     peer.map(|p| p.ip()).unwrap_or(IpAddr::from([0, 0, 0, 0]))
 }
 
-/// The hook for a country lookup (the analytics spec's option: a country computed from the address, the
-/// address dropped at once). Not built: no database ships with the server, so it answers `None`.
-pub fn country_of(_ip: IpAddr) -> Option<&'static str> {
-    None
-}
-
 /// A release version: `X.Y.Z` with digits (at most four each), or one of the configured list.
 pub fn release_ok(version: &str, allowed: &[String]) -> bool {
     if !allowed.is_empty() {
