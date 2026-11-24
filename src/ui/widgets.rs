@@ -1478,6 +1478,17 @@ struct Popup {
     head_h: f32,
     /// The phone's density when the list is a phone's (its rows and text in dp), else None.
     phone: Option<f32>,
+    /// A press held in a phone's rows (a drag scrolls, a release on the same row picks).
+    drag: Option<PopupDrag>,
+}
+
+/// A press held in a phone's drop-down rows: where it began, the scroll it began at, and the row
+/// under it (None outside the rows).
+#[derive(Clone, Copy, Debug)]
+struct PopupDrag {
+    at: (f32, f32),
+    start: usize,
+    row: Option<usize>,
 }
 
 local! {
@@ -2320,6 +2331,7 @@ pub fn open_list(key: &str, anchor: Rect, current: i64, options: &[(i64, String)
         row_h: size.row_h,
         head_h: size.head_h,
         phone,
+        drag: None,
     };
     POPUP.with(|p| *p.borrow_mut() = Some(popup));
 }
@@ -2442,6 +2454,16 @@ pub fn draw_popup() {
                 pop.scroll += 3;
             }
         }
+        // A phone's rows take a finger: a swipe (gestures) turns the wheel a step per 3 rows, the
+        // wheel's own step, and a held drag moves the rows with the finger (`popup_drag`).
+        if pop.phone.is_some() {
+            swipe_rows(Rect::new(r.x, r.y + head_h, r.w, r.h - head_h), 3.0 * row_h);
+            let rows_area = Rect::new(r.x, r.y + head_h, r.w, pop.rows as f32 * row_h);
+            if let Some(v) = popup_drag(&mut pop.drag, &mut pop.scroll, rows_area, row_h, max_scroll, &shown) {
+                PICKED.with(|k| k.set(Some((pop.id, v))));
+                close = true;
+            }
+        }
         pop.scroll = pop.scroll.min(max_scroll);
         draw_rectangle(r.x + 4.0, r.y + 4.0, r.w, r.h, Color::new(0.0, 0.0, 0.0, 0.4));
         draw_rectangle(r.x, r.y, r.w, r.h, Color::new(0.1, 0.09, 0.08, 0.98));
@@ -2471,7 +2493,8 @@ pub fn draw_popup() {
             }
             let label_y = if legacy { centred(ry, row_h, label_size) } else { ry + 16.0 * s };
             super::dt_font::legacy_metrics_if(legacy, || text(&l, r.x + 8.0 * unit, label_y, label_size, INK));
-            if hover && is_mouse_button_pressed(MouseButton::Left) {
+            // A desktop list picks on the press; a phone's picks on the release (`popup_drag`).
+            if pop.phone.is_none() && hover && is_mouse_button_pressed(MouseButton::Left) {
                 PICKED.with(|k| k.set(Some((pop.id, *v))));
                 close = true;
             }
@@ -2494,6 +2517,44 @@ pub fn draw_popup() {
         POPUP.with(|p| *p.borrow_mut() = None);
         claim();
     }
+}
+
+/// One frame of a phone's drop-down rows (`rows_area`, `row_h` px a row, `max_scroll` the most):
+/// a press inside the rows starts a drag; the pointer's slide past the slop moves `scroll` with
+/// the finger; the release picks the row when it is the row the press began on and the pointer
+/// did not move ([`popup_pick`]). Returns the value picked this frame.
+fn popup_drag(drag: &mut Option<PopupDrag>, scroll: &mut usize, rows_area: Rect, row_h: f32, max_scroll: usize, shown: &[&(i64, String)]) -> Option<i64> {
+    let now = pointer();
+    if is_mouse_button_pressed(MouseButton::Left) && rows_area.contains(Vec2::from(now)) {
+        let row = super::hub_view::row_index(now, rows_area, row_h, *scroll, shown.len());
+        *drag = Some(PopupDrag { at: now, start: *scroll, row });
+    }
+    let d = (*drag)?;
+    if is_mouse_button_down(MouseButton::Left) {
+        if super::hub_view::moved_past(d.at, now, super::hub_view::drag_slop()) {
+            *scroll = popup_drag_scroll(d.start, d.at.1, now.1, row_h, max_scroll);
+        }
+        return None;
+    }
+    *drag = None;
+    let moved = (now.0 - d.at.0).hypot(now.1 - d.at.1);
+    let release = super::hub_view::row_index(now, rows_area, row_h, *scroll, shown.len());
+    popup_pick(d.row, release, moved, super::hub_view::drag_slop()).and_then(|i| shown.get(i)).map(|o| o.0)
+}
+
+/// The row a phone's drop-down picks on release: the press and the release on the same row, the
+/// pointer moved less than `slop` px. A drag, or a press or release outside the rows, picks none.
+fn popup_pick(press_row: Option<usize>, release_row: Option<usize>, moved_px: f32, slop: f32) -> Option<usize> {
+    match (press_row, release_row) {
+        (Some(p), Some(q)) if p == q && moved_px < slop => Some(p),
+        _ => None,
+    }
+}
+
+/// The scroll of a phone's drop-down after a held drag begun at scroll `start` with the pointer at
+/// `from_y`, now at `now_y`: the rows follow the finger, `row_h` px a row, kept within `most`.
+fn popup_drag_scroll(start: usize, from_y: f32, now_y: f32, row_h: f32, most: usize) -> usize {
+    super::hub_view::drag_to(start as f32, from_y, now_y, row_h, most as f32).round() as usize
 }
 
 /// A row of tabs; the clicked one becomes `selected`. Returns the height used.
@@ -3008,6 +3069,36 @@ mod keyboard_tests {
         assert_eq!(down, Rect::new(10.0, 100.0, 300.0, 48.0 * 2.75));
         assert_eq!(up.h, 48.0 * 2.75);
         assert_eq!(up.y + up.h, field.y + field.h, "grown up: the bottom edge stays");
+    }
+}
+
+#[cfg(test)]
+mod popup_drag_tests {
+    use super::*;
+
+    #[test]
+    fn popup_pick_waits_for_release_and_ignores_a_drag() {
+        // A tap: the press and the release on the same row, no move.
+        assert_eq!(popup_pick(Some(2), Some(2), 0.5, 12.0), Some(2));
+        // A drag that began on a row and moved past the slop picks nothing.
+        assert_eq!(popup_pick(Some(2), Some(2), 40.0, 12.0), None);
+        // Released on another row picks nothing.
+        assert_eq!(popup_pick(Some(2), Some(3), 0.0, 12.0), None);
+        // A press or a release outside the rows picks nothing.
+        assert_eq!(popup_pick(None, Some(2), 0.0, 12.0), None);
+        assert_eq!(popup_pick(Some(2), None, 0.0, 12.0), None);
+    }
+
+    #[test]
+    fn popup_drag_scrolls_rows() {
+        // Dragged up two rows: the rows move up under the finger, two rows further on.
+        assert_eq!(popup_drag_scroll(3, 300.0, 300.0 - 2.0 * 48.0, 48.0, 20), 5);
+        // Dragged down past the top: the top.
+        assert_eq!(popup_drag_scroll(1, 100.0, 400.0, 48.0, 20), 0);
+        // Dragged up past the end: the last scroll.
+        assert_eq!(popup_drag_scroll(18, 400.0, 0.0, 48.0, 20), 20);
+        // Not moved: where it was.
+        assert_eq!(popup_drag_scroll(7, 200.0, 200.0, 48.0, 20), 7);
     }
 }
 
