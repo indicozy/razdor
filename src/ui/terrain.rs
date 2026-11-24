@@ -878,9 +878,9 @@ void main() {
 pub struct TerrainLayer {
     /// The old shader, when option 1 is off.
     old: Option<Material>,
-    /// The neighbours shader's variants (`Variant::key`, and the material or None when it does not compile), made on
-    /// their first draw.
-    variants: RefCell<Vec<(u16, Option<Material>)>>,
+    /// The neighbours shader's variants (`Variant::key`, the material or None when it does not compile, and the real
+    /// frame it was last used in), made on their first draw. See `material` and `variants_to_evict`.
+    variants: RefCell<Vec<(u16, Option<Material>, u64)>>,
     /// The cache's copy, when option 2 is on.
     composite: Option<Material>,
     /// The options in effect for this layer (a shader that fails to compile turns its options off).
@@ -1081,13 +1081,14 @@ impl TerrainLayer {
         let (image, (tw, th)) = pack_terrain_atlas(textures, fill)?;
         let mut opts = options();
         let (mut old, mut composite) = (None, None);
-        let mut variants: Vec<(u16, Option<Material>)> = Vec::new();
+        let mut variants: Vec<(u16, Option<Material>, u64)> = Vec::new();
+        let now = super::clock::draw_frame();
         if opts.new_shader {
             // The full variant (every block) is made at start: it proves the shader compiles (else the old one is used).
             // Its mediump twin proves option 4's text; the other variants are made on their first draw (`material`).
             let full = Variant { mediump: false, live: true, water: true, overlay: true, mist: true, cheap: false, edges: false, tone: false, paths: true, detail: true };
             match make_variant(full) {
-                Ok(m) => variants.push((full.key(), Some(m))),
+                Ok(m) => variants.push((full.key(), Some(m), now)),
                 Err(e) => razdor::diag!("terrain shader: {e}"),
             }
             if variants.is_empty() {
@@ -1097,7 +1098,7 @@ impl TerrainLayer {
             if opts.mediump {
                 let twin = Variant { mediump: true, ..full };
                 match make_variant(twin) {
-                    Ok(m) => variants.push((twin.key(), Some(m))),
+                    Ok(m) => variants.push((twin.key(), Some(m), now)),
                     Err(e) => {
                         razdor::diag!("terrain shader (mediump): {e}");
                         opts.mediump = false;
@@ -1572,20 +1573,42 @@ impl TerrainLayer {
     }
 
     /// The material of a draw's variant (`Variant`): made on its first use and kept, the failure too (a variant that does
-    /// not compile skips its draws, as before). With option 1 off, the old shader's material.
+    /// not compile skips its draws, as before). With option 1 off, the old shader's material. At most
+    /// `MAX_TERRAIN_VARIANTS` are kept: before a new one is made, the least recently used ones not drawn this frame go.
     fn material(&self, v: Variant) -> Option<Material> {
         if !self.opts.new_shader {
             return self.old.clone();
         }
         let key = v.key();
+        let now = super::clock::draw_frame();
         let mut list = self.variants.borrow_mut();
-        if let Some((_, m)) = list.iter().find(|(k, _)| *k == key) {
-            return m.clone();
+        if let Some(entry) = list.iter_mut().find(|e| e.0 == key) {
+            entry.2 = now;
+            return entry.1.clone();
+        }
+        let stamps: Vec<(u16, u64)> = list.iter().map(|e| (e.0, e.2)).collect();
+        for dead in variants_to_evict(&stamps, now, MAX_TERRAIN_VARIANTS) {
+            list.retain(|e| e.0 != dead);
         }
         let m = make_variant(v).map_err(|e| razdor::diag!("terrain shader (variant {key}): {e}")).ok();
-        list.push((key, m.clone()));
+        list.push((key, m.clone(), now));
         m
     }
+}
+
+/// The most terrain variants kept at once. Razdor's own guard, not the original's: macroquad's pipeline table has 32
+/// slots, shared with the rest of the interface (about 22 are live), and a new settings combination used to add a
+/// variant that was never dropped, until the table overflowed ("Pipelines amount exceeded").
+const MAX_TERRAIN_VARIANTS: usize = 6;
+
+/// Which variants to drop before a new one is made. `stamps` are each variant's key and the real frame it was last used
+/// in. A variant used in frame `now` is never dropped: its queued draw calls still hold its pipeline slot. The rest go
+/// least recently used first, until fewer than `cap` variants remain, so the new one keeps the list within `cap`.
+fn variants_to_evict(stamps: &[(u16, u64)], now: u64, cap: usize) -> Vec<u16> {
+    let mut free: Vec<(u16, u64)> = stamps.iter().copied().filter(|(_, used)| *used < now).collect();
+    free.sort_by_key(|(_, used)| *used);
+    let excess = (stamps.len() + 1).saturating_sub(cap);
+    free.into_iter().take(excess).map(|(key, _)| key).collect()
 }
 
 /// Adreno's variable-rate shading for the terrain (option 3). `GL_QCOM_shading_rate` gives
@@ -1668,6 +1691,42 @@ mod shading_rate {
 
 #[cfg(test)]
 mod tests {
+    use super::{variants_to_evict, MAX_TERRAIN_VARIANTS};
+
+    #[test]
+    fn variants_evicted_when_unused_over_cap() {
+        // Six variants, all from earlier frames: adding one more drops the least recently used.
+        let stamps = [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6)];
+        assert_eq!(variants_to_evict(&stamps, 10, MAX_TERRAIN_VARIANTS), vec![1]);
+        // Under the cap, nothing goes.
+        assert!(variants_to_evict(&[(1, 1), (2, 2)], 10, MAX_TERRAIN_VARIANTS).is_empty());
+        // Over many frames, a list that evicts before each push stays within the cap after it.
+        let cap = MAX_TERRAIN_VARIANTS;
+        let mut list: Vec<(u16, u64)> = Vec::new();
+        for (frame, key) in (1..=20u16).enumerate() {
+            let now = frame as u64 + 1;
+            let evict = variants_to_evict(&list, now, cap);
+            list.retain(|(k, _)| !evict.contains(k));
+            list.push((key, now));
+            assert!(list.len() <= cap, "{} variants after frame {now}", list.len());
+        }
+        // The survivors are the newest ones.
+        let mut keys: Vec<u16> = list.iter().map(|(k, _)| *k).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec![15, 16, 17, 18, 19, 20]);
+    }
+
+    #[test]
+    fn a_variant_used_this_frame_is_never_evicted() {
+        // Every variant was drawn this frame: none may go, even over the cap.
+        let stamps: Vec<(u16, u64)> = (1..=8).map(|k| (k, 10)).collect();
+        assert!(variants_to_evict(&stamps, 10, MAX_TERRAIN_VARIANTS).is_empty());
+        // Mixed: only the old one is a candidate, and the current-frame ones stay even though the list is over the cap.
+        let mut mixed: Vec<(u16, u64)> = (1..=7).map(|k| (k, 10)).collect();
+        mixed.push((9, 3));
+        assert_eq!(variants_to_evict(&mixed, 10, MAX_TERRAIN_VARIANTS), vec![9]);
+    }
+
     #[test]
     fn the_water_picture_composite_does_not_darken_the_waters_edge() {
         use super::WATER_COMPOSITE_FACTORS;

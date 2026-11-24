@@ -383,6 +383,8 @@ async fn main() {
         frames += 1;
         // The snapshot clock moves one frame on (live runs: no-op).
         ui::clock::tick();
+        // The real frame counter (live too) for the terrain's variant cache.
+        ui::clock::bump_draw_frame();
         if let Some((path, n)) = &snapshot {
             // `RAZDOR_SNAPSHOT_SERIES=<count>:<every>`: a picture every `every` frames from `n` (numbered), and the
             // run ends with the last of them. Without it, the one picture at `n`, as before.

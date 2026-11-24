@@ -8,6 +8,9 @@ use std::sync::OnceLock;
 
 /// The frames drawn so far, in a snapshot.
 static FRAMES: AtomicU64 = AtomicU64::new(0);
+/// The real frames drawn so far, live or in a snapshot (`bump_draw_frame` from the main loop). Unlike `FRAMES`, it
+/// advances in every run: a GPU resource that queued draw calls still use must be told apart by frame.
+static DRAW_FRAME: AtomicU64 = AtomicU64::new(0);
 
 /// The snapshot's fixed frame step, in seconds (one frame at 60 Hz). A trailer shot sets its own
 /// rate (`set_shot`, from its frames per second).
@@ -39,6 +42,16 @@ pub fn set_shot(fps: u32) {
 /// The frames drawn so far (the snapshot clock's count).
 pub fn frame_index() -> u64 {
     FRAMES.load(Ordering::Relaxed)
+}
+
+/// The real frame being drawn (advances once per frame, live too; see `bump_draw_frame`).
+pub fn draw_frame() -> u64 {
+    DRAW_FRAME.load(Ordering::Relaxed)
+}
+
+/// Advances the real frame counter by one. The main loop calls it once per frame.
+pub fn bump_draw_frame() {
+    DRAW_FRAME.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Whether this run is a snapshot: its clocks and dates are fixed.
@@ -86,5 +99,13 @@ mod tests {
         assert_eq!(after(0), 0.0);
         assert!((after(60) - 1.0).abs() < 1e-12);
         assert!((after(90) - 1.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_draw_frame_counter_advances_on_every_bump() {
+        let before = draw_frame();
+        bump_draw_frame();
+        bump_draw_frame();
+        assert_eq!(draw_frame(), before + 2);
     }
 }
