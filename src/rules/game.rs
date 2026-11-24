@@ -5964,6 +5964,119 @@ mod tests {
         assert_eq!(at(&mut g, 0.5), (1.0, 1.0));
     }
 
+    /// Probe for the order report (#1700): the hero walks (2,2)..(7,2) over road, with a marsh
+    /// at (5,2) walled in by water, while an army of speed 5 walks east along the road on row 4,
+    /// out of his reach. Both start with the army's bank at 0.
+    fn order_probe() -> Game {
+        use crate::dt::dtm::Surface;
+        let mut s = strip();
+        for x in 2..=7 {
+            tk::set(&mut s, x, 2, Surface::Road);
+        }
+        tk::set(&mut s, 5, 2, Surface::Marsh);
+        tk::set(&mut s, 5, 1, Surface::DeepSea);
+        tk::set(&mut s, 5, 3, Surface::DeepSea);
+        for x in 10..=22 {
+            tk::set(&mut s, x, 4, Surface::Road);
+        }
+        s.armies = vec![army(1, 10, 4, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        g.fog = crate::rules::fog::Fog::disabled(g.world.map.w, g.world.map.h);
+        let a = &mut g.world.armies[0];
+        a.mind.scripted = true;
+        a.mind.countdown = 100;
+        a.budget = 0.0;
+        a.path = (11..=22).map(|x| (x, 4)).collect();
+        assert!(g.set_destination((7, 2)));
+        assert_eq!(g.path, vec![(3, 2), (4, 2), (5, 2), (6, 2), (7, 2)]);
+        g
+    }
+
+    /// The army's bank, its position and the game clock: what the probe compares.
+    fn probe_state(g: &Game) -> ((f32, f32), f32, f64) {
+        let a = &g.world.armies[0];
+        (a.pos, a.budget, g.clock.total_minutes())
+    }
+
+    /// #1700 (order): a hero step moves the armies by the cell the hero LEFT (`begin_walk`,
+    /// priced by `hero_step_minutes`). Road costs 3 and marsh 8; the army pays its speed 5 times
+    /// that: 15 minutes a road cell, 40 for the marsh. The hero's steps leave road, road, road,
+    /// marsh, road, so the step minutes are 15, 15, 15, 40, 15. The army's bank takes each step's
+    /// minutes and pays a cell at 15: 1, 1, 1 cell; then 40 pays two cells (30) with 10 carried;
+    /// 10 + 15 pays one more. Expected cells per hero step: 1, 1, 1, 2, 1.
+    #[test]
+    fn an_armys_cells_follow_the_cell_the_hero_leaves_step_by_step() {
+        let mut g = order_probe();
+        let mut x = g.world.armies[0].tile(&g.world.map).0;
+        let mut moved = Vec::new();
+        for _ in 0..5 {
+            g.hero_step(&mut Vec::new());
+            let now = g.world.armies[0].tile(&g.world.map).0;
+            moved.push(now - x);
+            x = now;
+        }
+        assert_eq!(moved, vec![1, 1, 1, 2, 1]);
+    }
+
+    /// #1700 (order): no double payment. After every hero step the army's bank plus the minutes
+    /// it spent on its cells (15 each, all road) equals the hero's step minutes so far: 15, 30,
+    /// 45, 85, 100, with the bank 0, 0, 0, 10, 10 and the spending 15, 30, 45, 75, 90.
+    #[test]
+    fn the_armies_are_banked_exactly_the_heros_step_minutes_after_every_step() {
+        let mut g = order_probe();
+        let t0 = g.clock.total_minutes();
+        let x0 = g.world.armies[0].tile(&g.world.map).0;
+        for step in 1..=5 {
+            g.hero_step(&mut Vec::new());
+            let a = &g.world.armies[0];
+            let spent = (a.tile(&g.world.map).0 - x0) as f32 * 15.0;
+            let hero = (g.clock.total_minutes() - t0) as f32;
+            assert!(a.budget <= crate::rules::world::AI_BUDGET_CAP);
+            assert!(
+                (a.budget + spent - hero).abs() < 1e-3,
+                "after hero step {step}: bank {} + spent {spent} != hero minutes {hero}",
+                a.budget
+            );
+        }
+    }
+
+    /// #1700 (order): the same walk played in UI frames (`tick_shown_within`, uneven frame
+    /// budgets: 0, 1 or 2 extra arrivals a frame) moves the armies as played at once: the same
+    /// army position, bank and clock after each hero step.
+    #[test]
+    fn a_walk_played_in_frames_moves_the_armies_as_the_same_walk_played_at_once() {
+        let mut g = order_probe();
+        let mut at_once = Vec::new();
+        for _ in 0..5 {
+            g.hero_step(&mut Vec::new());
+            at_once.push(probe_state(&g));
+        }
+        let mut g = order_probe();
+        let mut framed = Vec::new();
+        let mut last = g.tile();
+        let dt = STEP_SECONDS / 7.0;
+        let mut frame = 0u32;
+        while framed.len() < 5 {
+            frame += 1;
+            assert!(frame < 100_000, "the walk ends");
+            let mut allowed = frame % 3;
+            let mut keep = || {
+                if allowed == 0 {
+                    return false;
+                }
+                allowed -= 1;
+                true
+            };
+            g.tick_shown_within(dt, &mut keep);
+            // A step is complete when its play has ended and no step is under way.
+            if g.pause.is_none() && g.step_from.is_none() && g.tile() != last {
+                last = g.tile();
+                framed.push(probe_state(&g));
+            }
+        }
+        assert_eq!(framed, at_once);
+    }
+
     /// The armies' walk frames run by game time (engine.md §7): frames 3–6, the next every
     /// 10 game minutes, smoothly inside a stretch and standing still while time does; the
     /// standing frame without a step to take.
