@@ -40,10 +40,10 @@ podman save -o "$WORK/razdor-api.tar" "$IMAGE"
 # The deploy files, under the names the root script expects (the same names as in this folder).
 for f in nginx.conf razdor-mirror.toml razdor-mirror-sync.service razdor-mirror-sync.timer \
   razdor-mirror-alert.service razdor-geo-update.service razdor-geo-update.timer \
-  razdor-mirror-sync.polkit.rules razdor-hub.logrotate razdor-api.container sudoers-razdor; do
+  razdor-mirror-sync.polkit.rules razdor-hub.logrotate razdor-api.container sudoers-razdor \
+  geo-update.sh geo-apply.sh razdor-install-bin.sh; do
   cp "$HERE/$f" "$WORK/$f"
 done
-cp "$HERE/geo-update.sh" "$WORK/geo-update.sh"
 echo "staged in $WORK: $(ls "$WORK" | wc -l) files, image $IMAGE"
 
 # One connection: the mkdir and the tar stream run in the same ssh command.

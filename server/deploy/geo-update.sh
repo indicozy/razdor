@@ -1,12 +1,16 @@
 #!/bin/sh
 # Monthly update of the country table (DB-IP IP to Country Lite, CC BY 4.0, "IP Geolocation by DB-IP",
-# https://db-ip.com). Run as root by razdor-geo-update.timer. It fetches the month's CSV, checks it,
-# writes the API's copy (read at the API's start) and nginx's `geo` include, reloads nginx and restarts the API.
+# https://db-ip.com). Run by razdor-geo-update.timer as the unprivileged user razdor-geo (User= in the
+# service), never as root. It fetches the month's CSV, checks it, and writes two files into razdor-geo's
+# own folder: the CSV and nginx's `geo` ranges. Then razdor-geo-apply (root, ExecStartPost=+ in the service)
+# checks the copies and installs them; that root step also runs nginx -t, reloads nginx and the API restarts.
 # Nothing is committed to git and nothing is sent anywhere: the table is only downloaded.
 set -eu
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export PATH
 
-API_DATA=/var/lib/razdor-api/geo
-NGINX_GEO=/etc/nginx/razdor-geo-country.conf
+OUT=/var/lib/razdor-geo
+# The root-owned copy of the server binary (installed by the root setup). Run here as razdor-geo, never by root.
 BIN=/usr/local/bin/razdor-server
 MONTH=$(date -u +%Y-%m)
 URL="https://download.db-ip.com/free/dbip-country-lite-${MONTH}.csv.gz"
@@ -23,18 +27,6 @@ if [ "$(wc -l < "$T/nginx.conf")" -lt 1000 ]; then
     exit 1
 fi
 
-install -d -o 10001 -g 10001 -m 0750 "$API_DATA"
-install -o 10001 -g 10001 -m 0640 "$T/table.csv" "$API_DATA/dbip-country-lite.csv"
-
-# Keep the old include so a failed test puts it back.
-[ -f "$NGINX_GEO" ] && cp -p "$NGINX_GEO" "$T/old.conf"
-install -m 0644 "$T/nginx.conf" "$NGINX_GEO"
-if ! nginx -t; then
-    [ -f "$T/old.conf" ] && install -m 0644 "$T/old.conf" "$NGINX_GEO"
-    echo "geo: nginx refused the new table, the old one is back" >&2
-    exit 1
-fi
-systemctl reload nginx
-# The API reads its table when it starts.
-systemctl restart razdor-api
-echo "geo: updated for $MONTH"
+install -m 0644 "$T/table.csv" "$OUT/dbip-country-lite.csv"
+install -m 0644 "$T/nginx.conf" "$OUT/razdor-geo-country.conf"
+echo "geo: downloaded for $MONTH, waiting for razdor-geo-apply to install it"

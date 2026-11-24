@@ -5,4 +5,16 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# The download runs unprivileged (razdor-geo). Only the two lines marked + run as root: a checked copy into
+# nginx's include (nginx -t, then reload) and the API restart. Both are fixed commands; neither runs a file
+# the razdor user can write.
+User=razdor-geo
+Group=razdor-geo
 ExecStart=/usr/local/sbin/razdor-geo-update
+ExecStartPost=+/usr/local/sbin/razdor-geo-apply
+ExecStartPost=+/usr/bin/systemctl restart razdor-api
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/razdor-geo
+ProtectHome=yes
+PrivateTmp=yes

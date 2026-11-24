@@ -446,11 +446,13 @@ deploy user fills first. Nothing here contacts the server except these steps.
 4. Routine update afterwards, with no root script. Upload with `stage-upload.sh` (`SKIP_BUILD=1` if the binaries
    are built). Then the deploy user runs only these lines, which the sudo rule allows and nothing else:
 
-       sudo install -m 0755 -o root -g root /home/razdor/stage/razdor-mirror /usr/local/bin/razdor-mirror
+       sudo /usr/local/sbin/razdor-install-bin mirror
        sudo systemctl start --no-block razdor-mirror-sync.service
 
    The next sync runs the new binary. `razdor-server` (the host copy the GeoIP script uses to print the nginx
-   ranges) takes the same line with its own name. For a new API image, load it from the staging folder through
+   ranges) takes the same wrapper with the other name: `sudo /usr/local/sbin/razdor-install-bin server`. The wrapper
+   copies the staged file without following links, checks it (a regular ELF file of a sane size) and installs it
+   as /usr/local/bin/razdor-<name>; it takes only `mirror` or `server`. For a new API image, load it from the staging folder through
    the allowed `podman load`, then restart the service:
 
        sudo /usr/bin/podman load < /home/razdor/stage/razdor-api.tar
@@ -563,9 +565,13 @@ Choices, for the owner to check:
 5. `install -m 0644 nginx.conf /etc/nginx/conf.d/razdor.conf; nginx -t; systemctl reload nginx`.
 6. Quadlet: `install -m 0644 razdor-api.container /etc/containers/systemd/`, `systemctl daemon-reload`,
    `systemctl restart razdor-api`.
-7. The table: `install -m 0755 geo-update.sh /usr/local/sbin/razdor-geo-update`, then
-   `install -m 0644 razdor-geo-update.service razdor-geo-update.timer /etc/systemd/system/`,
+7. The table: the root setup creates the user `razdor-geo` (no login, runs the download, owns only
+   `/var/lib/razdor-geo`) and `/var/lib/razdor-api/geo` (owned by the API's user, 10001). Then
+   `install -m 0755 geo-update.sh /usr/local/sbin/razdor-geo-update` and
+   `install -m 0755 geo-apply.sh /usr/local/sbin/razdor-geo-apply` (root: checks the copies, installs them after
+   `nginx -t`, reloads nginx), then `install -m 0644 razdor-geo-update.service razdor-geo-update.timer /etc/systemd/system/`,
    `systemctl daemon-reload`, `systemctl start razdor-geo-update` and watch `journalctl -u razdor-geo-update`.
+   The service runs as `razdor-geo`; only its two `ExecStartPost=+` lines run as root, fixed commands.
    The URL pattern `https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.csv.gz` was NOT checked against the
    live site from here: if the first run says the download failed, check the month's file name on db-ip.com and
    edit `URL` in the script.

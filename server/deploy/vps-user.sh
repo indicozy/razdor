@@ -30,11 +30,11 @@ Cmnd_Alias RZ_WEB = /usr/sbin/nginx -t, \
   /usr/bin/certbot certonly --webroot -w /var/www/letsencrypt -d razdor.indicozy.dev, \
   /usr/bin/certbot renew, /usr/bin/certbot renew --dry-run
 
-# Routine updates of the Razdor host binaries (2026-11-24). `install` copies a file from the razdor-owned
-# staging folder into /usr/local/bin as root. That is the intended routine update, and it means razdor can
-# replace these two binaries: the owner's decision. Only the Razdor binaries are listed, one exact line each.
-Cmnd_Alias RZ_BIN = /usr/bin/install -m 0755 -o root -g root /home/razdor/stage/razdor-mirror /usr/local/bin/razdor-mirror, \
-  /usr/bin/install -m 0755 -o root -g root /home/razdor/stage/razdor-server /usr/local/bin/razdor-server
+# Routine updates of the Razdor host binaries (2026-11-24). The root-owned wrapper /usr/local/sbin/razdor-install-bin
+# copies the named file out of the razdor-owned staging folder WITHOUT following links, checks the copy (a regular
+# ELF file of a sane size) and installs it as /usr/local/bin/razdor-<name>. The owner's decision: razdor may replace
+# these two binaries this way. Only these two exact lines: no install of a path razdor can write.
+Cmnd_Alias RZ_BIN = /usr/local/sbin/razdor-install-bin mirror, /usr/local/sbin/razdor-install-bin server
 
 # The mirror's sync and the GeoIP table: start, stop and restart of these four units only (2026-11-24).
 Cmnd_Alias RZ_MIRROR = /usr/bin/systemctl start razdor-mirror-sync.service, \

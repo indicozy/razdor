@@ -22,15 +22,17 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 step "preflight"
 [ "$(id -u)" = 0 ] || die "run as root"
-for c in install systemctl nginx visudo podman useradd stat sha256sum sed mktemp curl; do
+for c in install systemctl nginx visudo podman useradd stat sha256sum sed mktemp curl od tr; do
   command -v "$c" >/dev/null 2>&1 || die "missing command: $c"
 done
 getent group nginx >/dev/null || die "no nginx group: install nginx first (README section 5)"
-for f in razdor-mirror razdor-server razdor-api.tar nginx.conf geo-update.sh razdor-mirror.toml \
-  razdor-mirror-sync.service razdor-mirror-sync.timer razdor-mirror-alert.service \
+# The stage is razdor-owned: a staged file must be a plain file, never a link (install would follow it).
+[ ! -L "$STAGE" ] || die "$STAGE is a symlink"
+for f in razdor-mirror razdor-server razdor-api.tar nginx.conf geo-update.sh geo-apply.sh razdor-install-bin.sh \
+  razdor-mirror.toml razdor-mirror-sync.service razdor-mirror-sync.timer razdor-mirror-alert.service \
   razdor-geo-update.service razdor-geo-update.timer razdor-mirror-sync.polkit.rules \
   razdor-hub.logrotate razdor-api.container sudoers-razdor; do
-  [ -f "$STAGE/$f" ] || die "not in $STAGE: $f (upload first: server/deploy/stage-upload.sh)"
+  [ -f "$STAGE/$f" ] && [ ! -L "$STAGE/$f" ] || die "not a plain file in $STAGE: $f (upload first: server/deploy/stage-upload.sh)"
 done
 echo "all staged files present in $STAGE"
 
@@ -52,6 +54,17 @@ install -d -o razdor-mirror -g nginx -m 0755 /var/www/razdor-site /var/www/razdo
 install -d -o razdor-mirror -g razdor-mirror -m 0750 /var/lib/razdor-mirror
 install -d -o razdor-mirror -g razdor-mirror -m 0750 /var/lib/razdor-mirror/stage
 install -d -o nginx -g nginx -m 0755 /var/log/razdor-hub
+# The country table's unprivileged user (it runs the download and writes its own folder only), and the
+# root-owned work folder of the two root helpers (razdor-install-bin, razdor-geo-apply).
+if id razdor-geo >/dev/null 2>&1; then
+  echo "user razdor-geo exists"
+else
+  useradd --system --home-dir /var/lib/razdor-geo --no-create-home --shell /sbin/nologin razdor-geo
+  echo "created user razdor-geo"
+fi
+install -d -o razdor-geo -g razdor-geo -m 0750 /var/lib/razdor-geo
+install -d -o 10001 -g 10001 -m 0750 /var/lib/razdor-api/geo
+install -d -o root -g root -m 0700 /var/lib/razdor-install
 [ "$(stat -c %d /var/www/razdor-hub)" = "$(stat -c %d /var/lib/razdor-mirror/stage)" ] \
   || die "the stage folder must be on the same filesystem as /var/www/razdor-hub"
 echo "folders ready, stage on the web root's filesystem"
@@ -59,7 +72,10 @@ echo "folders ready, stage on the web root's filesystem"
 step "host binaries"
 install -m 0755 -o root -g root "$STAGE/razdor-mirror" /usr/local/bin/razdor-mirror
 install -m 0755 -o root -g root "$STAGE/razdor-server" /usr/local/bin/razdor-server
-echo "installed /usr/local/bin/razdor-mirror and /usr/local/bin/razdor-server"
+# The deploy user's only route to these binaries: the root wrapper (server/deploy/razdor-install-bin.sh), which
+# copies the staged file without following links and checks it. Root never runs a file from the stage or /usr/local/bin/razdor-*.
+install -m 0755 -o root -g root "$STAGE/razdor-install-bin.sh" /usr/local/sbin/razdor-install-bin
+echo "installed /usr/local/bin/razdor-mirror, /usr/local/bin/razdor-server and the wrapper /usr/local/sbin/razdor-install-bin"
 
 step "mirror config, units, log rotation, polkit, country table file"
 install -m 0644 -o root -g root "$STAGE/razdor-mirror.toml" /etc/razdor-mirror.toml
@@ -67,6 +83,7 @@ install -m 0644 -o root -g root "$STAGE/razdor-mirror-sync.service" "$STAGE/razd
   "$STAGE/razdor-mirror-alert.service" "$STAGE/razdor-geo-update.service" "$STAGE/razdor-geo-update.timer" \
   /etc/systemd/system/
 install -m 0755 -o root -g root "$STAGE/geo-update.sh" /usr/local/sbin/razdor-geo-update
+install -m 0755 -o root -g root "$STAGE/geo-apply.sh" /usr/local/sbin/razdor-geo-apply
 install -m 0644 -o root -g root "$STAGE/razdor-hub.logrotate" /etc/logrotate.d/razdor-hub
 # The polkit rule lets the deploy user (razdor) start the sync on demand; the file in git says "deploy".
 install -d -m 0755 /etc/polkit-1/rules.d
