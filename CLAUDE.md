@@ -113,6 +113,11 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   chimneys and flags (numbers keyed by the pixel hash, made offline by `tools/depth/detect_points.py`),
   may be committed; never the sprites, depth maps or previews.
 - The repo is public: every push is published at once.
+- Root on the server (the owner's decision, 2026-11-24): any command run as root on the VPS (`ssh root@…`,
+  or anything that runs with root rights there) needs the owner's explicit approval each time. First list
+  the exact commands (and the scripts they run), then wait for the owner's yes; an approval covers only
+  the commands listed. The `razdor` deploy user's own allowed commands (`server/deploy/sudoers-razdor`)
+  need no new approval.
 - Player-facing text (README, changelog, release notes, site, PLAYTEST_NOTES) is in Russian.
   Developer text stays English: code, comments, commit messages, CLAUDE.md, skills,
   `docs/flows/`, `docs/reference/`.
