@@ -944,4 +944,18 @@ mod tests {
         // No unpack folder on this platform: nothing is repaired.
         assert!(!repair_allowed(&unpack, None));
     }
+
+    /// Backlog 1642: a player's own install with no marker is never repaired, on any platform (the
+    /// marker is what makes a folder Razdor's; the phones' rule covers only the unpack folder itself).
+    #[test]
+    fn repair_never_writes_into_an_unmarked_install() {
+        let s = Scratch::new("repair-unmarked");
+        let unpack = s.0.join("DiscordTimes");
+        let mine = s.0.join("Games").join("DiscordTimes");
+        fs::create_dir_all(&unpack).unwrap();
+        fs::create_dir_all(&mine).unwrap();
+        // The player's copy next to the exe, no marker: refused, whether or not an unpack folder exists.
+        assert!(!repair_allowed(&mine, Some(unpack.as_path())));
+        assert!(!repair_allowed(&mine, None));
+    }
 }
