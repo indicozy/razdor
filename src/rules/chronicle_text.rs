@@ -3,7 +3,7 @@
 //! are English keys whose Russian is in the catalog (`data/lang/ru/game.txt`); the names come
 //! from the install (units, items, spells, buildings, armies, events), never from this file.
 
-use super::chronicle::{Entry, EntryKind, FoeRef, Summary, TextRef, MINUTES_PER_DAY};
+use super::chronicle::{day_of, Entry, EntryKind, FoeRef, Summary, TextRef, MINUTES_PER_DAY};
 use super::clock::Clock;
 use super::game::Game;
 use super::journal::Row;
@@ -113,7 +113,9 @@ pub fn body(game: &Game, e: &Entry) -> (String, Option<String>) {
 pub fn highlight_lines(game: &Game, s: &Summary) -> Vec<String> {
     let h = &s.highlights;
     let mut out = Vec::new();
-    let day = |e: &Entry| game.chronicle.day_of(e.at_minutes);
+    // The days count from the same origin as the totals next to them (the covered chapters'
+    // start), so on a later map «day N» is at most «Дней».
+    let day = |e: &Entry| day_of(s.origin, e.at_minutes);
     if let Some(e) = &h.biggest_battle {
         if let EntryKind::Battle { foe, won, own_losses, foe_losses, .. } = e.kind {
             let result = if won { tr("won") } else { tr("lost") };
@@ -136,7 +138,7 @@ pub fn highlight_lines(game: &Game, s: &Summary) -> Vec<String> {
         }
     }
     if let Some((index, steps)) = h.longest_walk {
-        let day = game.chronicle.day_of(index * MINUTES_PER_DAY);
+        let day = day_of(s.origin, index * MINUTES_PER_DAY);
         out.push(trf!("Longest walk — {steps} cells (day {day})", steps = steps, day = day));
     }
     out
@@ -256,6 +258,35 @@ mod tests {
         assert_eq!(lines[0], "Biggest battle — day 1: won (losses 3 : 5)", "{lines:?}");
         assert!(lines[1].starts_with("Most hired at once — 3 ") && lines[1].ends_with(" (day 1)"), "{lines:?}");
         assert_eq!(lines[2], "Richest moment — 900 (day 1)", "{lines:?}");
+    }
+
+    /// On the second map of a campaign the «Итоги» totals count its days from the map's start, and
+    /// the best lines' day numbers count from the same start (not the campaign's first day).
+    #[test]
+    fn the_best_lines_count_days_from_the_same_start_as_the_totals() {
+        use super::super::content::{Content, HeroClass};
+        use super::super::game::Game;
+        use std::sync::Arc;
+        let mut g = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        g.chronicle = Default::default();
+        g.chronicle.start("First", 0);
+        g.chronicle.record(10, EntryKind::Captured { location: 4 });
+        // The second map starts on day 31 of the campaign.
+        g.chronicle.next_chapter("Second", 30 * MINUTES_PER_DAY);
+        g.chronicle.route_step(30 * MINUTES_PER_DAY + 5, (2, 2));
+        g.chronicle.route_step(30 * MINUTES_PER_DAY + 6, (2, 3));
+        // The battle is on the map's day 3 (campaign day 33).
+        let battle_at = 32 * MINUTES_PER_DAY + 100;
+        g.chronicle.record(battle_at, EntryKind::Battle { at: (5, 5), foe: None, won: true, own_losses: 2, foe_losses: 6 });
+        let now = 35 * MINUTES_PER_DAY;
+        let s = g.chronicle.summary(1, now, false).expect("a summary");
+        assert_eq!(s.totals.days, 6, "the second map's days, from its start");
+        let lines = highlight_lines(&g, &s);
+        let battle = lines.iter().find(|l| l.starts_with("Biggest battle")).expect("a battle line");
+        assert_eq!(battle, "Biggest battle — day 3: won (losses 2 : 6)", "{lines:?}");
+        assert!(battle.contains("day 3") && 3 <= s.totals.days);
+        let walk = lines.iter().find(|l| l.starts_with("Longest walk")).expect("a walk line");
+        assert_eq!(walk, "Longest walk — 2 cells (day 1)", "{lines:?}");
     }
 
     #[test]

@@ -276,6 +276,9 @@ pub struct Summary {
     pub title: String,
     /// The map's picture is the chapter at this index; the totals cover the chapters from `from`.
     pub from: usize,
+    /// The minute the first covered chapter starts: the totals' day 1, and the origin the
+    /// highlights' day numbers count from (see [`day_of`]).
+    pub origin: u64,
     pub totals: Totals,
     pub highlights: Highlights,
     /// The hero's route on the map (the picture's chapter), oldest cell first.
@@ -442,6 +445,7 @@ impl Chronicle {
         Some(Summary {
             title: last.title.clone(),
             from: from.min(self.chapters.len() - 1),
+            origin: covered.first().map_or(0, |c| c.from_minutes),
             totals: totals_of(covered, now),
             highlights: Highlights {
                 biggest_battle: biggest_battle_of(covered).cloned(),
