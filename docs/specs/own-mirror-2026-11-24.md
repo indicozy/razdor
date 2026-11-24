@@ -128,8 +128,9 @@ config or catalog. Bound: the timer is 15 minutes, so the server is at most ~15 
 and the API's feed. Releases and a kill switch that must reach players at once: trigger the sync (below) and
 check `status.json`.
 
-**API budget:** 2 API calls a run (releases of `razdor`, releases of `razdor-community`, the second only when
-the catalog tag changed or a referenced tag is missing), every 15 min = at most 8 an hour against 60 for the IP.
+**API budget:** 3 API calls a run (releases of `razdor`; the `site-latest` tag of `razdor`, section 3.5; releases of
+`razdor-community`, only when the catalog tag changed or a referenced tag is missing), every 15 min = at most 12 an
+hour against 60 for the IP.
 The big transfers are `github.com/.../releases/download/...` redirects, not API calls. On a 403/429 with
 `x-ratelimit-remaining: 0` or `Retry-After`: stop, exit 0, try next tick; never retry in a loop.
 
@@ -191,6 +192,30 @@ README section 9 "The download mirror". Steps:
    razdor-mirror-sync` (a running one makes it a no-op). The release skill gains a step 6a2: after the tag and
    GitHub's release are live, start the sync over ssh and poll `status.json` until it lists the new tag, then run
    `update_check.py` against the own feed too (`--feed own`). `rollback.py` ends with the same trigger.
+
+### 3.5 The site copy (`razdor.indicozy.dev/` and `/wiki/`)
+
+The Pages site (the hand-made site from `gh-pages` and the Starlight wiki) is also served at the root of the owner's
+domain. The Pages workflow's `root-copy` job (`.github/workflows/pages.yml`) assembles the site the way the Pages build
+does, builds the wiki with `RAZDOR_WIKI_BASE=/wiki`, and runs `tools/site/root_copy.py`: the root-relative `/razdor/`
+links lose their prefix (the Markdown writes some by hand, and Astro does not rewrite them), absolute `indicozy.github.io/wiki`
+addresses go back to GitHub's path, and every HTML page gets a `<link rel="canonical">` to its GitHub address (search
+engines index GitHub's copy). The result is packed as `site.tar.gz`, the one asset of the pre-release `site-latest` of
+`indicozy/razdor` (a pre-release, not the latest: clients and the mirror skip pre-releases, and the Hub's catalog is the
+latest release of `razdor-community`). `GITHUB_TOKEN` cannot write to the community repository and no secret exists for
+it, so the release lives here.
+
+The mirror (`server/src/mirror/site.rs`, one step of a run) looks the release up (`releases/tags/site-latest`: one API call
+a run, counted in the budget above), checks the asset's digest, and when the digest differs from the live copy fetches the
+archive (verified, resumable), unpacks it into a new folder under `site_dir/versions/<sha256>` (only regular files and
+folders: a symlink, a hard link or any other entry type, or a path with `..` or an absolute name, fails the whole unpack;
+the archive needs `index.html` and `wiki/index.html`; a size and file-count cap), and moves `site_dir/current` to it with
+one rename. The copy before the live one is kept (`site_previous` in `status.json`); older ones are removed. nginx serves
+`site_dir/current` (`server/deploy/nginx.conf`). A failed step is an error of the run and leaves the live copy as it was.
+No `site-latest` release yet is not an error (the first deploy).
+
+Caching: the wiki's hashed `_astro/` files a year, HTML and the other small text files revalidated, the rest a day.
+No access log (the privacy page).
 
 ## 4. Client side
 

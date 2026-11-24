@@ -298,8 +298,46 @@ newest 2 catalogs and the game, ad and depth-model releases they name. `status.j
 
     curl -s https://razdor.indicozy.dev/hub/status.json     # synced_at, app, catalog, errors, ok
 
-GitHub's API allows 60 requests an hour per address. A run makes 2 (the app's list and the catalog's list),
-plus one lookup for a release that the list lacks (rare). A rate limit ends the run quietly; the next one tries again.
+GitHub's API allows 60 requests an hour per address. A run makes 3 (the app's list, the site copy's release lookup,
+and the catalog's list when a new catalog needs it), plus one lookup for a release that the list lacks (rare). A
+rate limit ends the run quietly; the next one tries again.
+
+### The site copy (`razdor.indicozy.dev/`, and the wiki at `/wiki/`)
+
+The Pages site (the hand-made site and the wiki) is also served at the root of this domain. The Pages workflow's
+`root-copy` job (`.github/workflows/pages.yml`) builds the root copy with `tools/site/root_copy.py` (the wiki with base
+`/wiki`, the `/razdor/` links rewritten, canonical links to GitHub's pages) and packs it as `site.tar.gz` into the
+pre-release `site-latest` of this repository (`GITHUB_TOKEN` cannot write to the community repository, and no
+secret is set). The mirror looks that release up (one call a run) and, when its digest is new, fetches the archive
+(digest checked), unpacks it into `/var/www/razdor-site/versions/<sha256>` (a link, or a path that leaves the folder,
+fails the unpack) and moves `/var/www/razdor-site/current` to it with one rename. The copy before the live one is
+kept, so a rollback is `ln -sfn versions/<sha256> /var/www/razdor-site/current` by hand.
+
+`status.json` lists the live copy as `site` and the one before it as `site_previous`:
+
+    curl -s https://razdor.indicozy.dev/hub/status.json     # site, site_previous, errors, ok
+
+Install (once, as root; the old placeholder folder is moved aside, the config needs no change, its `site_dir` is the
+default). Order: the folder and the unit first, then the first sync, then nginx, so the site never answers 404 for
+longer than the sync takes:
+
+    mv /var/www/razdor-site /var/www/razdor-site.old                       # the placeholder; delete it later
+    install -d -o razdor-mirror -g nginx -m 0755 /var/www/razdor-site /var/www/razdor-site/versions
+    install -m 0644 server/deploy/razdor-mirror-sync.service /etc/systemd/system/
+    systemctl daemon-reload
+    systemctl start --no-block razdor-mirror-sync.service                   # wait for status.json to show site
+    journalctl -u razdor-mirror-sync.service -n 30
+    install -m 0644 server/deploy/nginx.conf /etc/nginx/conf.d/razdor.conf  # root is .../current now
+    nginx -t && systemctl reload nginx
+
+The unit may write `/var/www/razdor-site` (`ReadWritePaths`); the mirror user owns that folder and nothing else
+under `/var/www`. Check after the install:
+
+    curl -sI https://razdor.indicozy.dev/ | head -5          # 200, Cache-Control: no-cache
+    curl -sI https://razdor.indicozy.dev/wiki/ | head -5     # 200
+
+A bad archive (a symlink in it, a wrong digest, no front page) is logged as `site:` in the run's errors and the
+live copy stays.
 
 ### Install (once, as root on the VPS)
 
