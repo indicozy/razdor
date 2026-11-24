@@ -104,7 +104,7 @@ mod android {
                 return Err("razdorDownload is missing".into());
             }
             let (url, path) = (string(env, url), string(env, path));
-            let stall = crate::update::STALL_SECONDS as i32;
+            let stall = crate::mirror::stall_seconds(url) as i32;
             let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32, start, end));
             if cleared(env) {
                 return Err("the download failed".into());
@@ -247,7 +247,7 @@ mod android {
             }
             let (verb, url, key, body, reply) = (string(env, verb), string(env, url), string(env, key), string(env, body), string(env, reply));
             let (version, commit) = (string(env, version), string(env, commit));
-            let stall = crate::update::STALL_SECONDS as i32;
+            let stall = crate::mirror::stall_seconds(url) as i32;
             let answer = Local::new(
                 env,
                 ((**env).CallObjectMethod.unwrap())(
@@ -285,7 +285,7 @@ mod android {
             }
             let (url, path) = (string(env, url), string(env, path));
             let (version, commit) = (string(env, version), string(env, commit));
-            let stall = crate::update::STALL_SECONDS as i32;
+            let stall = crate::mirror::stall_seconds(url) as i32;
             let reply = Local::new(
                 env,
                 ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, version.obj, commit.obj, stall, seconds as i32),
@@ -341,7 +341,7 @@ mod android {
             let (url, path) = (string(env, url), string(env, path));
             let etag = string(env, have.etag.as_deref().unwrap_or(""));
             let modified = string(env, have.last_modified.as_deref().unwrap_or(""));
-            let stall = crate::update::STALL_SECONDS as i32;
+            let stall = crate::mirror::stall_seconds(url) as i32;
             let reply = Local::new(env, ((**env).CallObjectMethod.unwrap())(env, ACTIVITY, mid, url.obj, path.obj, stall, seconds as i32, etag.obj, modified.obj));
             if cleared(env) {
                 return Err("the download failed".into());

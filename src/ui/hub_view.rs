@@ -759,7 +759,7 @@ pub fn frame(view: &mut HubView) -> bool {
         Some(Err(e)) if !detail => {
             // No address of the catalog answered: say so (each address's reason is in the log).
             let text = if e == hub::NO_ADDRESS {
-                tr("The catalog can't be read from any address (GitVerse, GitHub). Check the internet.").to_string()
+                tr("The catalog can't be read from any address (GitHub, the Razdor server). Check the internet.").to_string()
             } else {
                 trf!("The hub can't be read: {e}", e)
             };

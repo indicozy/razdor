@@ -1,4 +1,4 @@
-//! The community's game archive, on GitVerse first and GitHub as the fallback («Скачать игру» on the no-install screen; the hub's
+//! The community's game archive, on GitHub first and the Razdor server as the fallback («Скачать игру» on the no-install screen; the hub's
 //! catalog offers the same kind of address to the automatic start). The owner's decision
 //! (2026-11-07): the DT authors allowed the Discord server's moderators to share the game, and it
 //! is published as one public .zip file in Razdor's community releases (both hosts). Razdor downloads
@@ -30,7 +30,7 @@ pub struct Archive {
 
 /// The community's game as the remote config gives it (`remote_config::game_info`; the built-in one
 /// until the config arrives: `scripts/check-game-link.sh` checks the built-in links). The GitHub
-/// release file first, the GitVerse mirror after it.
+/// release file first, the Razdor server's copy after it.
 pub fn game() -> Archive {
     archive_from(&crate::remote_config::game_info())
 }
@@ -164,7 +164,15 @@ pub fn download_game(net: &dyn Net, archive: &Archive, dest: &Path, progress: &P
     let _ = fs::remove_file(dest);
     let part = part_path(dest);
     let mut last = String::from("no address");
-    for link in crate::mirror::order(&archive.links[..]) {
+    let mut links: Vec<String> = Vec::new();
+    for address in archive.links.iter() {
+        for copy in crate::mirror::expand(address) {
+            if !links.contains(&copy) {
+                links.push(copy);
+            }
+        }
+    }
+    for link in crate::mirror::order(&links) {
         match download_from(net, link, archive, &part, progress) {
             Ok(()) => {
                 crate::diag!("game download: from {link}");
@@ -352,12 +360,12 @@ mod tests {
     }
 
     #[test]
-    fn the_game_is_the_github_archive_then_the_gitverse_one() {
+    fn the_game_is_the_github_archive_then_the_own_copy() {
         assert_eq!(file_page(&game()), "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
         let links: Vec<String> = game().links.iter().map(|l| l.to_string()).collect();
         assert_eq!(links, crate::remote_config::Config::builtin().game.links);
         assert!(links[0].ends_with("/game-cu-1.2/discord-times-cu.zip"));
-        assert!(links[1].starts_with("https://gitverse.ru/api/attachments/"));
+        assert!(links[1].starts_with("https://razdor.indicozy.dev/hub/"));
         assert_eq!(game().size, 44_619_982);
         assert_eq!(game().name, "discord-times-cu.zip");
         assert_eq!(game().sha256, "dff554e22a0485f0ed06b3459d3e7e868224d49e264bba0ecf40db852514568d");
@@ -382,12 +390,12 @@ mod tests {
         let dir = scratch("github-first");
         let dest = dir.join("game.zip");
         let gh = "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/test.zip";
-        let gv = "https://gitverse.ru/api/attachments/test-game";
+        let gv = "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/download/game-cu-1.2/test.zip";
         let a = Archive::at_urls(vec![gh.into(), gv.into()], BODY.len() as u64, crate::update::sha256_hex(BODY), "test.zip".into());
         let net = Fake::new(vec![Reply::Fail("stalled"), Reply::Body(200, BODY.to_vec())]);
         download_game(&net, &a, &dest, &Progress::default()).unwrap();
         let asked: Vec<String> = net.requests.borrow().iter().map(|r| r.0.clone()).collect();
-        assert_eq!(asked, vec![gh.to_string(), gv.to_string()], "GitHub is asked first, GitVerse answers as the fallback");
+        assert_eq!(asked, vec![gh.to_string(), gv.to_string()], "GitHub is asked first, the own server answers as the fallback");
         assert_eq!(fs::read(&dest).unwrap(), BODY);
 
         let dest2 = dir.join("game2.zip");

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks that the community's game archive is alive before a release: every address the app tries
-# (src/mirror.rs, GAME: GitHub first, then GitVerse) must serve the file Razdor expects, whose size
+# (src/mirror.rs, GAME: GitHub first, then the owner's own server) must serve the file Razdor expects, whose size
 # is the built-in game's (src/remote_config.rs, fn builtin). Exit 0 when every address does, 1 when
 # a link is dead or refused, or serves another file (it says which address), 2 on a network error
 # on this machine. If both kinds occur, 1 wins. The addresses and size are read from the code, so
@@ -44,7 +44,7 @@ check_one() {
   case "$code" in
     200|206) ;;
     429)
-      # A throttle (GitVerse limits release downloads), not a dead link: a warning, as long as another
+      # A throttle (a host limits release downloads), not a dead link: a warning, as long as another
       # address serves the file (the owner's decision, 2026-11-23).
       echo "check-game-link: warning: $url throttles downloads for now (HTTP 429); not counted as dead" >&2
       return 3 ;;

@@ -50,8 +50,8 @@ jobs:
           rm -rf site/.git site/.github
           rsync -a --delete wiki/dist/ site/wiki/
 
-      # The remote config the app reads (https://indicozy.github.io/razdor/config.json): the same file
-      # as GitVerse's (tools/gitverse/publish_config.py). Source: data/remote/config.json.
+      # The remote config the app reads (https://indicozy.github.io/razdor/config.json). Source:
+      # data/remote/config.json; the owner's server copies it from here (docs/specs/own-mirror-2026-11-24.md).
       - name: Put the remote config into the site
         run: cp data/remote/config.json site/config.json
 

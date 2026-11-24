@@ -1,9 +1,9 @@
-//! The service info the app reads from `config.json` on both Pages sites (GitHub first, GitVerse
+//! The service info the app reads from `config.json` (GitHub's Pages first, the owner's own server
 //! after): the update feed's addresses, the hub's sources and the game archive. Its source is
-//! `data/remote/config.json` (on both sites, the same bytes), so a change there needs no app
-//! release. The built-in values (`mirror`) are used until a fresh config arrives, or when none does;
-//! the last good config is kept in the cache folder and used at the next start. See
-//! `docs/specs/2026-11-13-gitverse-mirrors.md` (Remote config). Nothing here needs macroquad.
+//! `data/remote/config.json` (published to GitHub Pages, copied to the own server by `razdor-mirror`),
+//! so a change there needs no app release. The built-in values (`mirror`) are used until a fresh
+//! config arrives, or when none does; the last good config is kept in the cache folder and used at the
+//! next start. See `docs/specs/own-mirror-2026-11-24.md`. Nothing here needs macroquad.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -15,11 +15,12 @@ use crate::mirror;
 /// The schema this app reads. A config of another schema is ignored whole (the built-ins are used).
 pub const SCHEMA: u32 = 1;
 
-/// Where the config is, GitHub first (the owner's decision, 2026-11-22), GitVerse after. GitVerse's
-/// Pages answer an unknown path with HTTP 200 and an HTML page, so only a config that parses counts.
+/// Where the config is, GitHub's Pages first, the owner's own server after (the owner's decision,
+/// 2026-11-24). A copy that answers an unknown path with an HTML page is no config: only a config that
+/// parses counts.
 pub const ADDRESSES: [&str; 2] = [
     "https://indicozy.github.io/razdor/config.json",
-    "https://indicozy.gitverse.site/razdor-community/config.json",
+    "https://razdor.indicozy.dev/hub/pages/razdor/config.json",
 ];
 
 /// The analytics and cloud API's built-in address: the owner's site at `/api` (one domain and a path).
@@ -404,7 +405,7 @@ mod tests {
       "update_feed": ["https://feed.example/releases.json", "https://api.example/releases"],
       "hub": ["https://hub.example/razdor", "https://github.example/latest/download"],
       "game": {
-        "links": ["https://gitverse.example/game.zip", "https://github.example/game.zip"],
+        "links": ["https://github.example/game.zip", "https://own.example/game.zip"],
         "size": 1234,
         "sha256": "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789",
         "name": "game.zip"
@@ -420,7 +421,7 @@ mod tests {
         let c = good();
         assert_eq!(c.update_feed, vec!["https://feed.example/releases.json", "https://api.example/releases"]);
         assert_eq!(c.hub, vec!["https://hub.example/razdor", "https://github.example/latest/download"]);
-        assert_eq!(c.game.links, vec!["https://gitverse.example/game.zip", "https://github.example/game.zip"]);
+        assert_eq!(c.game.links, vec!["https://github.example/game.zip", "https://own.example/game.zip"]);
         assert_eq!(c.game.size, 1234);
         assert_eq!(c.game.sha256, "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789", "the SHA-256 is kept in lower case");
         assert_eq!(c.game.name, "game.zip");
@@ -523,7 +524,7 @@ mod tests {
             base.replace("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789", "abc"),
             base.replace("\"size\": 1234", "\"size\": 0"),
             base.replace("\"size\": 1234", &format!("\"size\": {}", crate::hub::MAX_ARCHIVE_DOWNLOAD + 1)),
-            base.replace("\"links\": [\"https://gitverse.example/game.zip\", \"https://github.example/game.zip\"]", "\"links\": [\"http://plain.example/g.zip\"]"),
+            base.replace("\"links\": [\"https://github.example/game.zip\", \"https://own.example/game.zip\"]", "\"links\": [\"http://plain.example/g.zip\"]"),
         ];
         for text in bad {
             assert_eq!(Config::parse(text.as_bytes()).unwrap().game, Config::builtin().game, "{text}");
@@ -536,7 +537,9 @@ mod tests {
         assert!(b.update_feed[0].starts_with("https://indicozy.github.io/"));
         assert!(b.hub[0].starts_with("https://github.com/"));
         assert_eq!(b.game.links[0], "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
-        assert_eq!(b.game.links[1], "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5");
+        assert_eq!(b.game.links[1], "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip");
+        assert!(b.update_feed[2].starts_with("https://razdor.indicozy.dev/hub/"), "the own copy is the feed's last");
+        assert!(b.hub.iter().all(|u| !u.contains("gitverse")), "no GitVerse address in the built-ins");
     }
 
     #[test]
@@ -672,33 +675,33 @@ mod tests {
     }
 
     #[test]
-    fn github_is_tried_first_and_its_valid_config_is_used_even_when_gitverse_answers_too() {
-        let (gh, gv) = (ADDRESSES[0], ADDRESSES[1]);
+    fn github_is_tried_first_and_its_valid_config_is_used_even_when_the_own_server_answers_too() {
+        let (gh, own) = (ADDRESSES[0], ADDRESSES[1]);
         assert_eq!(mirror::Host::of(gh), Some(mirror::Host::GitHub), "the config's first address is GitHub's");
-        assert_eq!(mirror::Host::of(gv), Some(mirror::Host::GitVerse));
+        assert_eq!(mirror::Host::of(own), Some(mirror::Host::Own));
         let asked = RefCell::new(Vec::new());
         let pick = resolve(
             &ADDRESSES,
             |url| {
                 asked.borrow_mut().push(url.to_string());
-                let body = if url == gh { GOOD.replace("game.zip", "github.zip") } else { GOOD.replace("game.zip", "gitverse.zip") };
+                let body = if url == gh { GOOD.replace("game.zip", "github.zip") } else { GOOD.replace("game.zip", "own.zip") };
                 Ok(body.into_bytes())
             },
             None,
         );
-        assert_eq!(pick.config.game.name, "github.zip", "GitHub's config, not GitVerse's");
+        assert_eq!(pick.config.game.name, "github.zip", "GitHub's config, not the own server's");
         assert_eq!(pick.from.as_deref(), Some(gh));
-        assert_eq!(asked.borrow().as_slice(), &[gh.to_string()], "GitVerse is not asked when GitHub answers validly");
+        assert_eq!(asked.borrow().as_slice(), &[gh.to_string()], "the own server is not asked when GitHub answers validly");
     }
 
     #[test]
-    fn a_github_failure_or_web_page_falls_back_to_gitverse_for_that_fetch() {
-        let (gh, gv) = (ADDRESSES[0], ADDRESSES[1]);
+    fn a_github_failure_or_web_page_falls_back_to_the_own_server_for_that_fetch() {
+        let (gh, own) = (ADDRESSES[0], ADDRESSES[1]);
         let pick = resolve(&ADDRESSES, |url| if url == gh { Err("stalled".into()) } else { Ok(GOOD.as_bytes().to_vec()) }, None);
-        assert_eq!(pick.from.as_deref(), Some(gv), "GitHub stalled: GitVerse answers this fetch");
+        assert_eq!(pick.from.as_deref(), Some(own), "GitHub stalled: the own server answers this fetch");
         let page = b"<!doctype html><html>Page not found</html>".to_vec();
         let pick = resolve(&ADDRESSES, |url| if url == gh { Ok(page.clone()) } else { Ok(GOOD.as_bytes().to_vec()) }, None);
-        assert_eq!(pick.from.as_deref(), Some(gv), "a web page is no config");
+        assert_eq!(pick.from.as_deref(), Some(own), "a web page is no config");
     }
 
     #[test]
@@ -712,9 +715,10 @@ mod tests {
     }
 
     #[test]
-    fn the_consumer_lists_keep_the_configs_order_github_first() {
+    fn the_consumer_lists_keep_the_configs_order_github_first_and_the_own_copy_second() {
         let c = Config::builtin();
         assert!(mirror::order(&c.update_feed)[0].starts_with("https://indicozy.github.io/"));
+        assert!(mirror::order(&c.hub)[1].starts_with("https://razdor.indicozy.dev/hub/"));
         assert!(mirror::order(&c.hub)[0].starts_with("https://github.com/"));
         assert!(mirror::order(&c.game.links)[0].starts_with("https://github.com/"));
         assert_eq!(mirror::order(&c.hub), refs(&c.hub), "nothing is learned: the config's order");

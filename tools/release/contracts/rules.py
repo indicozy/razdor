@@ -6,7 +6,7 @@ the program would refuse the file. Stdlib only; no network.
 
 Versions and what they read:
 - v1.4.1, v1.5.0: the GitHub API's release list (`parse_releases`), and the flat catalog `index.json`
-  of the GitHub hub release. They never read the GitVerse feed, the config or `index-v2.json`.
+  of the GitHub hub release. They never read the own mirror's feed, the config or `index-v2.json`.
 - v1.5.2, v1.5.3, v1.5.4 (the same hub.rs, update.rs, mirror.rs and remote_config.rs in all three):
   `releases.json` (the update feed), `config.json` (schema 1), `index-v2.json` and `index.json` of the
   hub (absolute https addresses or paths in the hub folder).

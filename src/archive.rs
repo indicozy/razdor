@@ -1,5 +1,5 @@
 //! One file taken out of a zip archive: the updater's program (the member of a release's zip) and
-//! the hub's file wrapped in a zip (`hub::FileRef::wrapped`, a map on GitVerse). Nothing here needs
+//! the hub's file wrapped in a zip (`hub::FileRef::wrapped`, a map on the hub's mirror). Nothing here needs
 //! macroquad or a platform; the caller checks the bytes it gets (size and SHA-256).
 
 use std::io::Read;

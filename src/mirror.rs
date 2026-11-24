@@ -1,14 +1,15 @@
 //! The built-in addresses Razdor reads and downloads from, each list in the order it is tried:
-//! GitHub first, GitVerse as the fallback mirror for players in Russia. They are the defaults of the
-//! remote config (`remote_config::Config::builtin`): the lists in use are the config's, which the
-//! app takes from `config.json` (see `remote_config`). See `docs/specs/2026-11-13-gitverse-mirrors.md`.
+//! GitHub first, then the owner's own server (`razdor.indicozy.dev/hub/`, see
+//! `docs/specs/own-mirror-2026-11-24.md`). They are the defaults of the remote config
+//! (`remote_config::Config::builtin`): the lists in use are the config's, which the app takes from
+//! `config.json` (see `remote_config`).
 //!
-//! The rule (the owner's decision, 2026-11-23): GitHub is tried first on every request, and GitVerse
+//! The rule (the owner's decision, 2026-11-24): GitHub is tried first on every request, the own server
 //! is only that request's fallback. Nothing is learned or remembered between requests or launches: a
-//! GitHub failure in one request does not change the order of the next. The list is always the
-//! config's order ([`order`]). A host paused by a throttle (429, 503) goes last for its requests while
-//! the pause lasts (`throttled`, `wait_host`); the pauses are per session. A `mirror-pref.json` left
-//! by an older build (it saved a learned primary) is deleted at start ([`remove_old_pref`]).
+//! failure in one request does not change the order of the next. The list is always the config's order
+//! ([`order`]). A host paused by a throttle (429, 503) goes last for its requests while the pause lasts
+//! (`throttled`, `wait_host`); a stalled own server pauses for [`OWN_STALL_PAUSE`]; the pauses are per
+//! session. A `mirror-pref.json` left by an older build is deleted at start ([`remove_old_pref`]).
 //! `RAZDOR_HUB` is one explicit source and is never reordered. Nothing here needs macroquad.
 
 use std::collections::BTreeMap;
@@ -20,44 +21,56 @@ use std::time::Duration;
 
 use web_time::Instant;
 
+/// The owner's own server's root for the mirror (`/hub/`, filled from GitHub by `razdor-mirror`).
+pub const OWN_HUB: &str = "https://razdor.indicozy.dev/hub";
+
 /// The built-in update feed: the release list in the GitHub API's shape. GitHub's Pages copy is a
-/// static file of the community's Pages, tried first; the API is the next fallback (it allows 60
-/// anonymous requests an hour per IP); GitVerse's copy of the same file comes last. A copy that is not
-/// there (404) gives way to the next.
+/// static file of the community's Pages, tried first (it answers 404 today); the API is the next
+/// fallback (it allows 60 anonymous requests an hour per IP); the own server's generated copy of the
+/// same list comes last. A copy that is not there (404) gives way to the next.
 pub const UPDATE_FEED: [&str; 3] = [
     "https://indicozy.github.io/razdor-community/releases.json",
     "https://api.github.com/repos/indicozy/razdor/releases?per_page=30",
-    "https://indicozy.gitverse.site/razdor-community/releases.json",
+    "https://razdor.indicozy.dev/hub/pages/razdor-community/releases.json",
 ];
 
 /// The built-in hub folders: the catalog's `index.json` names the files, resolved against the folder
-/// that gave the catalog. GitHub's is `hub::DEFAULT_SOURCE`, then GitVerse's Pages.
-pub const HUB: [&str; 2] = [crate::hub::DEFAULT_SOURCE, "https://indicozy.gitverse.site/razdor-community"];
+/// that gave the catalog. GitHub's is `hub::DEFAULT_SOURCE`, then the own server's copy of it.
+pub const HUB: [&str; 2] = [crate::hub::DEFAULT_SOURCE, "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/latest/download"];
 
-/// The built-in game archive (`gdrive::game` gives the one in use): GitHub's release file, then
-/// GitVerse's attachment.
+/// The built-in game archive (`gdrive::game` gives the one in use): GitHub's release file, then the
+/// own server's copy.
 pub const GAME: [&str; 2] = [
     "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip",
-    "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5",
+    "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip",
 ];
 
 /// The file an older build saved its learned primary in, in the cache folder (`platform::cache_dir`).
 /// Nothing writes it now; a leftover one is deleted at start ([`remove_old_pref`]).
 const PREF_FILE: &str = "mirror-pref.json";
 
-/// The two hosts Razdor downloads from. GitHub is `github.com`, `api.github.com`, `*.github.io` and the
-/// release file hosts; GitVerse is `gitverse.ru` and `*.gitverse.site` (the Pages), the fallback.
+/// The hosts Razdor downloads from. GitHub is `github.com`, `api.github.com`, `*.github.io` and the
+/// release file hosts; Own is the owner's server, and only its `/hub/` paths (its `/api` is the
+/// telemetry and cloud API, which has no pauses of its own here).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Host {
-    GitVerse,
+    Own,
     GitHub,
 }
+
+/// The owner's GitHub repos the own server mirrors (`/hub/<owner>/<repo>/...`): nothing else has an
+/// own copy.
+const MIRRORED_OWNER: &str = "indicozy";
+const MIRRORED_REPOS: [&str; 2] = ["razdor", "razdor-community"];
+
+/// How long a stalled own server is paused (see [`stalled`]).
+pub const OWN_STALL_PAUSE: Duration = Duration::from_secs(60);
 
 impl Host {
     /// The word the saved file and the log use.
     pub fn name(self) -> &'static str {
         match self {
-            Host::GitVerse => "gitverse",
+            Host::Own => "own",
             Host::GitHub => "github",
         }
     }
@@ -65,18 +78,75 @@ impl Host {
     /// The host of an `https://` address, or `None` for a host that is neither (a folder, a test server).
     pub fn of(url: &str) -> Option<Host> {
         let rest = url.strip_prefix("https://")?;
-        let host = rest.split(['/', '?', '#']).next()?.rsplit('@').next()?.split(':').next()?.to_ascii_lowercase();
-        let gitverse = host == "gitverse.ru" || host.ends_with(".gitverse.ru") || host.ends_with(".gitverse.site");
+        let (host, path) = match rest.find(['/', '?', '#']) {
+            Some(i) => (&rest[..i], &rest[i..]),
+            None => (rest, ""),
+        };
+        let host = host.rsplit('@').next()?.split(':').next()?.to_ascii_lowercase();
+        if host == "razdor.indicozy.dev" {
+            return path.starts_with("/hub/").then_some(Host::Own);
+        }
         let github = host == "github.com"
             || host == "api.github.com"
             || host.ends_with(".github.io")
             || host == "objects.githubusercontent.com"
             || host == "release-assets.githubusercontent.com";
-        match (gitverse, github) {
-            (true, _) => Some(Host::GitVerse),
-            (_, true) => Some(Host::GitHub),
-            _ => None,
-        }
+        github.then_some(Host::GitHub)
+    }
+}
+
+/// The own server's copy of a GitHub address, by the prefix swap of `docs/specs/own-mirror-2026-11-24.md`
+/// (`https://github.com/<o>/<r>/<p>` -> `OWN_HUB/<o>/<r>/<p>`, `https://<o>.github.io/<r>/<p>` ->
+/// `OWN_HUB/pages/<r>/<p>`), for the owner's repos only. `None` for any other address.
+pub fn own_copy(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://")?;
+    if let Some(path) = rest.strip_prefix("github.com/") {
+        let mut parts = path.splitn(3, '/');
+        let (owner, repo, tail) = (parts.next()?, parts.next()?, parts.next()?);
+        return mirrored(owner, repo).then(|| format!("{OWN_HUB}/{owner}/{repo}/{tail}"));
+    }
+    let (host, path) = rest.split_once('/')?;
+    let owner = host.strip_suffix(".github.io")?;
+    let (repo, tail) = path.split_once('/')?;
+    mirrored(owner, repo).then(|| format!("{OWN_HUB}/pages/{repo}/{tail}"))
+}
+
+/// The GitHub copy of an own-server address (the inverse of [`own_copy`]): `OWN_HUB/<o>/<r>/<p>` ->
+/// `https://github.com/<o>/<r>/<p>` and `OWN_HUB/pages/<r>/<p>` -> `https://<o>.github.io/<r>/<p>`.
+/// `None` for any other address.
+pub fn github_copy(url: &str) -> Option<String> {
+    let path = url.strip_prefix(OWN_HUB)?.strip_prefix('/')?;
+    if let Some(pages) = path.strip_prefix("pages/") {
+        let (repo, tail) = pages.split_once('/')?;
+        return mirrored(MIRRORED_OWNER, repo).then(|| format!("https://{MIRRORED_OWNER}.github.io/{repo}/{tail}"));
+    }
+    let mut parts = path.splitn(3, '/');
+    let (owner, repo, tail) = (parts.next()?, parts.next()?, parts.next()?);
+    mirrored(owner, repo).then(|| format!("https://github.com/{owner}/{repo}/{tail}"))
+}
+
+/// True for the owner's own repos (the ones the own server mirrors).
+fn mirrored(owner: &str, repo: &str) -> bool {
+    owner == MIRRORED_OWNER && MIRRORED_REPOS.contains(&repo)
+}
+
+/// The addresses to try for one file, in order: a GitHub address first, then its own copy
+/// (`[github, own]`); an own address first as its GitHub copy, then itself (`[github, own]`).
+/// Any other address is alone. Nothing is learned: the same list on every request.
+pub fn expand(url: &str) -> Vec<String> {
+    match Host::of(url) {
+        Some(Host::GitHub) => std::iter::once(url.to_string()).chain(own_copy(url)).collect(),
+        Some(Host::Own) => github_copy(url).into_iter().chain(std::iter::once(url.to_string())).collect(),
+        None => vec![url.to_string()],
+    }
+}
+
+/// How long a request to the address may stall or wait to connect before it gives way: 10 s for the own
+/// server (a down server costs a few seconds), 30 s for the rest.
+pub fn stall_seconds(url: &str) -> u64 {
+    match Host::of(url) {
+        Some(Host::Own) => 10,
+        _ => 30,
     }
 }
 
@@ -137,7 +207,7 @@ pub fn is_throttle(why: &str) -> bool {
         .any(|s| why.match_indices(s).any(|(i, _)| !why[i + s.len()..].starts_with(|c: char| c.is_ascii_digit())))
 }
 
-/// The host part of an `https://` address, for the log (`indicozy.gitverse.site`); "" for none.
+/// The host part of an `https://` address, for the log (`razdor.indicozy.dev`); "" for none.
 fn host_of(url: &str) -> &str {
     let rest = url.strip_prefix("https://").unwrap_or(url);
     rest.split(['/', '?', '#']).next().unwrap_or("").rsplit('@').next().unwrap_or("").split(':').next().unwrap_or("")
@@ -177,6 +247,13 @@ impl Pauses {
     /// How long `host`'s requests still wait at `now`.
     pub fn remaining(&self, host: Host, now: Instant) -> Duration {
         self.hosts.get(host.name()).map_or(Duration::ZERO, |p| p.until.saturating_duration_since(now))
+    }
+
+    /// `host` stalled or could not connect at `now`: it is paused for [`OWN_STALL_PAUSE`] (the level of
+    /// throttles is not changed).
+    pub fn stalled(&mut self, host: Host, now: Instant) {
+        let entry = self.hosts.entry(host.name()).or_insert(Pause { until: now, level: 0 });
+        entry.until = entry.until.max(now + OWN_STALL_PAUSE);
     }
 
     /// `host` answered: its pause and its level are gone.
@@ -221,6 +298,15 @@ pub fn answered(url: &str) {
     }
 }
 
+/// A stall or a failed connect to the address's host: the own server is paused for a minute
+/// ([`Pauses::stalled`]); the other hosts change nothing.
+pub fn stalled(url: &str) {
+    if let Some(host @ Host::Own) = Host::of(url) {
+        pauses().stalled(host, Instant::now());
+        crate::diag!("http: {}: stalled, paused for {} s", host_of(url), OWN_STALL_PAUSE.as_secs());
+    }
+}
+
 /// True while the address's host is paused.
 pub fn paused(url: &str) -> bool {
     Host::of(url).is_some_and(|host| !pauses().remaining(host, Instant::now()).is_zero())
@@ -246,6 +332,9 @@ pub fn wait_host(url: &str, stopped: &dyn Fn() -> bool) {
 pub fn note_failure(url: &str, why: &str, retry_after: Option<u64>) {
     let retry = retry_after.map_or_else(|| "none".to_string(), |s| s.to_string());
     crate::diag!("http: {}: {why} (retry-after {retry})", host_of(url));
+    if why == crate::update::STALLED {
+        stalled(url);
+    }
     if is_throttle(why) {
         throttled(url, retry_after);
     }
@@ -290,8 +379,8 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    const GV: &str = "https://indicozy.gitverse.site/razdor-community/releases.json";
-    const GV2: &str = "https://gitverse.ru/api/attachments/36c22adf-f3f3-4286-a474-9b6a00a5abc5";
+    const OWN: &str = "https://razdor.indicozy.dev/hub/pages/razdor-community/releases.json";
+    const OWN2: &str = "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v1/razdor-1-linux";
     const GH: &str = "https://api.github.com/repos/indicozy/razdor/releases?per_page=30";
     const GH2: &str = "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip";
     const OTHER: &str = "https://other.example/x.json";
@@ -322,31 +411,94 @@ mod tests {
     }
 
     #[test]
-    fn the_addresses_are_github_first_and_gitverse_the_fallback() {
+    fn the_addresses_are_github_first_and_the_own_server_the_fallback() {
         assert_eq!(UPDATE_FEED[0], "https://indicozy.github.io/razdor-community/releases.json", "the Pages copy first");
-        assert!(UPDATE_FEED[1].starts_with("https://api.github.com/"), "the API is the next fallback");
-        assert!(UPDATE_FEED[2].starts_with("https://indicozy.gitverse.site/"), "GitVerse's copy is the last");
+        assert!(UPDATE_FEED[1].starts_with("https://api.github.com/"), "the API is the next");
+        assert!(UPDATE_FEED[2].starts_with("https://razdor.indicozy.dev/hub/"), "the own server's copy is the last");
         assert!(HUB[0].starts_with("https://github.com/"));
-        assert!(HUB[1].starts_with("https://indicozy.gitverse.site/"));
+        assert!(HUB[1].starts_with("https://razdor.indicozy.dev/hub/"));
         assert_eq!(HUB[0], crate::hub::DEFAULT_SOURCE);
         assert!(GAME[0].starts_with("https://github.com/"));
-        assert!(GAME[1].starts_with("https://gitverse.ru/api/attachments/"));
+        assert!(GAME[1].starts_with("https://razdor.indicozy.dev/hub/"));
+        for list in [&UPDATE_FEED[..], &HUB[..], &GAME[..]] {
+            assert!(list.iter().all(|u| !u.contains("gitverse")), "no GitVerse address is built in");
+        }
     }
 
     #[test]
     fn each_address_belongs_to_its_host_and_others_to_none() {
-        assert_eq!(Host::of(GV), Some(Host::GitVerse));
-        assert_eq!(Host::of(GV2), Some(Host::GitVerse));
-        assert_eq!(Host::of("https://gitverse.ru/x"), Some(Host::GitVerse));
+        assert_eq!(Host::of(OWN), Some(Host::Own));
+        assert_eq!(Host::of(OWN2), Some(Host::Own));
         assert_eq!(Host::of(GH), Some(Host::GitHub));
         assert_eq!(Host::of(GH2), Some(Host::GitHub));
         assert_eq!(Host::of("https://indicozy.github.io/razdor/config.json"), Some(Host::GitHub));
         assert_eq!(Host::of("https://objects.githubusercontent.com/x"), Some(Host::GitHub));
         assert_eq!(Host::of("https://release-assets.githubusercontent.com/x"), Some(Host::GitHub));
-        assert_eq!(Host::of("https://INDICOZY.GITVERSE.SITE:443/x"), Some(Host::GitVerse), "the host is not case sensitive");
+        assert_eq!(Host::of("https://RAZDOR.indicozy.dev:443/hub/x"), Some(Host::Own), "the host is not case sensitive");
+        assert_eq!(Host::of("https://razdor.indicozy.dev/api/v1/telemetry"), None, "the API has no mirror pauses");
+        assert_eq!(Host::of("https://razdor.indicozy.dev/hubx/x"), None, "only the /hub/ paths");
+        assert_eq!(Host::of("https://razdor.indicozy.dev.evil.example/hub/x"), None);
         assert_eq!(Host::of(OTHER), None);
         assert_eq!(Host::of("http://indicozy.github.io/x"), None, "https only");
         assert_eq!(Host::of("https://github.com.evil.example/x"), None);
+        assert_eq!(Host::of("https://gitverse.ru/api/attachments/x"), None, "GitVerse is no mirror any more");
+    }
+
+    #[test]
+    fn own_copy_and_github_copy_are_inverse_and_only_for_the_owners_repos() {
+        let gh = "https://github.com/indicozy/razdor-community/releases/latest/download/index.json";
+        let own = "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/latest/download/index.json";
+        assert_eq!(own_copy(gh).as_deref(), Some(own));
+        assert_eq!(github_copy(own).as_deref(), Some(gh));
+        let pages = "https://indicozy.github.io/razdor/config.json";
+        let own_pages = "https://razdor.indicozy.dev/hub/pages/razdor/config.json";
+        assert_eq!(own_copy(pages).as_deref(), Some(own_pages));
+        assert_eq!(github_copy(own_pages).as_deref(), Some(pages));
+        assert_eq!(own_copy("https://github.com/someone/razdor/x"), None, "another owner has no own copy");
+        assert_eq!(own_copy("https://github.com/indicozy/other/x"), None, "another repo has no own copy");
+        assert_eq!(own_copy("https://api.github.com/repos/indicozy/razdor/releases"), None, "the API has no own copy");
+        assert_eq!(github_copy("https://razdor.indicozy.dev/hub/someone/razdor/x"), None);
+        assert_eq!(github_copy("https://razdor.indicozy.dev/api/x"), None);
+        assert_eq!(own_copy(OWN), None, "an own address is not a GitHub one");
+    }
+
+    #[test]
+    fn expand_puts_github_first_and_the_own_copy_after_it() {
+        let gh = "https://github.com/indicozy/razdor/releases/download/v1.6.0/razdor-1.6.0-linux";
+        let own = "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v1.6.0/razdor-1.6.0-linux";
+        assert_eq!(expand(gh), vec![gh.to_string(), own.to_string()]);
+        assert_eq!(expand(own), vec![gh.to_string(), own.to_string()], "an own address is tried as its GitHub copy first");
+        assert_eq!(expand(OTHER), vec![OTHER.to_string()], "any other address is alone");
+        assert_eq!(expand(GH), vec![GH.to_string(), "https://api.github.com/repos/indicozy/razdor/releases?per_page=30".to_string()].into_iter().take(1).chain(own_copy(GH)).collect::<Vec<_>>(), "an API address has no copy");
+    }
+
+    #[test]
+    fn the_own_host_has_ten_second_timeouts_and_others_thirty() {
+        assert_eq!(stall_seconds(OWN), 10);
+        assert_eq!(stall_seconds(GH), 30);
+        assert_eq!(stall_seconds(OTHER), 30);
+    }
+
+    #[test]
+    fn a_stalled_own_host_is_paused_for_a_minute_and_a_github_stall_changes_nothing() {
+        let now = Instant::now();
+        let mut pauses = Pauses::default();
+        pauses.stalled(Host::Own, now);
+        assert_eq!(pauses.remaining(Host::Own, now), OWN_STALL_PAUSE);
+        assert_eq!(pauses.remaining(Host::GitHub, now), Duration::ZERO, "GitHub is not held back");
+        assert_eq!(pauses.throttled(Host::Own, now, None, 0.5), Duration::from_secs(2), "a stall does not raise the throttle level");
+        pauses.answered(Host::Own);
+        assert_eq!(pauses.remaining(Host::Own, now), Duration::ZERO);
+    }
+
+    #[test]
+    fn an_api_throttle_does_not_pause_the_mirror() {
+        let now = Instant::now();
+        let mut pauses = Pauses::default();
+        let api = "https://razdor.indicozy.dev/api/v1/telemetry";
+        assert_eq!(Host::of(api), None);
+        pauses.throttled(Host::GitHub, now, Some(5), 0.5);
+        assert_eq!(pauses.remaining(Host::Own, now), Duration::ZERO, "the own host is not paused by a GitHub throttle");
     }
 
     #[test]
@@ -370,9 +522,9 @@ mod tests {
 
     #[test]
     fn a_throttled_host_is_held_last_and_the_others_keep_their_order() {
-        let list = [GV, GH, OTHER, GV2];
-        let held = |u: &str| Host::of(u) == Some(Host::GitVerse);
-        assert_eq!(held_last_by(list.to_vec(), held), vec![GH, OTHER, GV, GV2]);
+        let list = [OWN, GH, OTHER, OWN2];
+        let held = |u: &str| Host::of(u) == Some(Host::Own);
+        assert_eq!(held_last_by(list.to_vec(), held), vec![GH, OTHER, OWN, OWN2]);
         assert_eq!(held_last_by(list.to_vec(), |_| false), list.to_vec(), "nothing held: the list as it is");
     }
 
@@ -380,17 +532,17 @@ mod tests {
     fn a_pause_is_shared_by_one_host_grows_without_a_retry_after_and_is_reset_by_an_answer() {
         let now = Instant::now();
         let mut pauses = Pauses::default();
-        let first = pauses.throttled(Host::GitVerse, now, None, 0.5);
+        let first = pauses.throttled(Host::Own, now, None, 0.5);
         assert_eq!(first, Duration::from_secs(2), "no Retry-After: 2 s at the middle of the jitter");
-        let second = pauses.throttled(Host::GitVerse, now, None, 0.5);
+        let second = pauses.throttled(Host::Own, now, None, 0.5);
         assert_eq!(second, Duration::from_secs(4), "the next throttle in a row is longer");
-        assert_eq!(pauses.remaining(Host::GitVerse, now), Duration::from_secs(4), "one pause for the whole host");
+        assert_eq!(pauses.remaining(Host::Own, now), Duration::from_secs(4), "one pause for the whole host");
         assert_eq!(pauses.remaining(Host::GitHub, now), Duration::ZERO, "another host is not held back");
-        assert_eq!(pauses.throttled(Host::GitVerse, now, Some(7), 0.5), Duration::from_secs(7), "Retry-After is honoured");
-        assert_eq!(pauses.throttled(Host::GitVerse, now, Some(999), 0.5), Duration::from_secs(60), "and capped");
-        pauses.answered(Host::GitVerse);
-        assert_eq!(pauses.remaining(Host::GitVerse, now), Duration::ZERO);
-        assert_eq!(pauses.throttled(Host::GitVerse, now, None, 0.5), Duration::from_secs(2), "the level starts again");
+        assert_eq!(pauses.throttled(Host::Own, now, Some(7), 0.5), Duration::from_secs(7), "Retry-After is honoured");
+        assert_eq!(pauses.throttled(Host::Own, now, Some(999), 0.5), Duration::from_secs(60), "and capped");
+        pauses.answered(Host::Own);
+        assert_eq!(pauses.remaining(Host::Own, now), Duration::ZERO);
+        assert_eq!(pauses.throttled(Host::Own, now, None, 0.5), Duration::from_secs(2), "the level starts again");
     }
 
     #[test]
@@ -433,7 +585,7 @@ mod tests {
 
     #[test]
     fn the_order_is_the_configs_whatever_came_before() {
-        let list = [GH, GV, OTHER, GH2, GV2];
+        let list = [GH, OWN, OTHER, GH2, OWN2];
         assert_eq!(order(&list), list.to_vec(), "the config's order: no learned primary");
         let owned: Vec<String> = list.iter().map(|s| s.to_string()).collect();
         assert_eq!(ordered_owned(&owned), owned, "the owned list is ordered the same");
@@ -441,9 +593,9 @@ mod tests {
 
     #[test]
     fn a_github_failure_in_one_request_does_not_change_the_next_requests_order() {
-        let list = [GH, GV];
+        let list = [GH, OWN];
         let got = first_ok("test", &list, |url| if url == GH { Err("stalled".into()) } else { Ok(9) });
-        assert_eq!(got, Ok(9), "GitVerse answers this request as its fallback");
+        assert_eq!(got, Ok(9), "the own server answers this request as its fallback");
         let asked = RefCell::new(Vec::new());
         let got = first_ok("test", &list, |url| {
             asked.borrow_mut().push(url.to_string());
@@ -459,8 +611,8 @@ mod tests {
         let mut pauses = Pauses::default();
         pauses.throttled(Host::GitHub, now, Some(30), 0.5);
         let held = |u: &str| Host::of(u).is_some_and(|h| !pauses.remaining(h, now).is_zero());
-        let list = [GH, GV, OTHER, GH2, GV2];
-        assert_eq!(held_last_by(list.to_vec(), held), vec![GV, OTHER, GV2, GH, GH2], "GitHub is paused: last, in its order");
+        let list = [GH, OWN, OTHER, GH2, OWN2];
+        assert_eq!(held_last_by(list.to_vec(), held), vec![OWN, OTHER, OWN2, GH, GH2], "GitHub is paused: last, in its order");
         pauses.answered(Host::GitHub);
         let held = |u: &str| Host::of(u).is_some_and(|h| !pauses.remaining(h, now).is_zero());
         assert_eq!(held_last_by(list.to_vec(), held), list.to_vec(), "the answer ends the pause: GitHub first again");
@@ -471,7 +623,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("razdor-mirror-old-pref-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir);
         let path = dir.join(PREF_FILE);
-        fs::write(&path, br#"{"host":"gitverse","since":1763000000,"order":2}"#).unwrap();
+        fs::write(&path, br#"{"host":"github","since":1763000000,"order":2}"#).unwrap();
         remove_pref_file(&path);
         assert!(!path.exists(), "the old file is removed");
         remove_pref_file(&path);

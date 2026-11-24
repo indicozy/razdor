@@ -1,5 +1,5 @@
 //! Parallel byte ranges: a big file is fetched in pieces at once when the server answers Range
-//! requests (GitVerse gives about 140-500 KB/s per connection; eight connections add up).
+//! requests (a server gives a few hundred KB/s per connection; eight connections add up).
 //!
 //! The rule: a first request for byte 0 only (the probe) tells the size and whether ranges work.
 //! A 206 with a size over [`MIN_SIZE`] (and not over the cap) gets [`PIECES`] pieces at once, each
@@ -40,8 +40,6 @@ use web_time::Instant;
 
 /// The pieces a file is fetched in at once.
 pub const PIECES: u64 = 8;
-/// The pieces at once for a gitverse.ru address: GitVerse answers 429 (rate limit) to eight.
-pub const PIECES_GITVERSE: u64 = 4;
 /// The waits a piece (or the probe) takes for a 429 or 503 that gives a `Retry-After`: at most this many,
 /// each for the server's time (capped at [`MAX_RETRY_AFTER`]). A throttle with no `Retry-After` gives
 /// the address up at once.
@@ -106,14 +104,10 @@ pub trait RangeNet: Sync {
     }
 }
 
-/// The pieces a file from `url` is fetched in at once: [`PIECES_GITVERSE`] for a gitverse.ru
-/// address, else [`PIECES`].
-pub fn pieces_for(url: &str) -> u64 {
-    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://")).unwrap_or(url);
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
-    let host = host.split(':').next().unwrap_or("").to_ascii_lowercase();
-    if host == "gitverse.ru" || host.ends_with(".gitverse.ru") { PIECES_GITVERSE } else { PIECES }
+/// The pieces a file from `url` is fetched in at once: [`PIECES`] for every host (GitHub and the own
+/// server both answer eight connections; a host that throttles is handled by its pause, not here).
+pub fn pieces_for(_url: &str) -> u64 {
+    PIECES
 }
 
 /// A status that asks to wait and try again (rate limit, or the server busy).
@@ -937,7 +931,6 @@ mod tests {
         assert!(small.iter().all(|(s, e)| e - s + 1 == 512 << 10));
         // The sizes add up exactly, also when the size does not divide.
         let odd = layout(9 * MIB + 7, PIECES);
-        assert!(layout(10 * MIB, PIECES_GITVERSE).len() == 4, "at most four for GitVerse");
         assert_eq!(odd.iter().map(|(s, e)| e - s + 1).sum::<u64>(), 9 * MIB + 7);
     }
 
@@ -1265,19 +1258,14 @@ mod tests {
     }
 
     #[test]
-    fn gitverse_gets_four_pieces_and_other_hosts_eight() {
-        assert_eq!(pieces_for("https://gitverse.ru/api/attachments/x"), PIECES_GITVERSE);
-        assert_eq!(pieces_for("https://GitVerse.ru:443/x"), PIECES_GITVERSE);
-        assert_eq!(pieces_for("https://api.gitverse.ru/x"), PIECES_GITVERSE);
+    fn every_host_gets_eight_pieces() {
         assert_eq!(pieces_for("https://github.com/indicozy/razdor-community/releases/x"), PIECES);
-        assert_eq!(pieces_for("https://indicozy.gitverse.site/razdor-community/index.json"), PIECES);
-        assert_eq!(pieces_for("https://gitverse.ru.example.org/x"), PIECES);
-        assert_eq!(pieces_for("https://evil.example/gitverse.ru/x"), PIECES);
-        let dir = scratch("gitverse-pieces");
+        assert_eq!(pieces_for("https://razdor.indicozy.dev/hub/indicozy/razdor/x"), PIECES);
+        let dir = scratch("own-pieces");
         let dest = dir.join("big.zip");
         let net = Fake::new(body(10 * MIB as usize));
-        assert_eq!(fetch(&net, "https://gitverse.ru/api/attachments/x", &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
-        assert_eq!(net.log.lock().unwrap().len(), 5, "the probe and four pieces");
+        assert_eq!(fetch(&net, "https://razdor.indicozy.dev/hub/indicozy/razdor/x", &dest, u64::MAX, &|_| {}, &no_cancel), Ok(Parted::Joined));
+        assert_eq!(net.log.lock().unwrap().len(), 1 + PIECES as usize, "the probe and eight pieces");
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1318,7 +1306,7 @@ mod tests {
     /// failing once on the way, then a cancel. A manual run (`#[ignore]`), against the local server:
     /// `RAZDOR_RANGE_E2E_DIR=<empty dir> [RAZDOR_RANGE_E2E_THROTTLE=300000] [RAZDOR_RANGE_E2E_CLEAN=1]
     /// [RAZDOR_RANGE_E2E_NO_RANGE=1] cargo test --profile fasttest --lib parts::tests::desktop_end_to_end -- --ignored --nocapture`.
-    /// `..._THROTTLE` is bytes a second per connection (the GitVerse speed), `..._CLEAN` skips the
+    /// `..._THROTTLE` is bytes a second per connection (a slow mirror's speed), `..._CLEAN` skips the
     /// faults, `..._NO_RANGE` makes the server ignore Range (one stream for the timing).
     #[test]
     #[ignore = "runs curl against a local Python range server: a manual run"]

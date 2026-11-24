@@ -376,12 +376,12 @@ fn curl_program() -> PathBuf {
 /// `curl` with its window hidden on Windows (Razdor has no console there). It does not fail on an
 /// HTTP error status by itself (see [`curl`]).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn curl_base() -> Command {
+fn curl_base(url: &str) -> Command {
     let mut c = Command::new(curl_program());
     // The tests' range server is plain HTTP on 127.0.0.1; the app asks https only.
     let proto = if cfg!(test) { "=http,https" } else { "=https" };
     c.args(["-sSL", "--proto", proto, "-A", concat!("razdor/", env!("CARGO_PKG_VERSION"))]);
-    c.args(stall_args());
+    c.args(stall_args(url));
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -393,17 +393,18 @@ fn curl_base() -> Command {
 
 /// `curl` that fails on an HTTP error status (its body is then not written).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn curl() -> Command {
-    let mut c = curl_base();
+fn curl(url: &str) -> Command {
+    let mut c = curl_base(url);
     c.arg("-f");
     c
 }
 
-/// The options that stop a stalled transfer: no connection within [`STALL_SECONDS`], and fewer
-/// than one byte a second for [`STALL_SECONDS`]. Curl then exits with code 28 ([`curl_why`]).
+/// The options that stop a stalled transfer: no connection within the address's stall time, and fewer
+/// than one byte a second for as long (`mirror::stall_seconds`: 10 s for the own server, else
+/// [`STALL_SECONDS`]). Curl then exits with code 28 ([`curl_why`]).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn stall_args() -> Vec<String> {
-    let s = STALL_SECONDS.to_string();
+fn stall_args(url: &str) -> Vec<String> {
+    let s = mirror::stall_seconds(url).to_string();
     ["--connect-timeout", &s, "--speed-limit", "1", "--speed-time", &s].iter().map(|a| a.to_string()).collect()
 }
 
@@ -454,7 +455,7 @@ fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
 /// One request for the body of `url` (see [`fetch`]).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn fetch_once(url: &str, seconds: u32) -> Result<Vec<u8>, String> {
-    let out = curl()
+    let out = curl(url)
         .args(["--max-time", &seconds.to_string(), url])
         .output()
         .map_err(|e| format!("curl: {e}"))?;
@@ -475,7 +476,7 @@ pub(crate) fn post(url: &str, body: &[u8], seconds: u32, version: &str, commit: 
     // The body goes on stdin, never on the command line (it can be a few megabytes).
     // The response headers go to a private file (`-D`): the Retry-After is read from it.
     let dump = crate::cloud::http::HeaderFile::new("").map_err(|e| format!("curl: header dump: {e}"))?;
-    let mut cmd = curl_base();
+    let mut cmd = curl_base(url);
     cmd.args(["--max-time", &seconds.to_string(), "-X", "POST", "-H", "Content-Type: application/json"])
         .args(["-H", &format!("{}: {version}", razdor_wire::paths::VERSION_HEADER)])
         .args(["-H", &format!("{}: {commit}", razdor_wire::paths::COMMIT_HEADER)])
@@ -588,7 +589,7 @@ pub(crate) fn fetch_conditional(url: &str, seconds: u32, have: &Validators) -> R
 /// headers written to the output (`-D -`), parsed by [`parse_conditional`].
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn conditional_once(url: &str, seconds: u32, have: &Validators) -> Result<Conditional, String> {
-    let mut cmd = curl_base();
+    let mut cmd = curl_base(url);
     cmd.args(["--max-time", &seconds.to_string(), "-D", "-"]);
     if let Some(tag) = &have.etag {
         cmd.args(["-H", &format!("If-None-Match: {tag}")]);
@@ -739,7 +740,7 @@ struct ApiRelease {
 struct ApiAsset {
     name: String,
     browser_download_url: String,
-    /// `"zip"` for an archive (GitVerse's mirror packs the programs that its file names refuse).
+    /// `"zip"` for an archive (a mirror packs the programs that its file names refuse).
     #[serde(default)]
     archive: Option<String>,
     /// The file inside a zip archive that is the program.
@@ -796,7 +797,7 @@ pub fn parse_releases(json: &[u8], current: Version, asset: &str) -> Result<Opti
     let Some((version, newest)) = newer.first() else { return Ok(None) };
     let find = |name: &str| newest.assets.iter().find(|a| a.name == name);
     // Copies on old updaters know only the fixed name; new releases also carry the versioned one.
-    // A zip (the GitVerse mirror's) is found by the program's fixed name, which it holds as `member`.
+    // A zip (a mirror's) is found by the program's fixed name, which it holds as `member`.
     let file = |name: &str| find(name).map(|a| (name.to_string(), a.browser_download_url.clone(), None));
     let zip = || {
         newest
@@ -917,7 +918,7 @@ pub(crate) fn download_known(url: &str, path: &Path, seconds: u32, max_bytes: u6
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn download_one(url: &str, path: &Path, seconds: u32, max_bytes: u64) -> Result<(), String> {
     mirror::wait_host(url, &|| false);
-    let out = curl()
+    let out = curl(url)
         // curl's size limit is a signed 64-bit number.
         .args(["--max-time", &seconds.to_string(), "--max-filesize", &max_bytes.min(i64::MAX as u64).to_string(), "-o"])
         .arg(path)
@@ -988,7 +989,7 @@ impl parts::RangeNet for Ranged {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn range_request(url: &str, path: &Path, start: u64, end: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<parts::RangeReply, String> {
     mirror::wait_host(url, cancelled);
-    let mut cmd = curl_base();
+    let mut cmd = curl_base(url);
     cmd.args(["--max-time", &seconds.to_string(), "--max-filesize", &(end - start + 1).to_string()])
         .args(["-r", &format!("{start}-{end}"), "-w", "%{http_code} %header{content-range}|%header{retry-after}", "-o"])
         .arg(path)
@@ -1083,7 +1084,7 @@ fn run_watched(mut cmd: Command, path: &Path, progress: &dyn Fn(u64), cancelled:
 /// continued with `-C`). Returns the HTTP status (see `download_watched`).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn stream_watched(url: &str, path: &Path, from: u64, seconds: u32, progress: &dyn Fn(u64), cancelled: &dyn Fn() -> bool) -> Result<u16, String> {
-    let mut cmd = curl_base();
+    let mut cmd = curl_base(url);
     cmd.args(["--retry", "2", "--max-time", &seconds.to_string(), "-w", "%{http_code}", "-o"]).arg(path);
     if from > 0 {
         cmd.args(["-C", &from.to_string()]);
@@ -1245,16 +1246,16 @@ pub fn reuse_download(existing: Option<&str>, want: &str) -> bool {
 fn install_now(r: &Release) -> Result<bool, String> {
     let asset = asset_name().ok_or("no release for this system")?;
     let program = program().ok_or("the program's file is unknown")?;
-    let sums = fetch(&r.sums_url, 60)?;
+    let sums = mirror::first_ok("release sums", &mirror::expand(&r.sums_url)[..], |u| fetch(u, 60))?;
     // The sum is the program's: for an archive, the file inside it (its member), else the file itself.
     let want = expected_sum(&sums, r.member.as_deref().unwrap_or(&r.asset))?;
     let part = part_path(&program, asset);
     let bytes = match &r.member {
-        None => download_to(&r.program_url, &part, 900, archive::MAX_MEMBER).and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display()))),
+        None => mirror::first_ok("release file", &mirror::expand(&r.program_url)[..], |u| download_to(u, &part, 900, archive::MAX_MEMBER)).and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display()))),
         Some(member) => {
             // The archive is kept beside the program only while its member is taken out of it.
             let zip = program.with_file_name(format!(".{asset}.zip.update"));
-            let got = download_to(&r.program_url, &zip, 900, archive::MAX_MEMBER).and_then(|()| archive::member(&zip, member));
+            let got = mirror::first_ok("release file", &mirror::expand(&r.program_url)[..], |u| download_to(u, &zip, 900, archive::MAX_MEMBER)).and_then(|()| archive::member(&zip, member));
             let _ = std::fs::remove_file(&zip);
             got
         }
@@ -1282,7 +1283,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
         // The phones' releases are plain files (the APK); an archive is not unpacked here.
         return Err(format!("{} is an archive: the phone takes the APK itself", r.asset));
     }
-    let sums = fetch(&r.sums_url, 60)?;
+    let sums = mirror::first_ok("release sums", &mirror::expand(&r.sums_url)[..], |u| fetch(u, 60))?;
     let want = expected_sum(&sums, &r.asset)?;
     let dir = phone::cache_dir()?;
     let apk = dir.join(apk_file_name(r.version));
@@ -1293,7 +1294,7 @@ fn install_now(r: &Release) -> Result<bool, String> {
         let _ = std::fs::remove_file(&apk);
         let part = dir.join(format!("{}.part", apk_file_name(r.version)));
         let _ = std::fs::remove_file(&part);
-        let fetched = phone::download(&r.program_url, &part, 900)
+        let fetched = mirror::first_ok("release file", &mirror::expand(&r.program_url)[..], |u| phone::download(u, &part, 900))
             .and_then(|()| std::fs::read(&part).map_err(|e| format!("{}: {e}", part.display())))
             .and_then(|bytes| check_sum(&bytes, &want))
             .and_then(|()| std::fs::rename(&part, &apk).map_err(|e| format!("{}: {e}", apk.display())));
@@ -1381,11 +1382,21 @@ pub fn open_in_browser(url: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_release_file_is_tried_on_github_then_on_the_own_copy() {
+        let gh = "https://github.com/indicozy/razdor/releases/download/v1.6.0/razdor-1.6.0-linux";
+        let own = "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v1.6.0/razdor-1.6.0-linux";
+        assert_eq!(mirror::expand(gh), [gh, own]);
+        assert_eq!(mirror::expand(own), [gh, own], "an own address is asked as its GitHub copy first");
+    }
+
+
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn every_curl_stops_a_stalled_transfer() {
-        let args: Vec<String> = curl().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
-        let s = STALL_SECONDS.to_string();
+        let url = "https://example.test/x";
+        let args: Vec<String> = curl(url).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let s = mirror::stall_seconds(url).to_string();
         for (flag, value) in [("--connect-timeout", s.as_str()), ("--speed-limit", "1"), ("--speed-time", s.as_str())] {
             let at = args.iter().position(|a| a == flag).unwrap_or_else(|| panic!("{flag} is missing: {args:?}"));
             assert_eq!(args[at + 1], value, "{flag}");
@@ -1781,15 +1792,15 @@ mod tests {
         let html = b"<html><body>Page not found</body></html>".to_vec();
         let asked = std::cell::RefCell::new(Vec::<String>::new());
         let got = feed_from(
-            &["https://gitverse.example/releases.json", "https://api.example/releases"],
+            &["https://own.example/releases.json", "https://api.example/releases"],
             |url| {
                 asked.borrow_mut().push(url.to_string());
-                Ok(if url.starts_with("https://gitverse") { html.clone() } else { REPLY.as_bytes().to_vec() })
+                Ok(if url.starts_with("https://own.example") { html.clone() } else { REPLY.as_bytes().to_vec() })
             },
             Version(0, 3, 13),
             "Razdor.exe",
         );
-        assert_eq!(*asked.borrow(), ["https://gitverse.example/releases.json", "https://api.example/releases"]);
+        assert_eq!(*asked.borrow(), ["https://own.example/releases.json", "https://api.example/releases"]);
         assert_eq!(got.unwrap().unwrap().version, Version(0, 4, 0));
     }
 
@@ -1817,7 +1828,7 @@ mod tests {
     fn the_first_feed_that_reads_answers_even_when_nothing_is_newer() {
         let asked = std::cell::RefCell::new(Vec::<String>::new());
         let got = feed_from(
-            &["gitverse", "github"],
+            &["own", "github"],
             |url| {
                 asked.borrow_mut().push(url.to_string());
                 Ok(REPLY.as_bytes().to_vec())
@@ -1826,7 +1837,7 @@ mod tests {
             "Razdor.exe",
         );
         assert_eq!(got, Ok(None));
-        assert_eq!(*asked.borrow(), ["gitverse"]);
+        assert_eq!(*asked.borrow(), ["own"]);
     }
 
     #[test]

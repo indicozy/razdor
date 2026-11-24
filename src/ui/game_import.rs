@@ -958,7 +958,7 @@ mod tests {
         let game = |url: &str, mirrors: Vec<&str>| GameRef { url: url.into(), mirrors: mirrors.into_iter().map(String::from).collect(), size: 9, sha256: "ab".repeat(32), name: "g.zip".into() };
         let catalog = |game: Option<GameRef>| Catalog { format: 1, entries: vec![], game, ad: None, holiday: None };
         // A read catalog that offers an https game: its own.
-        let offered = auto_archive(false, &Ok(catalog(Some(game("https://gitverse.ru/x", vec!["https://github.com/y"]))))).unwrap();
+        let offered = auto_archive(false, &Ok(catalog(Some(game("https://razdor.indicozy.dev/hub/indicozy/razdor-community/x", vec!["https://github.com/y"]))))).unwrap();
         assert_eq!(offered.name, "g.zip");
         assert_eq!(offered.links.len(), 2);
         // A read catalog with no game, or a game at a plain address: the built-in one.
