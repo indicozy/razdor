@@ -22,14 +22,16 @@ razdor --trailer shot.shot --out shot.mp4
 
 Off-screen: run it under Xvfb, with its own runtime folder and log, as
 `.claude/skills/offscreen-snapshot/SKILL.md` describes. The GPU for encoding is the RTX 4060
-(`CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1`, set by the run for ffmpeg). `--encoder libx264`
+(the environment's `CUDA_VISIBLE_DEVICES`, passed to ffmpeg; with it set the run adds `CUDA_DEVICE_ORDER=PCI_BUS_ID`;
+unset, ffmpeg takes the PC's own card). The owner's runs use `CUDA_VISIBLE_DEVICES=$(ai-resources gpus)`. `--encoder libx264`
 uses the CPU instead. The shot's size must fit the Xvfb screen (`xvfb-run -s "-screen 0 5120x2160x24"`
 for 5K).
 
 **The install and a mod.** No shot line: the install is the environment's `RAZDOR_DT_DIR` (also from `.env`), read at start. A mod is its own install, so a mod run is `RAZDOR_DT_DIR="<the mod's install folder>" razdor --trailer shot.shot …`. A shot cannot change its install itself, so a mods beat takes one run per install.
 
 **Renders and the save folder.** A battle met on the map writes its autosave (and the session's) to the save
-folder, as in play. A render sets `RAZDOR_SAVE_DIR` to a scratch folder so that the player's saves stay untouched.
+folder, as in play. A render sets `RAZDOR_SAVE_DIR` to a throwaway folder of its own (in the temp folder) when the
+environment names none, so that the player's saves stay untouched.
 
 **Frames on the RTX 4060 (no window on the desktop).** Under plain Xvfb the frames come from Mesa's
 llvmpipe, which draws artefacts the GPU does not. The run is therefore wrapped in VirtualGL, which
@@ -42,7 +44,7 @@ CARD=$(for c in /sys/class/drm/card[0-9]*; do [ "$(basename "$(readlink -f "$c/d
 # (PCI 0000:05:00.0: check with `ls -l /sys/class/drm/card*/device`, the GPU is the 4060 by name).
 XDG_RUNTIME_DIR=<scratch, mode 700> Xvfb :77 -screen 0 5120x2160x24 +extension GLX -nolisten tcp &
 DISPLAY=:77 VGL_DISPLAY=$CARD VGL_EGLLIB=/usr/lib64/libEGL.so.1 VGL_GLLIB=/usr/lib64/libGL.so.1 VGL_LOGO=0 \
-  CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=1 \
+  CUDA_DEVICE_ORDER=PCI_BUS_ID CUDA_VISIBLE_DEVICES=$(ai-resources gpus) \
   vglrun razdor --trailer shot.shot --out shot.mp4 --hashes shot.hashes
 ```
 

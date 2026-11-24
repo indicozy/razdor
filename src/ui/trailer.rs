@@ -250,6 +250,12 @@ pub fn configure(args: &[String]) -> Option<i32> {
     if let Some(c) = &cfg {
         if let Some(shot) = &c.shot {
             shotfile_log(c, shot);
+            // A render's autosaves and session go to a throwaway folder unless the environment names one
+            // (`docs/trailer-shots.md`), so the player's saves stay untouched.
+            if let Some(dir) = render_save_dir(std::env::var_os(razdor::rules::save::DIR_ENV).as_deref()) {
+                let _ = std::fs::create_dir_all(&dir);
+                std::env::set_var(razdor::rules::save::DIR_ENV, &dir);
+            }
         }
     }
     let _ = CONFIG.set(cfg);
@@ -259,6 +265,15 @@ pub fn configure(args: &[String]) -> Option<i32> {
         }
     }
     None
+}
+
+/// The save folder a render gets when the environment names none (`RAZDOR_SAVE_DIR` unset or empty): a
+/// throwaway folder of this run. None when the environment's folder stays.
+fn render_save_dir(set: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    if set.is_some_and(|d| !d.is_empty()) {
+        return None;
+    }
+    Some(std::env::temp_dir().join(format!("razdor-trailer-saves-{}", std::process::id())))
 }
 
 fn shotfile_log(c: &Config, shot: &Shot) {
@@ -1080,8 +1095,11 @@ fn open_sinks(cfg: &Config) -> Result<(), String> {
             cmd.args(["-c:v", &encoder, "-preset", "p6", "-cq", "18", "-rc", "vbr"]);
         }
         cmd.args(["-pix_fmt", "yuv420p", "-r", &rate]).arg(out).stdin(Stdio::piped());
-        // The GPU of the trailer runs: the RTX 4060 only (nvidia-smi index 1, PCI order).
-        cmd.env("CUDA_DEVICE_ORDER", "PCI_BUS_ID").env("CUDA_VISIBLE_DEVICES", "1");
+        // The GPU is the environment's choice (`CUDA_VISIBLE_DEVICES`, inherited; the owner's runs set it with
+        // `ai-resources gpus`). Unset, ffmpeg takes the PC's own card. PCI order goes with a chosen index.
+        if std::env::var_os("CUDA_VISIBLE_DEVICES").is_some() {
+            cmd.env("CUDA_DEVICE_ORDER", "PCI_BUS_ID");
+        }
         let spawned = cmd.spawn().map_err(|e| format!("cannot start ffmpeg: {e}"))?;
         child = Some(spawned);
 
@@ -1140,6 +1158,13 @@ fn finish() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_render_keeps_the_environments_save_folder_or_gets_a_throwaway_one() {
+        assert_eq!(render_save_dir(Some(std::ffi::OsStr::new("/home/player/saves"))), None);
+        assert!(render_save_dir(None).is_some_and(|d| d.starts_with(std::env::temp_dir())));
+        assert!(render_save_dir(Some(std::ffi::OsStr::new(""))).is_some());
+    }
 
     #[test]
     fn the_camera_of_no_keys_is_the_players_default() {
