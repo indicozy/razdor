@@ -66,8 +66,12 @@ impl HeaderFile {
     /// A new private file holding `line` (`""` for an empty one, such as a header dump).
     pub(crate) fn new(line: &str) -> std::io::Result<HeaderFile> {
         use std::io::Write;
+        // A counter in the name: the clock alone is not unique (macOS counts microseconds, so two requests in the
+        // same microsecond, e.g. two threads, got one name and the second failed with "File exists").
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
-        let path = std::env::temp_dir().join(format!("razdor-cloud-{}-{nanos}.h", std::process::id()));
+        let path = std::env::temp_dir().join(format!("razdor-cloud-{}-{nanos}-{n}.h", std::process::id()));
         let mut file = super::account::open_private(&path)?;
         let file = HeaderFile(path).with(|| file.write_all(line.as_bytes()))?;
         Ok(file)
@@ -236,6 +240,17 @@ pub(crate) fn one_request_server() -> (u16, std::thread::JoinHandle<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[test]
+    fn header_files_made_at_once_on_many_threads_get_their_own_names() {
+        let files: Vec<HeaderFile> = std::thread::scope(|s| {
+            let hands: Vec<_> = (0..16).map(|_| s.spawn(|| (0..50).map(|_| HeaderFile::new("x").expect("a new file")).collect::<Vec<_>>())).collect();
+            hands.into_iter().flat_map(|h| h.join().expect("joins")).collect()
+        });
+        let names: std::collections::HashSet<_> = files.iter().map(|f| f.0.clone()).collect();
+        assert_eq!(names.len(), files.len(), "every header file has its own name");
+    }
 
     #[test]
     fn the_api_requests_carry_the_version_and_the_commit() {
