@@ -13,6 +13,9 @@ pub struct MirrorConfig {
     pub root: PathBuf,
     /// Where downloads wait until they are verified. Must be on the same filesystem as `root`.
     pub stage: PathBuf,
+    /// The owner's site copy (`site.rs`): `site_dir/current` is a symlink to `site_dir/versions/<sha256>`, and
+    /// nginx serves `site_dir/current`. The folder holds only the mirror's own versions.
+    pub site_dir: PathBuf,
     /// The owner's own address for the mirror (`https://razdor.indicozy.dev/hub`), used for the
     /// own copies of the catalog's addresses.
     pub own_base: String,
@@ -36,6 +39,7 @@ impl Default for MirrorConfig {
         MirrorConfig {
             root: PathBuf::from("/var/www/razdor-hub"),
             stage: PathBuf::from("/var/lib/razdor-mirror/stage"),
+            site_dir: PathBuf::from("/var/www/razdor-site"),
             own_base: "https://razdor.indicozy.dev/hub".into(),
             keep_app_releases: 3,
             keep_catalogs: 2,

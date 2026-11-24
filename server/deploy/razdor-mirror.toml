@@ -1,6 +1,9 @@
 # /etc/razdor-mirror.toml: the download mirror's sync tool (razdor-mirror). These are the binary's defaults.
 # See docs/specs/own-mirror-2026-11-24.md, section 3.1, and server/deploy/README.md, section 9.
 
+# The site copy (site.rs): site_dir/current is a symlink to site_dir/versions/<sha256>; nginx serves current.
+site_dir = "/var/www/razdor-site"
+
 # The web root nginx serves at /hub/. The staging folder must be on the same filesystem (the tool checks).
 root = "/var/www/razdor-hub"
 stage = "/var/lib/razdor-mirror/stage"

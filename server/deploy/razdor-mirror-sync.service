@@ -1,5 +1,5 @@
 [Unit]
-Description=Razdor download mirror: copy the release files from GitHub into /var/www/razdor-hub
+Description=Razdor download mirror: copy the release files from GitHub into /var/www/razdor-hub, and the site copy into /var/www/razdor-site
 After=network-online.target
 Wants=network-online.target
 OnFailure=razdor-mirror-alert.service
@@ -18,7 +18,7 @@ IOSchedulingClass=idle
 MemoryMax=256M
 # Only the web root and the staging folder are writable.
 ProtectSystem=strict
-ReadWritePaths=/var/www/razdor-hub /var/lib/razdor-mirror
+ReadWritePaths=/var/www/razdor-hub /var/www/razdor-site /var/lib/razdor-mirror
 ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes

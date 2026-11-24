@@ -21,6 +21,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 toml = "0.8"
 # The mirror's HTTPS client (rustls, no C code). Only the `razdor-mirror` binary calls it.
 ureq = { version = "2", default-features = false, features = ["tls"] }
+# The site copy (src/mirror/site.rs): the archive is a gzip tar, read in pure Rust (miniz_oxide).
+flate2 = "1"
+tar = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
 zstd = "0.13"

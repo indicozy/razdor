@@ -99,6 +99,7 @@ fn setup(name: &str) -> (Base, MirrorConfig) {
     let cfg = MirrorConfig {
         root: base.join("hub"),
         stage: base.join("stage"),
+        site_dir: base.join("site"),
         min_free_bytes: 0,
         ..MirrorConfig::default()
     };
@@ -187,6 +188,42 @@ fn world(fake: &Fake) {
     let depth = release(fake, "razdor-community", DEPTH_TAG, &[("depth.onnx", b"model")], false);
     fake.json(APP_API, &json!([app]));
     fake.json(HUB_API, &json!([catalog, game, depth]));
+    publish_site(fake, &site_archive("home"));
+}
+
+/// A site copy as the Pages workflow packs it: a gzip tar with the front pages, `front` as the home page.
+fn site_archive(front: &str) -> Vec<u8> {
+    let mut b = tar::Builder::new(Vec::new());
+    for (name, body) in [("index.html", front.as_bytes()), ("wiki/index.html", b"wiki".as_slice())] {
+        let mut h = tar::Header::new_gnu();
+        h.set_size(body.len() as u64);
+        h.set_mode(0o644);
+        b.append_data(&mut h, name, body).unwrap();
+    }
+    let tar_bytes = b.into_inner().unwrap();
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    std::io::Write::write_all(&mut enc, &tar_bytes).unwrap();
+    enc.finish().unwrap()
+}
+
+/// Publishes `archive` as the site release (the lookup of `SITE_API` answers it).
+fn publish_site(fake: &Fake, archive: &[u8]) -> Value {
+    let rel = release(fake, "razdor", site::SITE_TAG, &[(site::SITE_ASSET, archive)], false);
+    fake.json(SITE_API, &rel);
+    rel
+}
+
+fn status_of(cfg: &MirrorConfig) -> Value {
+    serde_json::from_slice(&fs::read(cfg.root.join("status.json")).unwrap()).unwrap()
+}
+
+fn version_names(cfg: &MirrorConfig) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(cfg.site_dir.join("versions"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
 }
 
 fn feed_tags(cfg: &MirrorConfig) -> Vec<String> {
@@ -219,8 +256,8 @@ fn the_sync_makes_two_api_calls_a_run_and_writes_status() {
     let fake = Fake::default();
     world(&fake);
     let out = run(&cfg, &fake, now()).unwrap();
-    assert_eq!(out.api_calls, 2);
-    assert_eq!(fake.api_seen.borrow().len(), 2);
+    assert_eq!(out.api_calls, 3);
+    assert_eq!(fake.api_seen.borrow().len(), 3);
     let status: Value = serde_json::from_slice(&fs::read(cfg.root.join("status.json")).unwrap()).unwrap();
     assert_eq!(status["app"], json!(["v1.6.0"]));
     assert_eq!(status["catalog"], json!("catalog-2026-11-24-1"));
@@ -556,4 +593,100 @@ fn the_config_must_be_schema_one() {
 fn rfc3339_is_utc_with_a_z() {
     assert_eq!(rfc3339(UNIX_EPOCH), "1970-01-01T00:00:00Z");
     assert_eq!(rfc3339(UNIX_EPOCH + Duration::from_secs(1_764_000_000)), "2025-11-24T16:00:00Z");
+}
+
+#[test]
+fn the_site_copy_is_unpacked_and_current_points_at_it() {
+    let (_base, cfg) = setup("site");
+    let fake = Fake::default();
+    world(&fake);
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    let live = status_of(&cfg)["site"].as_str().unwrap().to_string();
+    assert_eq!(live, store::sha256_bytes(&site_archive("home")));
+    assert_eq!(fs::read_link(cfg.site_dir.join("current")).unwrap(), PathBuf::from(format!("versions/{live}")));
+    assert_eq!(fs::read(cfg.site_dir.join("current/index.html")).unwrap(), b"home");
+    assert!(!cfg.stage.join("site").exists(), "the archive is dropped once it is live");
+    // A second run with the same archive downloads nothing and changes nothing.
+    let before = fake.downloads_of(&format!("https://github.com/indicozy/razdor/releases/download/{}/{}", site::SITE_TAG, site::SITE_ASSET)).len();
+    run(&cfg, &fake, now()).unwrap();
+    let after = fake.downloads_of(&format!("https://github.com/indicozy/razdor/releases/download/{}/{}", site::SITE_TAG, site::SITE_ASSET)).len();
+    assert_eq!(before, after);
+    assert_eq!(version_names(&cfg), vec![live]);
+}
+
+#[test]
+fn a_new_site_keeps_the_previous_copy_and_prunes_the_one_before() {
+    let (_base, cfg) = setup("site-rollback");
+    let fake = Fake::default();
+    world(&fake);
+    run(&cfg, &fake, now()).unwrap();
+    let one = status_of(&cfg)["site"].as_str().unwrap().to_string();
+    publish_site(&fake, &site_archive("home two"));
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    let two = status_of(&cfg)["site"].as_str().unwrap().to_string();
+    assert_eq!(fs::read(cfg.site_dir.join("current/index.html")).unwrap(), b"home two");
+    assert_eq!(status_of(&cfg)["site_previous"].as_str(), Some(one.as_str()));
+    let mut both = vec![one.clone(), two.clone()];
+    both.sort();
+    assert_eq!(version_names(&cfg), both);
+    publish_site(&fake, &site_archive("home three"));
+    run(&cfg, &fake, now()).unwrap();
+    let three = status_of(&cfg)["site"].as_str().unwrap().to_string();
+    assert_eq!(status_of(&cfg)["site_previous"].as_str(), Some(two.as_str()));
+    let mut last = vec![two, three];
+    last.sort();
+    assert_eq!(version_names(&cfg), last, "the copy before the previous one is gone");
+}
+
+#[test]
+fn a_bad_site_archive_leaves_the_live_copy() {
+    let (_base, cfg) = setup("site-bad");
+    let fake = Fake::default();
+    world(&fake);
+    run(&cfg, &fake, now()).unwrap();
+    let live = status_of(&cfg)["site"].as_str().unwrap().to_string();
+    // An archive with a symlink in it: refused, the live copy stays.
+    let mut b = tar::Builder::new(Vec::new());
+    let mut h = tar::Header::new_gnu();
+    h.set_entry_type(tar::EntryType::Symlink);
+    h.set_size(0);
+    b.append_link(&mut h, "index.html", "/etc/passwd").unwrap();
+    let tar_bytes = b.into_inner().unwrap();
+    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    std::io::Write::write_all(&mut enc, &tar_bytes).unwrap();
+    publish_site(&fake, &enc.finish().unwrap());
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.iter().any(|e| e.starts_with("site:")), "{:?}", out.errors);
+    assert_eq!(fs::read(cfg.site_dir.join("current/index.html")).unwrap(), b"home");
+    assert_eq!(status_of(&cfg)["site"].as_str(), Some(live.as_str()));
+}
+
+#[test]
+fn a_site_archive_with_a_wrong_digest_is_not_published() {
+    let (_base, cfg) = setup("site-digest");
+    let fake = Fake::default();
+    world(&fake);
+    run(&cfg, &fake, now()).unwrap();
+    let live = status_of(&cfg)["site"].as_str().unwrap().to_string();
+    let mut rel = publish_site(&fake, &site_archive("home two"));
+    rel["assets"][0]["digest"] = json!(format!("sha256:{}", "0".repeat(64)));
+    fake.json(SITE_API, &rel);
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.iter().any(|e| e.starts_with("site:")), "{:?}", out.errors);
+    assert_eq!(fs::read(cfg.site_dir.join("current/index.html")).unwrap(), b"home");
+    assert_eq!(status_of(&cfg)["site"].as_str(), Some(live.as_str()));
+}
+
+#[test]
+fn no_site_release_yet_is_not_an_error() {
+    let (_base, cfg) = setup("site-none");
+    let fake = Fake::default();
+    world(&fake);
+    fake.gets.borrow_mut().remove(SITE_API);
+    let out = run(&cfg, &fake, now()).unwrap();
+    assert!(out.errors.is_empty(), "{:?}", out.errors);
+    assert!(status_of(&cfg)["site"].is_null());
+    assert!(!cfg.site_dir.join("current").exists());
 }

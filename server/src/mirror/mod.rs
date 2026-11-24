@@ -5,6 +5,7 @@
 pub mod config;
 pub mod github;
 pub mod net;
+pub mod site;
 pub mod store;
 
 #[cfg(test)]
@@ -24,6 +25,8 @@ use net::{Net, Reply};
 pub const CONFIG_URL: &str = "https://indicozy.github.io/razdor/config.json";
 pub const APP_API: &str = "https://api.github.com/repos/indicozy/razdor/releases?per_page=30";
 pub const HUB_API: &str = "https://api.github.com/repos/indicozy/razdor-community/releases?per_page=100";
+/// The owner's site copy: the pre-release `site-latest` of this repo (see `site.rs`). Its lookup is one call a run.
+pub const SITE_API: &str = "https://api.github.com/repos/indicozy/razdor/releases/tags/site-latest";
 pub const CATALOG_LATEST: &str = "https://github.com/indicozy/razdor-community/releases/latest/download/index.json";
 /// The depth model's release (`src/depth/fetch.rs`, `DEPTH_MODEL_URL`).
 pub const DEPTH_TAG: &str = "depth-model-v1";
@@ -42,7 +45,8 @@ pub struct Outcome {
     /// The catalog tag `latest` points at after the run.
     pub catalog: Option<String>,
     pub errors: Vec<String>,
-    /// GitHub API requests this run made (the budget is 2 a run plus one per tag the lists lack).
+    /// GitHub API requests this run made (the budget is 3 a run: the app list, the site tag, and the catalog list
+    /// when a new catalog needs it; plus one per tag a list lacks).
     pub api_calls: u32,
     /// GitHub refused for the rate limit: the run ended quietly and changed nothing.
     pub rate_limited: bool,
@@ -274,6 +278,9 @@ impl Sync<'_> {
             }
         }
 
+        // 6b. The owner's site copy (`site.rs`): fetched, unpacked and swapped in, or left as it is.
+        let site = self.sync_site(&read_status(&cfg.root))?;
+
         // 7. Then `latest` (the catalog's files are on disk), the feed, the config, and status.json.
         if let Some(tag) = latest.as_ref() {
             if store::tag_dir(&cfg.root, HUB, tag).exists() {
@@ -308,6 +315,8 @@ impl Sync<'_> {
             "catalog": self.out.catalog,
             "catalog_history": history,
             "config_sha256": store::sha256_bytes(&config_body),
+            "site": site.live,
+            "site_previous": site.previous,
             "errors": self.out.errors,
             "ok": self.out.errors.is_empty(),
         });
@@ -318,6 +327,79 @@ impl Sync<'_> {
         //    the game and ad releases no kept catalog names (the depth model stays).
         self.prune(&complete, &history)?;
         Ok(())
+    }
+
+    /// The owner's site copy. The release `site-latest` holds `site.tar.gz`; when its digest is not the one
+    /// `site_dir/current` names, the archive is fetched (verified), unpacked into a new folder under
+    /// `versions/`, and `current` is moved to it with one rename. Nothing is removed before that. A failure
+    /// leaves the copy in place and is an error of the run. No release yet is not an error (the first deploy).
+    fn sync_site(&mut self, before: &PreviousStatus) -> Result<SiteState, Stop> {
+        let cfg = self.cfg;
+        let versions = cfg.site_dir.join("versions");
+        let current = cfg.site_dir.join("current");
+        fs::create_dir_all(&versions).map_err(io_stop("site folder"))?;
+        let live_now = fs::read_link(&current)
+            .ok()
+            .and_then(|t| t.file_name().map(|n| n.to_string_lossy().into_owned()));
+        let mut state = SiteState { live: live_now.clone(), previous: before.site_previous.clone() };
+
+        let found = self.api(SITE_API, "site")?;
+        let Some(rel) = found.iter().find(|r| r.tag == site::SITE_TAG && !r.draft) else {
+            return Ok(state);
+        };
+        let Some(asset) = rel.assets.iter().find(|a| a.name == site::SITE_ASSET).cloned() else {
+            self.out.errors.push(format!("site: {} has no {}", site::SITE_TAG, site::SITE_ASSET));
+            return Ok(state);
+        };
+        let Some(sha) = asset.digest.clone() else {
+            self.out.errors.push("site: the archive has no SHA-256 digest".into());
+            return Ok(state);
+        };
+        if live_now.as_deref() != Some(sha.as_str()) {
+            if !versions.join(&sha).is_dir() {
+                if let Err(e) = self.build_site_version(&asset, &sha) {
+                    self.out.errors.push(format!("site: {e}"));
+                    return Ok(state);
+                }
+            }
+            if let Err(e) = store::replace_symlink(&current, &format!("versions/{sha}")) {
+                self.out.errors.push(format!("site: current: {e}"));
+                return Ok(state);
+            }
+            state.previous = live_now.filter(|l| *l != sha);
+        }
+        state.live = Some(sha.clone());
+
+        // Keep the live copy and the one before it (a rollback); the rest goes.
+        let mut keep: HashSet<String> = HashSet::new();
+        keep.extend(state.live.clone());
+        keep.extend(state.previous.clone());
+        remove_unlisted(&versions, &keep, &mut self.out.errors);
+        if state.live.as_deref() == Some(sha.as_str()) {
+            let _ = fs::remove_dir_all(cfg.stage.join("site"));
+        }
+        Ok(state)
+    }
+
+    /// Fetches the archive into the stage, checks it, unpacks it into a stage folder and moves that folder
+    /// into `versions/<sha>`. Any failure leaves `versions/` as it was.
+    fn build_site_version(&self, asset: &Asset, sha: &str) -> Result<(), String> {
+        let cfg = self.cfg;
+        let stage = cfg.stage.join("site");
+        fs::create_dir_all(&stage).map_err(|e| format!("stage: {e}"))?;
+        let spec = Spec { name: site::SITE_ASSET.into(), url: asset.url.clone(), size: asset.size, sha256: sha.into() };
+        self.fetch_file(&spec, &stage)?;
+        let versions = cfg.site_dir.join("versions");
+        let same = store::device(&versions).map_err(|e| format!("site folder: {e}"))?
+            == store::device(&stage).map_err(|e| format!("stage: {e}"))?;
+        if !same {
+            return Err("the stage folder must be on the same filesystem as the site folder".into());
+        }
+        let unpacked = stage.join(format!("unpacked-{sha}"));
+        let _ = fs::remove_dir_all(&unpacked);
+        site::unpack(&stage.join(site::SITE_ASSET), &unpacked)?;
+        site::check(&unpacked)?;
+        fs::rename(&unpacked, versions.join(sha)).map_err(|e| format!("publish: {e}"))
     }
 
     fn prune(&mut self, complete: &[&Release], history: &[String]) -> Result<(), Stop> {
@@ -516,6 +598,13 @@ impl Sync<'_> {
     }
 }
 
+/// The site copy after a run: the version `current` names, and the one before it (kept for a rollback).
+#[derive(Debug, Default, PartialEq)]
+struct SiteState {
+    live: Option<String>,
+    previous: Option<String>,
+}
+
 /// The folder that holds a repository's release folders.
 fn download_dir(root: &Path, repo: &str) -> PathBuf {
     root.join(OWNER).join(repo).join("releases").join("download")
@@ -541,6 +630,7 @@ fn remove_unlisted(dir: &Path, keep: &HashSet<String>, errors: &mut Vec<String>)
 struct PreviousStatus {
     catalog: Option<String>,
     catalog_history: Vec<String>,
+    site_previous: Option<String>,
 }
 
 fn read_status(root: &Path) -> PreviousStatus {
@@ -551,6 +641,7 @@ fn read_status(root: &Path) -> PreviousStatus {
         return PreviousStatus::default();
     };
     PreviousStatus {
+        site_previous: v.get("site_previous").and_then(Value::as_str).map(str::to_string),
         catalog: v.get("catalog").and_then(Value::as_str).map(str::to_string),
         catalog_history: v
             .get("catalog_history")
