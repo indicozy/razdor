@@ -18,14 +18,14 @@ analytics. Russian by default, with an English switch.
   `textContent` or property assignment, never `innerHTML`.
 - `README.md`: this file.
 
-Every file name is lowercase ASCII with one extension, so GitVerse Pages and GitHub Pages both take them.
+Every file name is lowercase ASCII with one extension, so GitHub Pages takes them.
 
 ## Deployment
 
 The page reads `index.json` from its own folder. Put the four files and the catalog in one folder
 and serve that folder:
 
-- GitHub Pages or GitVerse Pages: copy the files beside `index.json` into the published folder.
+- GitHub Pages or another static host: copy the files beside `index.json` into the published folder.
 - The files and previews named by the catalog are relative paths. They must sit next to
   `index.json`, or the page must be told where they are (next section).
 

@@ -351,3 +351,5 @@ and the game as soon as the config reaches them.
 5. `txwatch` alert threshold raised from 1 GB to 5 GB sent per hour.
 6. App release files: versioned names only (old fixed names stay on GitHub).
 7. Lag: the 15-minute timer plus a manual trigger; the `release` skill triggers a sync right after publishing and waits for `status.json`.
+8. CLAUDE.md (the owner's decision, 2026-11-24): the mirror paragraph is replaced by: "Mirrors (the owner's decision, 2026-11-24): GitHub is the main host and the owner's server `razdor.indicozy.dev` (`/hub/`, filled by `razdor-mirror` pulling from GitHub, see `docs/specs/own-mirror-2026-11-24.md`) the only fallback, tried in that order on every request, nothing remembered. GitVerse was dropped as a mirror (it throttled downloads); its repos and Pages are left as they are, nothing is published there."
+9. GitVerse is removed from every mirror list (the owner's decision, 2026-11-24): the order is GitHub, then the own server, on every request, for the update feed and files, the hub, the holiday files, the game archive, the ad image, the depth model, the ads zip and the remote config. `tools/gitverse/` stays unused.

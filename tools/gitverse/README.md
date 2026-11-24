@@ -1,3 +1,5 @@
+Unused since 2026-11-24: GitVerse is no longer a mirror (the owner's decision).
+
 # GitVerse publishing
 
 Scripts that mirror Razdor's releases and the hub catalog to GitVerse (`gitverse.ru`), for players

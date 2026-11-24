@@ -245,8 +245,8 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   not checked). It does not cover Windows, macOS or iOS, nor a player's real install (saves,
   the Hub, the phone installer's dialog). Exit codes: 0 pass, 1 a check failed, 2 it could not run
   (a refused `--to`, a missing tool, or the old program's log saying it could not check for updates).
-  Run it after the GitVerse mirror (release step 6a): from 1.5.2 on the old program reads the GitVerse
-  feed first, so a stale feed shows as "up to date" in its log and then as a timeout failure.
+  Run it after the own mirror has the new tag (release step 6a2): a stale feed on the mirror shows as
+  "up to date" in the old program's log and then as a timeout failure.
   Known: the APK's versionCode is not set in `Cargo.toml`, so every release ships code 1. The check
   allows an equal code (Android installs over the same signature with it; not tried on a device).
 - The data carry-over check (the same script, release steps 3b and 6b; `--new-bin` runs it before the tag):
@@ -269,8 +269,8 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   release, which then goes out without the Windows 7 files; the release job checks for them):
   `scripts/dist-win7.sh` builds `Razdor-win7.exe` and the zip `razdor-<version>-windows7.zip` (that
   program, `curl.exe` built from source by `scripts/win7/build-curl.sh` (msvcrt only, mbedTLS for
-  TLS; pins in `scripts/curl-win.env`), the ads and the menu art). The GitVerse mirror takes the zip
-  (`tools/gitverse/publish_release.py` skips the loose `.exe`).
+  TLS; pins in `scripts/curl-win.env`), the ads and the menu art). The own mirror copies the zip from the
+  release like any other file.
   Target `x86_64-win7-windows-gnu` (Rust's tier-3 Windows 7 target): the pinned compiler with
   `RUSTC_BOOTSTRAP=1` and `-Z build-std=std,panic_abort`; the crt objects `rsbegin.o`/`rsend.o`
   come from the `x86_64-pc-windows-gnu` target; linked by clang with lld against mingw-w64's
@@ -291,12 +291,11 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   is the `release` skill.
 - `src/update.rs`: the game checks the release feeds on a background thread
   (`update::Mode`: Ask / Always / Off): GitHub's feed first (the GitHub Pages copy,
-  then the GitHub API, then GitVerse's `releases.json` as that request's fallback; `mirror::first_ok`, `docs/specs/2026-11-13-gitverse-mirrors.md` «Learned primary», replaced 2026-11-23)
+  then the GitHub API, then the own server's copy of the list as that request's fallback; `mirror::first_ok`, `docs/specs/own-mirror-2026-11-24.md`)
   (`remote_config::update_feed()`, the remote config's list; `mirror::UPDATE_FEED` is the built-in one; `update::feed_from`: a reply that is not a release list, e.g. an
   HTML page with HTTP 200, is the next address's). It downloads through the system `curl` (nothing is learned: GitHub is tried first on every request), accepts a file
   only if its SHA-256 matches `SHA256SUMS` (or `SHA256SUMS.txt`), and replaces itself by rename.
-  A big download (over 4 MiB, a server that answers Range requests) comes in 8 pieces at once (4 for
-  gitverse.ru), each checked (`src/parts.rs`, the game flow in `app-and-ui.md`); the update's `download_to`
+  A big download (over 4 MiB, a server that answers Range requests) comes in 8 pieces at once, each checked (`src/parts.rs`, the game flow in `app-and-ui.md`); the update's `download_to`
   takes that path too. A piece that stalls, fails or comes back short RESUMES: its bytes are kept and
   the next request is a Range request for the rest of its range (a 429 or 503 with a `Retry-After`
   waits it, up to three times, and is not a try; one with no `Retry-After` gives the address up at once, so
@@ -306,7 +305,7 @@ Other diagnostics: `razdor.log` in the data folder (`razdor::diag`, `RAZDOR_LOG=
   its remaining bytes; the first copy to finish the piece wins and the other is cancelled. A file is written
   only on a 206, so a partial file is a prefix of its range. Cancel stops every piece (the phones: each
   file's download is cancelled by its own path, `razdorDownloadCancelPath`).
-  A GitVerse asset may be a zip (`archive: "zip"`, its `member` the program inside): the member is
+  A release asset may be a zip (`archive: "zip"`, its `member` the program inside): the member is
   taken out (`update::zip_member`, a name with `..` or a drive is refused) and the member is checked
   against the sums. Each program is
   published under a versioned name (`razdor-X.Y.Z-linux`, `Razdor-X.Y.Z.exe`, `razdor-X.Y.Z.apk`, ...)

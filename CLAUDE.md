@@ -186,19 +186,11 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 - Releases are weekly (the owner's decision, 2026-10-28): a fix is done once it is on `main`
   with status `fixed` and its line in `changelog/unreleased.md` (the next release's candidate);
   never cut or offer a release after a fix. The owner releases the week's pile when they say so.
-- GitVerse mirror (the owner's decision, 2026-11-13): every release and every download link players get
-  (app releases, the game archive, the hub) is also on GitVerse (`gitverse.ru/indicozy/razdor`,
-  `gitverse.ru/indicozy/razdor-community`; API `api.gitverse.ru`, token `GITVERSE_TOKEN` in `.env`) as the
-  mirror for Russia. Its release files are `https://gitverse.ru/api/attachments/<uuid>` (Range works; about
-  4 GB of release files per account, ~140–500 KB/s per connection). GitVerse Pages is the website
-  (site + wiki, `indicozy.gitverse.site/razdor`) and the community's Pages (`razdor-community`).
-  The owner's decision (2026-11-22): the game archive is also a Pages file on both hosts
-  (`indicozy.gitverse.site/razdor-community`, `indicozy.github.io/razdor-community`), because GitVerse
-  throttles release downloads (HTTP 429); its release copies stay as the fallback mirrors. The Hub files
-  (maps, campaigns, mods) stay on release attachments; moving them to Pages is postponed. From 1.5.2 on,
-  The owner's decision (2026-11-22): GitHub is the main host and GitVerse the fallback mirror for Russia. The
-  app tries GitHub first and GitVerse after it for app updates, the hub, the holiday files and the game download,
-  GitHub is tried first on every request; GitVerse is only that request's fallback, and nothing is remembered (the owner's decision, 2026-11-23).
+- Mirrors (the owner's decision, 2026-11-24): GitHub is the main host and the owner's server
+  `razdor.indicozy.dev` (`/hub/`, filled by `razdor-mirror` pulling from GitHub, see
+  `docs/specs/own-mirror-2026-11-24.md`) the only fallback, tried in that order on every request, nothing
+  remembered. GitVerse was dropped as a mirror (it throttled downloads); its repos and Pages are left as
+  they are, nothing is published there.
 - "release" / "make a release": the `release` skill. The Discord release post goes out together with
   the release's start (right after the tag is pushed), without waiting for the release pipeline to
   finish (the owner's decision, 2026-10-27).

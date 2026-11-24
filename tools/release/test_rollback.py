@@ -14,7 +14,7 @@ import rollback as rb  # noqa: E402
 import update_check as uc  # noqa: E402
 from testkit import HermeticTestCase  # noqa: E402
 
-FEED_URL = "https://indicozy.gitverse.site/razdor-community/releases.json"
+FEED_URL = "https://razdor.indicozy.dev/hub/pages/razdor-community/releases.json"
 CONFIG_FEEDS = [FEED_URL, "https://api.github.com/repos/indicozy/razdor/releases?per_page=100"]
 
 
@@ -28,30 +28,8 @@ def feed_entry(tag):
 
 RELEASES = [rel("v1.5.4"), rel("v1.5.3"), rel("v1.5.0"), rel("v1.4.1")]
 FEED = [feed_entry("v1.5.4"), feed_entry("v1.5.3")]
-CONFIG = {"schema": 1, "update_feed": CONFIG_FEEDS, "hub": ["https://indicozy.gitverse.site/razdor-community"],
+CONFIG = {"schema": 1, "update_feed": CONFIG_FEEDS, "hub": ["https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/latest/download"],
           "game": {"links": ["https://x"], "size": 1, "sha256": "0" * 64, "name": "a.zip"}}
-
-
-class FakePages:
-    """Stands in for tools/gitverse/pages.Pages: records what would be written and pushed."""
-    log = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def write(self, rel_path, data):
-        FakePages.log.append(("write", rel_path, data))
-
-    def commit_push(self, message):
-        FakePages.log.append(("push", message))
-        return "abc12345"
-
-    def wait_served(self, expected):
-        FakePages.log.append(("served", sorted(expected)))
-        return 0
 
 
 def refuse(*a, **k):
@@ -139,20 +117,19 @@ class MainTests(HermeticTestCase):
         return code, out.getvalue(), err.getvalue()
 
     def test_a_dry_run_changes_nothing_and_calls_nothing(self):
-        code, out, _ = self.run_main(["--to", "v1.5.3"], self.env(gh_runner=refuse, pages_factory=refuse))
+        code, out, _ = self.run_main(["--to", "v1.5.3"], self.env(gh_runner=refuse))
         self.assertEqual(code, 0)
         self.assertIn("dry run: nothing changed", out)
         self.assertIn("GH_TOKEN=$(gh auth token -u indicozy) gh release edit v1.5.4 --repo indicozy/razdor --prerelease", out)
         self.assertIn("entries ['v1.5.4', 'v1.5.3'] -> ['v1.5.3']", out)
 
     def test_a_blocked_plan_exits_1_and_says_nothing_changed(self):
-        code, out, err = self.run_main(["--to", "v1.5.3"], self.env(feed=None, gh_runner=refuse, pages_factory=refuse))
+        code, out, err = self.run_main(["--to", "v1.5.3"], self.env(feed=None, gh_runner=refuse))
         self.assertEqual(code, 1)
         self.assertIn("nothing changed", err)
 
-    def test_apply_writes_the_feed_then_flips_github_then_checks(self):
+    def test_apply_flips_github_then_checks_the_own_feed_is_left_to_the_mirror(self):
         calls = []
-        FakePages.log = []
 
         def gh(argv):
             calls.append(argv)
@@ -165,27 +142,22 @@ class MainTests(HermeticTestCase):
 
         after = [rel("v1.5.4", prerelease=True), rel("v1.5.3")] + RELEASES[2:]
         code, out, err = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
-            gh_runner=gh, pages_factory=FakePages, releases_reader=lambda: after,
+            gh_runner=gh, releases_reader=lambda: after,
             mirror=lambda: "the own mirror lists v1.5.3 and not v1.5.4 (fake)"))
         self.assertEqual(code, 0, err)
         self.assertIn("own mirror lists v1.5.3", out)
-        self.assertEqual(FakePages.log[0][0], "write")
-        self.assertEqual(FakePages.log[0][1], rb.FEED_PATH)
-        self.assertEqual(FakePages.log[1][0], "push")
-        self.assertEqual(FakePages.log[2][0], "served")
         self.assertEqual(calls, [["gh", "release", "edit", "v1.5.4", "--repo", "indicozy/razdor", "--prerelease"]])
         self.assertIn("newest published release is now v1.5.3", out)
 
     def test_apply_reports_an_own_mirror_that_does_not_confirm(self):
         import mirror_sync as ms
-        FakePages.log = []
 
         def stuck():
             raise ms.MirrorTimeout("not complete after 1 s: synced_at x, app v1.5.4")
         after = [rel("v1.5.4", prerelease=True), rel("v1.5.3")] + RELEASES[2:]
         code, out, err = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
             gh_runner=lambda argv: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
-            pages_factory=FakePages, releases_reader=lambda: after, mirror=stuck))
+            releases_reader=lambda: after, mirror=stuck))
         self.assertEqual(code, 2)
         self.assertIn("did not confirm", err)
         self.assertIn("mirror_sync.py --tag v1.5.3 --gone v1.5.4", err)
@@ -207,23 +179,20 @@ class MainTests(HermeticTestCase):
         self.assertIn("lists v1.5.3 and not v1.5.4", text)
 
     def test_apply_stops_when_the_check_still_sees_the_bad_release(self):
-        FakePages.log = []
         code, out, err = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
             gh_runner=lambda argv: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
-            pages_factory=FakePages, releases_reader=lambda: RELEASES))
+            releases_reader=lambda: RELEASES))
         self.assertEqual(code, 2)
         self.assertIn("not v1.5.3", err)
 
     def test_a_blocked_apply_calls_nothing(self):
-        FakePages.log = []
         code, _, _ = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
-            feed=[feed_entry("v1.5.4")], gh_runner=refuse, pages_factory=refuse))
+            feed=[feed_entry("v1.5.4")], gh_runner=refuse))
         self.assertEqual(code, 1)
-        self.assertEqual(FakePages.log, [])
 
     def test_a_gh_failure_is_an_error(self):
         code, _, err = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
-            pages_factory=FakePages, releases_reader=lambda: RELEASES,
+            releases_reader=lambda: RELEASES,
             gh_runner=lambda argv: type("R", (), {"returncode": 1, "stdout": "", "stderr": "HTTP 403"})()))
         self.assertEqual(code, 2)
         self.assertIn("HTTP 403", err)
@@ -234,13 +203,13 @@ class MainTests(HermeticTestCase):
 
 
 class RealSourceTests(unittest.TestCase):
-    def test_the_feed_is_the_gitverse_copy_of_the_update_feed(self):
+    def test_the_feed_is_the_own_copy_of_the_update_feed(self):
         self.assertEqual(rb.feed_url_default(), FEED_URL)
 
-    def test_the_config_names_github_first_then_gitverse(self):
+    def test_the_config_names_github_first_then_the_own_copy(self):
         urls = rb.config_urls_default()
         self.assertEqual(urls[0], "https://indicozy.github.io/razdor/config.json")
-        self.assertEqual(urls[1], "https://indicozy.gitverse.site/razdor-community/config.json")
+        self.assertEqual(urls[1], "https://razdor.indicozy.dev/hub/pages/razdor/config.json")
         self.assertEqual(len(urls), 2)
 
     def test_the_repo_config_is_readable(self):

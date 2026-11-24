@@ -77,11 +77,7 @@ Give gemma only the sources for that page (small inputs, fewer invented facts).
 6. Build: `cd wiki && nice -n 19 taskset -c 8-19 npm ci && nice -n 19 taskset -c 8-19 npm run build`. It must pass
    with no broken links; then delete `wiki/dist` and `wiki/.astro`.
 7. Commit with the feature (same commit or the next): `Wiki: <page> for <feature>`. The push
-   to `main` publishes it.
-8. GitVerse copy: once the wiki change is on `main`, run `python3 -I tools/gitverse/publish_site.py`
-   (builds the committed wiki the way pages.yml does and publishes it to https://indicozy.gitverse.site/razdor/wiki/;
-   about 3 minutes). Check the result it prints; the ru and en pages are both checked.
-
+   to `main` publishes it (GitHub Pages; the owner's server copies it).
 ## After every feature (Definition of Done)
 
 A player-visible change is not done until its wiki page says so, in Russian and English: a new

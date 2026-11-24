@@ -10,17 +10,14 @@ release is withdrawn by two changes, both done here:
 
 1. GitHub: the bad release becomes a pre-release (`gh release edit vBAD --prerelease`). The API list the
    app reads skips it, so the newest published release is vTO again. Its files stay downloadable.
-2. GitVerse: the update feed `releases.json` on the razdor-community Pages (the GitVerse address of
-   `UPDATE_FEED` in `src/mirror.rs`; GitHub's Pages copy, the first address since 2026-11-22, is NOT
-   rewritten by this tool yet, so a rollback must also fix that copy by hand) is rewritten without the bad
-   release and anything newer than vTO. Its entry for vTO is kept as it is (its own asset addresses).
-   It is written through `tools/gitverse/pages.py` (`Pages.write`, `commit_push`, `wait_served`): a
-   commit on the razdor-community `main`, then a wait until the anonymous address serves the new bytes.
+2. The own feed (`razdor.indicozy.dev/hub/pages/razdor-community/releases.json`, `UPDATE_FEED` in
+   `src/mirror.rs`) is made by the own mirror from GitHub's list, so the bad release leaves it at the next
+   sync (`mirror_sync.py`, below). Nothing is written to any other host.
 
 The config (`data/remote/config.json`, served at both Pages sites) needs no change for a rollback: it names
 the feed, not a release. The tool only reads it and warns when it names the bad tag, or when its
 `update_feed` does not list the feed this tool rewrites. A change to it is made in the repo file and
-published with `tools/gitverse/publish_config.py` (by hand, after the owner's yes).
+goes out with the next push to `main` (`pages.yml`; the own mirror copies it), after the owner's yes.
 
 What a rollback does NOT do: a player already on vBAD is not moved back (the updaters offer only newer
 releases, never an older one). Those players get the next fixed release; say so to the owner.
@@ -35,7 +32,7 @@ or not older than vBAD, the feed does not list vTO, or the repo's config and the
 Pages push writes docs/config.json from the repo file, so it would overwrite the live config).
 
 Exit codes: 0 the plan is clear (dry run) or applied and verified, 1 a blocker (nothing changed), 2 the tool
-could not run (network, gh, the GitVerse token, a bad input).
+could not run (network, gh, a bad input).
 """
 
 import argparse
@@ -48,14 +45,12 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-GITVERSE_DIR = os.path.join(ROOT, "tools", "gitverse")
 sys.path.insert(0, HERE)
 
 import mirror_sync as ms  # noqa: E402
 import update_check as uc  # noqa: E402
 
 REPO = uc.REPO
-FEED_PATH = "docs/releases.json"  # in razdor-community (the Pages site's docs/)
 CONFIG_SRC = os.path.join(ROOT, "data", "remote", "config.json")
 MIRROR_SRC = os.path.join(ROOT, "src", "mirror.rs")
 REMOTE_CONFIG_SRC = os.path.join(ROOT, "src", "remote_config.rs")
@@ -80,9 +75,9 @@ def rust_urls(path, const):
 
 
 def feed_url_default():
-    """The feed address this tool rewrites: GitVerse's Pages copy (`pages.py` writes it). The app tries the
-    GitHub Pages copy first since 2026-11-22; that copy is not rewritten by this tool yet (see the notes)."""
-    return next(u for u in rust_urls(MIRROR_SRC, "UPDATE_FEED") if "gitverse" in u)
+    """The feed address this tool reads: the own mirror's copy of the API list (`UPDATE_FEED`). The mirror
+    makes it from GitHub's list, so the check reads what the players' second address serves."""
+    return next(u for u in rust_urls(MIRROR_SRC, "UPDATE_FEED") if "razdor.indicozy.dev" in u)
 
 
 def config_urls_default():
@@ -204,8 +199,8 @@ def describe(p, feed_url):
         lines.append("1. GitHub: the bad release becomes a pre-release (the API list skips it):")
         lines.append("     GH_TOKEN=$(gh auth token -u indicozy) " + " ".join(p["gh"]))
     if p["feed_new"] is not None:
-        lines.append(f"2. GitVerse feed {feed_url}:")
-        lines.append(f"     the razdor-community Pages file {FEED_PATH}: entries {p['feed_before']} -> {p['feed_after']}")
+        lines.append(f"2. Own feed {feed_url} (the own mirror makes it from GitHub's list; nothing is written here):")
+        lines.append(f"     entries {p['feed_before']} -> {p['feed_after']}")
         lines.append("     (the diff shows the tag names; each kept entry keeps its own asset list)")
         before = feed_bytes([{"tag_name": t} for t in p["feed_before"]]).decode().splitlines()
         after = feed_bytes([{"tag_name": t} for t in p["feed_after"]]).decode().splitlines()
@@ -236,30 +231,9 @@ def gh_env():
     return env
 
 
-def apply_feed(to, feed_entries, pages_factory=None, waiter=None):
-    """Writes the feed to razdor-community Pages, pushes it, and waits until it is served."""
-    if pages_factory is None:
-        sys.path.insert(0, GITVERSE_DIR)
-        import pages  # noqa: E402
-        pages_factory = pages.Pages
-    data = feed_bytes(feed_entries)
-    with pages_factory() as p:
-        p.write(FEED_PATH, data)
-        head = p.commit_push(f"Update feed: {uc.vtag(to)} is the newest again (rollback)")
-        if head is None:
-            return "the feed already had this content (no commit)"
-        if waiter is None:
-            waited = p.wait_served({FEED_PATH: data})
-        else:
-            waited = waiter(p, data)
-    return f"pushed {head}, served after {int(waited)} s"
-
-
-def apply(p, feed_url, releases_reader=None, gh_runner=None, pages_factory=None, waiter=None):
+def apply(p, feed_url, releases_reader=None, gh_runner=None):
     """Makes the changes and reads them back. Returns the lines to print."""
     out = []
-    if p["feed_new"] is not None:
-        out.append("feed: " + apply_feed(p["to"], p["feed_new"], pages_factory, waiter))
     if p["gh"]:
         runner = gh_runner or (lambda argv: subprocess.run(argv, env=gh_env(), capture_output=True, text=True, timeout=120))
         r = runner(p["gh"])
@@ -284,7 +258,7 @@ def own_mirror(to, bad):
 
 def load_inputs(env, to, feed_url):
     """The inputs as the tool reads them: each one from `env` when a test gives it (None included: an
-    unreadable input), else from GitHub, GitVerse and the repo."""
+    unreadable input), else from GitHub, the own mirror and the repo."""
     def given(key):
         return key in env
 
@@ -317,7 +291,7 @@ def load_inputs(env, to, feed_url):
 
 def main(argv=None, env=None):
     """`env` (tests only) replaces inputs: keys releases, feed, feed_url, live_config, repo_config,
-    releases_reader, gh_runner, pages_factory, waiter, mirror (a function () -> str that runs the own mirror's
+    releases_reader, gh_runner, mirror (a function () -> str that runs the own mirror's
     trigger; tests pass a fake, the real one needs the ssh host). A key given as None means that input is unreadable."""
     env = env or {}
     ap = argparse.ArgumentParser(description="Roll a bad release back: the update feeds stop offering it.")
@@ -345,8 +319,7 @@ def main(argv=None, env=None):
         print("\ndry run: nothing changed. Run with --apply to make these changes (the owner's yes first).")
         return EXIT_OK
     try:
-        lines = apply(p, feed_url, env.get("releases_reader"), env.get("gh_runner"),
-                      env.get("pages_factory"), env.get("waiter"))
+        lines = apply(p, feed_url, env.get("releases_reader"), env.get("gh_runner"))
     except RollbackError as e:
         print(f"rollback: {e}", file=sys.stderr)
         return EXIT_ERROR
@@ -360,7 +333,7 @@ def main(argv=None, env=None):
     try:
         print("  " + mirror())
     except (ms.MirrorError, ms.MirrorTimeout, uc.ToolError, ValueError) as e:
-        print(f"rollback: applied on GitHub and the feed, but the own mirror did not confirm it: {e}. "
+        print(f"rollback: applied on GitHub, but the own mirror did not confirm it: {e}. "
               f"Run `python3 -I tools/release/mirror_sync.py --tag {uc.vtag(p['to'])} --gone {p['bad']}` "
               "when it is fixed, and tell the owner.", file=sys.stderr)
         return EXIT_ERROR

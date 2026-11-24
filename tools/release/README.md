@@ -163,25 +163,22 @@ The AVD here: android-34 google_apis x86_64, 1080x2340, 1536 MB RAM, a 512 MB SD
     python3 -I tools/release/rollback.py --to v1.5.3 --bad v1.5.4 --apply
 
 The updaters read two things: the GitHub release list (drafts and pre-releases skipped; an offer only for a
-release newer than the program) and the update feed `releases.json` on the razdor-community Pages (the first
-address of `UPDATE_FEED` in `src/mirror.rs`). A rollback makes the bad release a pre-release on GitHub
-(`gh release edit vBAD --repo indicozy/razdor --prerelease`) and rewrites the feed without it and without
-anything newer than the target. The feed is written through `tools/gitverse/pages.py` (a commit on
-razdor-community `main`, then a wait until the address serves the new bytes). The target's own entry keeps its
-asset addresses.
+release newer than the program) and the update feed (the own mirror's copy of the release list, made from GitHub by `mirror_sync.py`). A rollback makes the bad release a pre-release on GitHub
+(`gh release edit vBAD --repo indicozy/razdor --prerelease`) and the own mirror drops it from the feed at its next sync (nothing else is written: GitVerse is no mirror any
+more). The target's own entry keeps its asset addresses.
 
 - The dry run reads GitHub, the feed and the live config (anonymous reads) and writes nothing. It prints the two
   changes, the warnings and any blockers.
 - Blockers (exit 1, nothing changed): the bad release is not the newest published one; the target is not older
   than it or not published; the feed cannot be read or does not list the target; the repo's
   `data/remote/config.json` differs from the live config (a Pages push writes the repo's file over the live one).
-- Warnings: the live config names the bad tag (fix `data/remote/config.json`, then `publish_config.py`); its
+- Warnings: the live config names the bad tag (fix `data/remote/config.json` and push it to `main`); its
   `update_feed` does not list the feed; the config cannot be read.
-- `--apply` writes the feed first, then flips GitHub, then checks that the newest published release is the target.
+- `--apply` flips GitHub, then checks that the newest published release is the target.
   It prints what it changed; a failure says what may have changed.
 - A player already on the bad release is not moved back: the updaters never offer an older release. Those players
   get the next fixed release.
-- `--apply` needs `gh` logged in as indicozy (`gh auth token -u indicozy`) and `GITVERSE_TOKEN` (in `.env`).
+- `--apply` needs `gh` logged in as indicozy (`gh auth token -u indicozy`).
 - After the GitHub flip, `--apply` runs `mirror_sync.py` (below) with `--tag vTO --gone vBAD` and reports the own
   mirror's result. A mirror that does not confirm in time exits 2 with the command to run by hand. The tests
   inject a fake for it (`mirror=` in `env`).
@@ -212,10 +209,13 @@ instead of GitHub's API. The newest release there must be `--to`, so a pass mean
 and its files (the mirror's copies, checked by the same SHA256SUMS). Run it after `mirror_sync.py`. The default stays GitHub.
 
 The own files' contract samples (`contracts/samples/config-own.json`, `index-own.json`, `releases-own.json`) are the
-1.5.2-1.5.4 rules' view of the mirror's config, catalog (option B: the game's own address first, GitHub's in `mirrors`)
+1.5.2-1.5.4 rules' view of the mirror's config, catalog (option B: the game's GitHub address first, its own copy after it in `game.links`)
 and feed.
 
 ## hub_candidate_check.py: the old releases and a candidate catalog
+
+Unused since 2026-11-24: it checks the GitVerse catalog layout, and GitVerse is no longer a mirror (the owner's
+decision). It is no release or community-pack step any more; the file stays for the old layout.
 
 Serves a candidate hub catalog from a local HTTPS server and runs the old Linux releases against it. Run it
 before any catalog publish (community-pack step 6a; release step 3d). Give it the publish dry run's folder:

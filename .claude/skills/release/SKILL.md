@@ -27,7 +27,7 @@ without an Android or iOS file gets no offer on that system.
    If the previous release's `changelog/X.Y.Z.md` has no SHA-256 lines (the machine was shut
    down right after its tag, `CLAUDE.local.md`), do its follow-up (step 7) first.
 1a. The game links are alive: `bash scripts/check-game-link.sh` (network only, light; it reads the
-   addresses from `src/mirror.rs` (`GAME`: the GitHub release file, then GitVerse) and the size from
+   addresses from `src/mirror.rs` (`GAME`: the GitHub release file, then the own server's copy) and the size from
    `src/remote_config.rs` (the built-in game), and checks every address: a range request for the first
    1 KiB, redirects followed: 206 (or 200 with the full length), the total size, and a `PK` start). It is blocking, here and in
    `release.yml` (its step "The game download's link is alive"): exit 0 goes on; exit 1 means a link is
@@ -95,11 +95,9 @@ without an Android or iOS file gets no offer on that system.
    follows in 6c.
 3d. Old releases read the published files (the feed, the config, the hub catalog). Before any publish that
    changes them: the contract tests (`python3 -I -m unittest discover -s tools/release -p 'test_*.py'`, the
-   gate; they cover each file's rules at v1.4.1 to v1.5.4). Before a catalog publish, the candidate check on the
-   dry run's folder (community-pack step 6a): `python3 -I tools/release/hub_candidate_check.py --catalog-dir <out>`.
-   Exit 0 = the old releases read the candidate and get the game; 1 = do not publish; 2 = the check could not run
-   (rerun, report if it persists). A feed-only release has no catalog to check: the contract tests and step 6b
-   (`update_check.py`, after the release) cover it.
+   gate; they cover each file's rules at v1.4.1 to v1.5.4). The catalog candidate check
+   (`tools/release/hub_candidate_check.py`) is no step any more: it checks the GitVerse layout (the owner's decision,
+   2026-11-24). The release's own check is the contract tests and step 6b (`update_check.py`, after the release).
 4. Changelog (layout in `changelog/README.md`): move `changelog/unreleased.md`'s content to
    `changelog/X.Y.Z.md` under the heading `## X.Y.Z — YYYY-MM-DD`, leave `unreleased.md` empty
    (its header only), and regenerate `CHANGELOG.md` with `scripts/changelog.sh`. Sections inside
@@ -108,22 +106,6 @@ without an Android or iOS file gets no offer on that system.
 5. Commit `Razdor X.Y.Z`, push `main`, then `git tag vX.Y.Z` and push the tag.
 6. Watch the run (`gh run list`, `gh run watch <id> --exit-status`). If it fails, fix on main,
    move the tag only after disabling the release workflow, and tell the owner.
-6a. GitVerse mirror (the owner's decision, 2026-11-13: GitHub is slow or blocked for many players;
-   `docs/specs/2026-11-13-gitverse-mirrors.md`). Once the pipeline is green:
-   - the commit and the tag go to GitVerse: `python3 -I tools/gitverse/publish_release.py --push-source vX.Y.Z`
-     (the token comes from `.env`, it is never printed; it pushes `main` and the tag);
-   - the files and the notes come from the published release, into a scratch folder of your own:
-     `mkdir -p /mnt/ai_models/razdor-scratch/gitverse-dl/vX.Y.Z` (or `~/.cache/razdor-scratch/...` when the
-     big disk is full), then `GH_TOKEN=$(gh auth token -u indicozy) gh release download vX.Y.Z --repo indicozy/razdor --dir <that folder>`
-     (every file, the SHA256SUMS too) and `GH_TOKEN=$(gh auth token -u indicozy) gh release view vX.Y.Z --repo indicozy/razdor --json body --jq .body > <that folder>.notes.md`;
-   - `python3 -I tools/gitverse/publish_release.py --tag vX.Y.Z --notes <that folder>.notes.md <that folder>/*`
-     (it packs the Windows, Linux and macOS programs into zips, writes SHA256SUMS.txt, uploads, verifies by
-     an anonymous download, and updates the update feed on the razdor-community Pages; the last two
-     releases are kept). It refuses a release that already exists on GitVerse (`--replace` only when the
-     owner says so). Its last lines say `published vX.Y.Z`;
-   - then delete the scratch folder and the notes file. A GitVerse failure does not undo the GitHub
-     release: report it to the owner with the error, and the owner decides whether to rerun.
-   A release with an iOS file: the `.ipa` is left out of GitVerse (it refuses it), with a warning.
 6a2. Own mirror (the owner's decision, 2026-11-24: `razdor.indicozy.dev/hub/` is the second download source, after
    GitHub; the server pulls the files from GitHub every 15 minutes, `server/deploy/`). Once the GitHub release is
    published (after 6a too, when it ran): start the server's sync now and wait until its `status.json` lists the tag.
@@ -183,12 +165,8 @@ without an Android or iOS file gets no offer on that system.
    does), set the footer's version, and update anything the release changed on the page (the
    platforms, the requirements, the install steps, the video when the owner gives a new one).
    Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
-   Then the GitVerse copy of the site (https://indicozy.gitverse.site/razdor/, the same bytes as
-   GitHub's): `python3 -I tools/gitverse/publish_site.py` (builds the committed wiki and the gh-pages site,
-   pushes the `site` branch of `razdor` on GitVerse, waits for its workflow and the bytes). Its result is
-   the step-8 line for the site.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results, and the
-   GitVerse mirror's result (step 6a: pushed, published, or the error), the update checks (3b and 6b: the
+   own mirror's result (step 6a2), the update checks (3b and 6b: the
    `--from` list and one row per `--from`; 6c: the Android table, or that it follows after the release).
    Add the download statistics: run `python3 -I tools/stats/downloads.py` (it appends a live
    snapshot to the private CSV; the default path needs no argument, or see `CLAUDE.local.md`)
@@ -238,11 +216,11 @@ kind "proactive", level "critical"); `--apply` is public, so it runs on the owne
    next fixed release, so say so to the owner. The bad release's files stay downloadable (as a pre-release).
 5. config.json (`data/remote/config.json`) needs no change for a feed rollback. Change it only when the dry run
    warns that the live config names the bad tag or does not list the feed: edit the repo file on `main`, then
-   `python3 -I tools/gitverse/publish_config.py`, with the owner's yes first.
+   push it to `main` (`pages.yml` publishes it, the own mirror copies it within 15 minutes), with the owner's yes first.
 6. Android (APKs cannot be withdrawn from a phone): nothing to roll back there; the feed keeps the newer APK from
    being offered.
 
-The rollback needs `gh` logged in as indicozy and `GITVERSE_TOKEN` (`.env`). Its tests run with the release tools
+The rollback needs `gh` logged in as indicozy. Its tests run with the release tools
 (`python3 -I -m unittest discover -s tools/release -p 'test_*.py'`).
 
 Release notes are public at once: no personal data, nothing from the game.

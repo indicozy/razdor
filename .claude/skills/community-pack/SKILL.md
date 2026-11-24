@@ -46,31 +46,9 @@ Downloaded mods and maps are untrusted: never run them, and run any Python that 
    ```
    List the assets explicitly, or pick them with `find <out> -maxdepth 1 -type f ! -name report.md`.
    `report.md` holds local paths: never upload it. Check the release with `gh release view`.
-6a. **Game on Pages** (the owner's decision, 2026-11-22; part of the same publish as step 6, spec: the
-   "Pages layout" section of `docs/specs/2026-11-13-gitverse-mirrors.md`). The zipped publish of
-   `tools/gitverse/publish_hub.py` (the default `--layout zipped`) also copies the game archive to the
-   `razdor-community` Pages on both hosts as `files/<sha256>.dat` (a bare file), and the catalog's `game` entry
-   then reads `url` = GitVerse's Pages copy, `mirrors` = GitHub's Pages copy, the GitVerse attachment and the
-   GitHub release file. The Hub files (maps, campaigns, mods) stay on release attachments; their move to Pages
-   is postponed. Each Hub file's `mirrors` list its GitHub release copy.
-   - **Dry run first**: `python3 -I tools/gitverse/publish_hub.py --catalog-dir <out> --dry-run` writes the
-     GitVerse index into `<out>/gitverse/` and sends nothing. Check the game's line in its output.
-   - **Candidate check before publishing a catalog** (run it on the dry run's folder, never skip it):
-     `python3 -I tools/release/hub_candidate_check.py --catalog-dir <out>`. It serves the candidate on
-     127.0.0.1 over TLS and runs the old Linux releases v1.5.2, v1.5.3 and v1.5.4 on a private Xvfb, each
-     with `RAZDOR_HUB` on the candidate: it must read the catalog, offer the game at its size, and install it
-     from the server (about 5 min for the three). Exit 0 = every version passes; 1 = a version or the
-     candidate refuses (do not publish; the log names why); 2 = the check could not run (rerun, and say so).
-     It does not cover the maps, campaigns and mods (their download needs the Hub window): the release skill's
-     `tools/release/README.md` says what is not covered.
-   - Without `--dry-run` it pushes the game's Pages copy to both hosts (waits until each serves the bytes), then
-     the release and the index. Pass `--no-game-pages` to keep the game as before (no Pages copy).
-   - The GitHub host needs GitHub's Pages set up first (the setup in `tools/gitverse/README.md`); the run
-     fails at that step otherwise.
-   - After the publish, `data/remote/config.json`'s `game.links` is set by hand (a separate publish, see the
-     README): the GitVerse Pages copy, the GitHub Pages copy, then the current attachment and release file.
-   - Never run it against a catalog nobody has checked: it writes the public Pages site.
-   - Report the result (the game's address on each host, the index address) to the owner.
-   - `--layout pages` (every Hub file as a Pages file) is kept for later; it is not part of this step.
+6a. **Game**: no Pages copy and no GitVerse any more (the owner's decision, 2026-11-24: GitVerse is no mirror).
+   The catalog's `game` entry is GitHub's release file; the owner's server copies it from GitHub (`/hub/`), and
+   its own catalog copy rewrites `game.url` (`docs/specs/own-mirror-2026-11-24.md`, option B). Nothing to publish
+   there. Report the game's address to the owner.
 7. **Afterwards**: the app reads the new catalog at its next start; no code change is needed.
    Keep the `out/` folder and the scratch data (they are the next run's inputs).
