@@ -457,4 +457,9 @@ RULES = {
     "index-v2.json": {"v1.5.2": check_catalog_v152, "v1.5.3": check_catalog_v152, "v1.5.4": check_catalog_v152},
     "index.json": {"v1.4.1": check_catalog_v141, "v1.5.0": check_catalog_v141,
                    "v1.5.2": check_catalog_v152, "v1.5.3": check_catalog_v152, "v1.5.4": check_catalog_v152},
+    # The own mirror's copies (2026-11-24): the same files with the own addresses, read by 1.5.2 .. 1.5.4 when
+    # the mirror serves them (the config's and catalog's own addresses; the feed's own copy of the API list).
+    "config-own.json": {"v1.5.2": check_config_v152, "v1.5.3": check_config_v152, "v1.5.4": check_config_v152},
+    "index-own.json": {"v1.5.2": check_catalog_v152, "v1.5.3": check_catalog_v152, "v1.5.4": check_catalog_v152},
+    "releases-own.json": {"v1.5.2": check_feed_v152, "v1.5.3": check_feed_v152, "v1.5.4": check_feed_v152},
 }

@@ -26,7 +26,10 @@ What a rollback does NOT do: a player already on vBAD is not moved back (the upd
 releases, never an older one). Those players get the next fixed release; say so to the owner.
 
 Dry run by default: it reads GitHub, the feed and the live config (anonymous reads), and writes nothing.
-`--apply` makes the two changes, then reads them back and prints what it changed. It refuses (exit 1,
+`--apply` makes the two changes, then reads them back and prints what it changed. Then it starts the own download
+mirror's sync over ssh and waits until its `status.json` lists vTO and no longer lists vBAD (`mirror_sync.py`; the
+own feed is generated from GitHub's list, so the bad release leaves it at that sync). A mirror that does not confirm
+in time is reported with exit 2 and the command to run by hand. It refuses (exit 1,
 nothing changed) when a blocker is found: vBAD is not the newest published release, vTO is not published
 or not older than vBAD, the feed does not list vTO, or the repo's config and the live one differ (the
 Pages push writes docs/config.json from the repo file, so it would overwrite the live config).
@@ -48,6 +51,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 GITVERSE_DIR = os.path.join(ROOT, "tools", "gitverse")
 sys.path.insert(0, HERE)
 
+import mirror_sync as ms  # noqa: E402
 import update_check as uc  # noqa: E402
 
 REPO = uc.REPO
@@ -271,6 +275,13 @@ def apply(p, feed_url, releases_reader=None, gh_runner=None, pages_factory=None,
     return out
 
 
+def own_mirror(to, bad):
+    """After the GitHub flip: starts the own download mirror's sync and waits until its status lists `to` and no
+    longer lists `bad` (the sync drops a pre-release from the own feed). Raises mirror_sync's errors."""
+    st = ms.sync_and_wait(ms.release_check(to, gone=bad))
+    return f"the own mirror lists {to} and not {bad} (synced {st['synced_at']})"
+
+
 def load_inputs(env, to, feed_url):
     """The inputs as the tool reads them: each one from `env` when a test gives it (None included: an
     unreadable input), else from GitHub, GitVerse and the repo."""
@@ -306,7 +317,8 @@ def load_inputs(env, to, feed_url):
 
 def main(argv=None, env=None):
     """`env` (tests only) replaces inputs: keys releases, feed, feed_url, live_config, repo_config,
-    releases_reader, gh_runner, pages_factory, waiter. A key given as None means that input is unreadable."""
+    releases_reader, gh_runner, pages_factory, waiter, mirror (a function () -> str that runs the own mirror's
+    trigger; tests pass a fake, the real one needs the ssh host). A key given as None means that input is unreadable."""
     env = env or {}
     ap = argparse.ArgumentParser(description="Roll a bad release back: the update feeds stop offering it.")
     ap.add_argument("--to", required=True, metavar="vX.Y.Z", help="the release to make the newest again (the previous one)")
@@ -344,6 +356,14 @@ def main(argv=None, env=None):
         return EXIT_ERROR
     print("\nApplied:")
     print("\n".join("  " + ln for ln in lines))
+    mirror = env.get("mirror") or (lambda: own_mirror(uc.vtag(p["to"]), p["bad"]))
+    try:
+        print("  " + mirror())
+    except (ms.MirrorError, ms.MirrorTimeout, uc.ToolError, ValueError) as e:
+        print(f"rollback: applied on GitHub and the feed, but the own mirror did not confirm it: {e}. "
+              f"Run `python3 -I tools/release/mirror_sync.py --tag {uc.vtag(p['to'])} --gone {p['bad']}` "
+              "when it is fixed, and tell the owner.", file=sys.stderr)
+        return EXIT_ERROR
     return EXIT_OK
 
 

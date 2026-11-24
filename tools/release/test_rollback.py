@@ -165,14 +165,46 @@ class MainTests(HermeticTestCase):
 
         after = [rel("v1.5.4", prerelease=True), rel("v1.5.3")] + RELEASES[2:]
         code, out, err = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
-            gh_runner=gh, pages_factory=FakePages, releases_reader=lambda: after))
+            gh_runner=gh, pages_factory=FakePages, releases_reader=lambda: after,
+            mirror=lambda: "the own mirror lists v1.5.3 and not v1.5.4 (fake)"))
         self.assertEqual(code, 0, err)
+        self.assertIn("own mirror lists v1.5.3", out)
         self.assertEqual(FakePages.log[0][0], "write")
         self.assertEqual(FakePages.log[0][1], rb.FEED_PATH)
         self.assertEqual(FakePages.log[1][0], "push")
         self.assertEqual(FakePages.log[2][0], "served")
         self.assertEqual(calls, [["gh", "release", "edit", "v1.5.4", "--repo", "indicozy/razdor", "--prerelease"]])
         self.assertIn("newest published release is now v1.5.3", out)
+
+    def test_apply_reports_an_own_mirror_that_does_not_confirm(self):
+        import mirror_sync as ms
+        FakePages.log = []
+
+        def stuck():
+            raise ms.MirrorTimeout("not complete after 1 s: synced_at x, app v1.5.4")
+        after = [rel("v1.5.4", prerelease=True), rel("v1.5.3")] + RELEASES[2:]
+        code, out, err = self.run_main(["--to", "v1.5.3", "--apply"], self.env(
+            gh_runner=lambda argv: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
+            pages_factory=FakePages, releases_reader=lambda: after, mirror=stuck))
+        self.assertEqual(code, 2)
+        self.assertIn("did not confirm", err)
+        self.assertIn("mirror_sync.py --tag v1.5.3 --gone v1.5.4", err)
+
+    def test_own_mirror_asks_the_sync_for_the_new_state(self):
+        import mirror_sync as ms
+        calls = []
+
+        def fake_sync(has_new, **kw):
+            calls.append(has_new({"synced_at": "2", "app": ["v1.5.3"]}))
+            return {"synced_at": "2"}
+        real = ms.sync_and_wait
+        ms.sync_and_wait = fake_sync
+        try:
+            text = rb.own_mirror("v1.5.3", "v1.5.4")
+        finally:
+            ms.sync_and_wait = real
+        self.assertEqual(calls, [True])
+        self.assertIn("lists v1.5.3 and not v1.5.4", text)
 
     def test_apply_stops_when_the_check_still_sees_the_bad_release(self):
         FakePages.log = []

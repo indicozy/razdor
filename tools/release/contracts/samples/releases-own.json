@@ -1,0 +1,40 @@
+[
+  {
+    "tag_name": "v9.9.2",
+    "name": "Sample 9.9.2",
+    "html_url": "https://sample.invalid/releases/v9.9.2",
+    "draft": false,
+    "prerelease": false,
+    "body": "Sample release (made up for the contract test).",
+    "assets": [
+      {
+        "name": "razdor-9.9.2-linux.zip",
+        "browser_download_url": "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v9.9.2/razdor-9.9.2-linux.zip",
+        "archive": "zip",
+        "member": "razdor"
+      },
+      {
+        "name": "SHA256SUMS",
+        "browser_download_url": "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v9.9.2/SHA256SUMS"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v9.9.2/SHA256SUMS"
+      }
+    ]
+  },
+  {
+    "tag_name": "v9.9.1",
+    "name": "Sample 9.9.1",
+    "html_url": "https://sample.invalid/releases/v9.9.1",
+    "draft": false,
+    "prerelease": false,
+    "body": null,
+    "assets": [
+      {
+        "name": "SHA256SUMS",
+        "browser_download_url": "https://razdor.indicozy.dev/hub/indicozy/razdor/releases/download/v9.9.1/old/SHA256SUMS"
+      }
+    ]
+  }
+]

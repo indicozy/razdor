@@ -124,6 +124,22 @@ without an Android or iOS file gets no offer on that system.
    - then delete the scratch folder and the notes file. A GitVerse failure does not undo the GitHub
      release: report it to the owner with the error, and the owner decides whether to rerun.
    A release with an iOS file: the `.ipa` is left out of GitVerse (it refuses it), with a warning.
+6a2. Own mirror (the owner's decision, 2026-11-24: `razdor.indicozy.dev/hub/` is the second download source, after
+   GitHub; the server pulls the files from GitHub every 15 minutes, `server/deploy/`). Once the GitHub release is
+   published (after 6a too, when it ran): start the server's sync now and wait until its `status.json` lists the tag.
+   Give it its own scratch folder for the done-file (the session scratchpad), and run it in the background:
+
+       (python3 -I tools/release/mirror_sync.py --tag vX.Y.Z --timeout 1800; echo $? > <scratch>/mirror.done) &
+
+   Then poll in the foreground, at most 4 minutes per call, and repeat in a new call until the file exists:
+
+       for i in $(seq 1 8); do [ -f <scratch>/mirror.done ] && break; sleep 30; done; cat <scratch>/mirror.done 2>/dev/null
+
+   The host is `RAZDOR_MIRROR_SSH` in `.env` (or `--ssh HOST`). The timeout is 30 minutes (a release is about 313 MiB
+   to pull). Exit 0: the own mirror lists vX.Y.Z; go on to 6b. Exit 1: not complete in time (the sync failed or is
+   slow): tell the owner with the server's sync log (`journalctl -u razdor-mirror-sync`); the release stands, GitHub
+   is still the first source. Exit 2: the tool could not run (no host, ssh refused): tell the owner, do not block the
+   release. The mirror is never a reason to hold a release.
 6b. Update check (the owner's decision, 2026-11-15): after 6a (the GitHub Pages feed is read first from 1.5.x on, the owner's decision 2026-11-22),
    once the pipeline is green and the release is published,
    `$(ai-resources prefix) python3 -I tools/release/update_check.py <the list> --to vX.Y.Z` (the list is
@@ -134,6 +150,9 @@ without an Android or iOS file gets no offer on that system.
    does not update to this one (or the APK cannot install over it), or its data does not carry over: tell the
    owner at once with the summary; exit 2 = network/tool error (or a refused `--to`, which is not the newest
    release): rerun, report if it persists. Put its result in the step-8 report.
+   When 6a2 exited 0, run the same `update_check.py --to vX.Y.Z --feed own` too (the own mirror's list and files; the
+   from-list is the same). Its exit codes mean the same; a failure there (with 6b passing) means the mirror serves a
+   bad copy: report it and look at the mirror before anything else.
 6c. Android update check, after the release (the APK over the previous one: the install, the version, the data,
    and a crash the old version does not have). Once 6b has run:
    `$(ai-resources prefix) python3 -I tools/release/android_update_check.py --from vPREV --to vX.Y.Z`
@@ -210,7 +229,9 @@ kind "proactive", level "critical"); `--apply` is public, so it runs on the owne
 2. Apply, after the owner's yes: `python3 -I tools/release/rollback.py --to vPREV --apply`. It writes the feed first (a commit on
    razdor-community `main`, then a wait until the address serves it), then flips GitHub, then checks that the newest
    published release is vPREV. It prints what it changed; a failure says what may have changed: check the feed and
-   the GitHub release by hand.
+   the GitHub release by hand. Then it starts the own download mirror's sync and waits until the mirror lists vPREV
+   and no longer lists vBAD (`mirror_sync.py --tag vPREV --gone vBAD`). A mirror that does not confirm exits 2 with
+   that command to run by hand, once the server is fixed; tell the owner.
 3. Tell the owner at once (stolik, kind "proactive", one or two sentences): the bad release, the rollback's result
    and what it changed.
 4. Players already on the bad release are not moved back: the updaters never offer an older release. They get the

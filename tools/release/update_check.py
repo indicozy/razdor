@@ -33,6 +33,10 @@ does not update to this one, or its data does not carry over), 2 the check could
 (network, tool or input error; --to must be the newest published release and --from an older
 one; the old data could not be made).
 
+`--feed own` reads the release list from the own download mirror (`razdor.indicozy.dev/hub/...`, the feed the
+mirror generates) instead of GitHub's API, so the check proves the mirror serves the new release; the files are
+then the mirror's copies. Run it after `mirror_sync.py` has the new tag.
+
 Only stdlib (ctypes for the key presses on the private display). The public GitHub API and
 download URLs need no token. Windows, macOS and iOS are not covered (Wine has no curl; there is
 no Mac here).
@@ -59,6 +63,8 @@ from pathlib import Path
 REPO = "indicozy/razdor"
 API_RELEASES = f"https://api.github.com/repos/{REPO}/releases?per_page=100&page={{page}}"
 API_MAX_PAGES = 50  # 5000 releases: far more than the repo has (a guard against a loop)
+OWN_FEED = "https://razdor.indicozy.dev/hub/pages/razdor-community/releases.json"  # the own mirror's copy of the API list
+FEEDS = ("github", "own")
 UA = "razdor-update-check/1"
 UPDATE_WAIT = 180  # seconds for the program to put the new file in place
 START_SECONDS = 20  # seconds the updated program runs
@@ -155,10 +161,20 @@ def parse_sums(text):
     return out
 
 
-def release_list(get=None):
+def release_list(get=None, feed="github"):
     """Every release of the repo, all pages (the API gives 100 at a time; the repo has more than 30,
-    so one page would miss the old releases a `--from` names). `get(url)` gives the bytes of a page."""
+    so one page would miss the old releases a `--from` names). `get(url)` gives the bytes of a page.
+    `feed="own"` reads the own mirror's copy of the list instead (one file, its download addresses are the own
+    copies): the check then proves the mirror serves the new release."""
     get = get or http_get
+    if feed == "own":
+        try:
+            chunk = json.loads(get(OWN_FEED))
+        except ValueError as e:
+            raise ToolError(f"the own feed is not JSON: {e}") from e
+        if not isinstance(chunk, list):
+            raise ToolError("the own feed is not a list")
+        return chunk
     data = []
     for page in range(1, API_MAX_PAGES + 1):
         try:
@@ -185,8 +201,8 @@ def published_map(data):
     return pub
 
 
-def load_published(get=None):
-    pub = published_map(release_list(get))
+def load_published(get=None, feed="github"):
+    pub = published_map(release_list(get, feed))
     if not pub:
         raise ToolError("no published release found")
     return pub
@@ -1171,6 +1187,9 @@ def main(argv=None):
     ap.add_argument("--keep", action="store_true", help="keep the scratch folders (also on success)")
     ap.add_argument("--mod-src", help="the mod source for the carry-over's test Hub mod: an install whose "
                     "Graphics differ from the game (default: $RAZDOR_COMMUNITY_DIR/evolution/install)")
+    ap.add_argument("--feed", choices=FEEDS, default="github",
+                    help="the release list to read: GitHub's API (default) or the own mirror's copy (--feed own, "
+                    "after the mirror's sync: the newest release there must be --to)")
     a = ap.parse_args(argv)
     if bool(a.to) == bool(a.new_bin):
         ap.error("give --to (after the release) or --new-bin (before the tag), one of them")
@@ -1183,7 +1202,7 @@ def main(argv=None):
     try:
         frms = [parse_version(f) for f in a.frms]
         to = parse_version(a.to) if a.to else None
-        pub = load_published()
+        pub = load_published(feed=a.feed)
         newest = max(pub)
         if to is not None and to != newest:
             raise ToolError(f"{vtag(to)} is not the newest published release ({vtag(newest)}); "

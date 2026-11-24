@@ -8,7 +8,8 @@ Checks run by the release skill on a Razdor release. Plain Python 3, standard li
 | `update_check.py` | the desktop update (the previous release puts the new one in place) and the data carry-over (saves, mods, the picture cache) | 3b, 6b |
 | `from_list.py` | prints the `--from` list for `update_check.py` from the download stats | 3b, 6b |
 | `android_update_check.py` | the Android APK over the previous one: signatures, package, versionCode, and a headless emulator install with the data kept | 6c (after the release) |
-| `rollback.py` | withdraws a bad release from the update feeds (dry run by default) | Rollback |
+| `rollback.py` | withdraws a bad release from the update feeds (dry run by default), then has the own mirror sync it | Rollback |
+| `mirror_sync.py` | starts the own download mirror's sync over ssh and waits until its `status.json` has the release (or has lost a bad one) | 6a2, Rollback |
 | `hub_candidate_check.py` | a candidate hub catalog (the publish dry run's folder), served on 127.0.0.1 over TLS, read and used by the old Linux releases v1.5.2 to v1.5.4 | community-pack 6a, release 3d |
 | `contracts/`, `test_contracts.py` | the parser rules of the old releases for each published file (feed, config, hub catalog), checked against the publishers' own output | release 3d, the gate |
 | `testkit.py`, `test_*.py` | hermetic tests of the tools above (fakes; no network, no emulator, no gh, no token) | the gate |
@@ -181,6 +182,38 @@ asset addresses.
 - A player already on the bad release is not moved back: the updaters never offer an older release. Those players
   get the next fixed release.
 - `--apply` needs `gh` logged in as indicozy (`gh auth token -u indicozy`) and `GITVERSE_TOKEN` (in `.env`).
+- After the GitHub flip, `--apply` runs `mirror_sync.py` (below) with `--tag vTO --gone vBAD` and reports the own
+  mirror's result. A mirror that does not confirm in time exits 2 with the command to run by hand. The tests
+  inject a fake for it (`mirror=` in `env`).
+
+## mirror_sync.py: the own download mirror's sync
+
+    python3 -I tools/release/mirror_sync.py --tag v1.7.0                  # after a release (release step 6a2)
+    python3 -I tools/release/mirror_sync.py --tag v1.5.3 --gone v1.5.4    # after a rollback (the bad tag leaves)
+
+The owner's server pulls the release files from GitHub on a 15-minute timer (`razdor-mirror`, `server/`). This tool
+does not wait for the timer: it reads `https://razdor.indicozy.dev/hub/status.json`, starts
+`razdor-mirror-sync.service` over ssh (`ssh -o BatchMode=yes HOST systemctl start razdor-mirror-sync.service`),
+then polls every 20 s. It is done when `synced_at` is newer than the one read before the start, the tag is in
+`app` (and `--gone` is not). A finished run without the tag starts the sync again.
+
+- Host: `--ssh HOST`, else `$RAZDOR_MIRROR_SSH`, else the line `RAZDOR_MIRROR_SSH=` in `.env`. The ssh login must be
+  allowed to start that unit (no sudo in this tool).
+- Timeout: 1800 s (`--timeout`). A release is about 313 MiB of files to pull from GitHub, a catalog about 357 MiB.
+- Exit codes: 0 the mirror has the state; 1 it did not in time (check `journalctl -u razdor-mirror-sync` on the
+  server); 2 the tool could not run (no host, ssh failed, a bad version).
+
+## update_check.py with `--feed own`
+
+    python3 -I tools/release/update_check.py --from v1.6.0 --to v1.7.0 --feed own
+
+Reads the release list from the own mirror's feed (`https://razdor.indicozy.dev/hub/pages/razdor-community/releases.json`)
+instead of GitHub's API. The newest release there must be `--to`, so a pass means the mirror serves the new release
+and its files (the mirror's copies, checked by the same SHA256SUMS). Run it after `mirror_sync.py`. The default stays GitHub.
+
+The own files' contract samples (`contracts/samples/config-own.json`, `index-own.json`, `releases-own.json`) are the
+1.5.2-1.5.4 rules' view of the mirror's config, catalog (option B: the game's own address first, GitHub's in `mirrors`)
+and feed.
 
 ## hub_candidate_check.py: the old releases and a candidate catalog
 

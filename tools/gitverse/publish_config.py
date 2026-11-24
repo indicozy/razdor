@@ -37,6 +37,11 @@ FEED_ORDER = ("https://indicozy.github.io/razdor-community/releases.json",
               "https://indicozy.gitverse.site/razdor-community/releases.json")
 
 
+# The own download mirror's feed (2026-11-24, the owner's order: GitHub, then the own server, then GitVerse). It is
+# optional in the file; when present it sits between the two above.
+OWN_FEED = "https://razdor.indicozy.dev/hub/pages/razdor-community/releases.json"
+
+
 def https_address(a):
     return isinstance(a, str) and a.startswith("https://") and len(a) > len("https://") and not BAD_ADDRESS_CHARS.search(a)
 
@@ -59,6 +64,8 @@ def check(raw):
         raise gv.GitVerseError(f"config.json: update_feed must name {FEED_ORDER[0]} and {FEED_ORDER[1]}")
     if feed.index(FEED_ORDER[0]) > feed.index(FEED_ORDER[1]):
         raise gv.GitVerseError("config.json: update_feed must try GitHub Pages' feed before GitVerse's feed")
+    if OWN_FEED in feed and not feed.index(FEED_ORDER[0]) < feed.index(OWN_FEED) < feed.index(FEED_ORDER[1]):
+        raise gv.GitVerseError("config.json: update_feed must try the own feed after GitHub Pages' and before GitVerse's")
     game = cfg.get("game")
     if not isinstance(game, dict):
         raise gv.GitVerseError("config.json: game is missing")

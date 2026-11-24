@@ -1,0 +1,93 @@
+{
+  "format": 1,
+  "entries": [
+    {
+      "id": "sample-map",
+      "kind": "map",
+      "title": {
+        "ru": "Образец карты",
+        "en": "Sample map"
+      },
+      "author": "sample author",
+      "version": "1.0",
+      "description": {
+        "ru": "Описание.",
+        "en": ""
+      },
+      "languages": [
+        "ru"
+      ],
+      "status": "full",
+      "status_note": {
+        "ru": ""
+      },
+      "preview": {
+        "path": "previews/sample-map.png",
+        "name": "sample-map.png",
+        "size": 68,
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "rating": {
+        "up": 3,
+        "down": 0
+      },
+      "files": [
+        {
+          "path": "https://sample.invalid/hub/0001",
+          "name": "Sample.DTm",
+          "lang": "ru",
+          "size": 100,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "wrapped": "zip",
+          "member": "Sample.DTm",
+          "archive_size": 90,
+          "archive_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "mirrors": [
+            "https://sample.invalid/github/Sample.DTm"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sample-mod",
+      "kind": "mod",
+      "title": {
+        "ru": "Образец мода",
+        "en": ""
+      },
+      "author": "sample author",
+      "version": "2.0",
+      "requires": [
+        "sample-map"
+      ],
+      "files": [
+        {
+          "path": "https://sample.invalid/hub/0002",
+          "name": "sample-mod.zip",
+          "size": 200,
+          "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "archive": true
+        }
+      ]
+    }
+  ],
+  "game": {
+    "url": "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip",
+    "mirrors": [
+      "https://github.com/indicozy/razdor-community/releases/download/game-cu-1.2/discord-times-cu.zip"
+    ],
+    "size": 1024,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "sample-game.zip"
+  },
+  "ad": {
+    "id": "sample-ad",
+    "version": 1,
+    "image": "previews/sample-ad.png",
+    "size": 68,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "url": "https://sample.invalid/ad",
+    "caption_ru": "Образец",
+    "caption_en": "Sample"
+  }
+}

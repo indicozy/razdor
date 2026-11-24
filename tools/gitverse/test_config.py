@@ -54,6 +54,19 @@ class CheckTests(HermeticTestCase):
             with self.assertRaises(gv.GitVerseError):
                 publish_config.check(raw_of(with_feed(feed)))
 
+    def test_the_own_feed_sits_between_github_pages_and_gitverse(self):
+        own = publish_config.OWN_FEED
+        base = list(publish_config.FEED_ORDER)
+        between = [base[0], own, base[1], "https://api.example/releases"]
+        cfg = good()
+        cfg["update_feed"] = between
+        self.assertEqual(publish_config.check(raw_of(cfg))["update_feed"], between)
+        for feed in ([own, base[0], base[1]], [base[0], base[1], own], [base[1], own, base[0]]):
+            cfg = good()
+            cfg["update_feed"] = feed
+            with self.subTest(feed=feed), self.assertRaises(gv.GitVerseError):
+                publish_config.check(raw_of(cfg))
+
     def test_a_good_config_passes(self):
         self.assertEqual(publish_config.check(raw_of(good()))["game"]["name"], "game.zip")
 
