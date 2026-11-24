@@ -341,7 +341,10 @@ and the game as soon as the config reaches them.
 
 ## 7. The owner's answers (2026-11-24)
 
-1. Order: own server → GitHub → GitVerse, on every request, for everything players download, the remote config included.
+1. Order (changed by the owner the same day, overrides every "own first" above): GitHub → own server → GitVerse, on every
+   request, for everything players download, the remote config included. GitHub stays primary; the own server is the
+   first fallback (it replaces GitVerse's role); GitVerse is last. Where the sections above say "own first", read "own
+   second, after GitHub"; the own host's short timeouts (§4.1) still apply to it.
 2. Files reach the server by the server pulling from GitHub (no CI secret).
 3. Option B: yes. The own catalog copy rewrites `game.url` so 1.6.0 also downloads the game archive from the own server.
 4. Extras mirrored: the Thorny Times ad image, the depth model (`DEPTH_MODEL_URL`) and the ads zip.
