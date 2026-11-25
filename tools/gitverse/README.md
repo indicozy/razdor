@@ -1,4 +1,4 @@
-Unused since 2026-11-24: GitVerse is no longer a mirror (the owner's decision).
+Since 2026-11-25 (the owner's decision) only `publish_feed_entry.py` is used: every release adds its entry to the GitVerse update feed, with links to the own mirror, for 1.6.0 copies that read GitVerse. The other scripts are unused since 2026-11-24.
 
 # GitVerse publishing
 
@@ -10,6 +10,7 @@ The design is in `docs/specs/2026-11-13-gitverse-mirrors.md`.
 |---|---|
 | `gitverse.py` | The shared client: the token, the API calls (releases, assets), retries, anonymous ranged downloads with the size and SHA-256 check, the name rule, the registry of the releases these scripts made. Not run directly. |
 | `pages.py` | The Pages push for `razdor-community`: a fresh clone of the repo, the site changed, a commit as the owner, a push, and a wait until the anonymous URLs serve exactly the new bytes. Host `gitverse` (default): the `docs/` folder of `main`. Host `github` (the pages layout only): the root of the `gh-pages` branch, the token from `gh auth token -u indicozy`. Every push writes `config.json` from `data/remote/config.json`. Not run directly. |
+| `publish_feed_entry.py` | The GitVerse update feed (`docs/releases.json`, 2026-11-25): adds a release's entry (`--tag vX.Y.Z`) with links to the own mirror (`razdor.indicozy.dev`; the IPA on GitHub), after checking each link answers 200 and the mirror's `SHA256SUMS` lists the programs; keeps the newest two. `--drop vX.Y.Z` removes an entry (a rollback). Nothing is uploaded to GitVerse. |
 | `publish_config.py` | The remote config only: checks `data/remote/config.json` as the app reads it, pushes `docs/config.json` to the `razdor-community` Pages, waits until it is served. `--dry-run` checks only. |
 | `publish_release.py` | An app release: packs the files GitVerse refuses, writes `SHA256SUMS.txt`, creates the release, uploads, verifies, updates the update feed (`releases.json`), deletes old releases. Also `--push-source` (the release commit and tag to GitVerse) and `--unpublish`. |
 | `publish_hub.py` | The hub catalog. Default `--layout zipped` (the 2026-11-13 design): zips each map and other file (one zip each) into a `catalog-YYYY-MM-DD` release, writes the GitVerse `index-v2.json`, pushes the site (`index-v2.json`, the pictures under `previews/`, the hub page) to Pages, deletes old catalogs. `--layout pages` (the owner's decision, 2026-11-22): every hub file and the game archive is a bare Pages file `files/<sha256>.dat` on `--host gitverse` (the `docs/` of `main`) or `--host github` (the root of `gh-pages`); no release is made or removed. The zipped default also copies the game archive to Pages on both hosts and gives each Hub file its GitHub release copy as a mirror (see «Game on Pages»). `--layout pages` is postponed (see «Pages layout»). |
@@ -28,6 +29,12 @@ python3 -I tools/gitverse/publish_release.py --dry-run --tag v1.5.2 --notes NOTE
 python3 -I tools/gitverse/publish_release.py --push-source v1.5.2     # the release commit to main, and the tag
 python3 -I tools/gitverse/publish_release.py --tag v0.0.1-x --prerelease --target main <files> # a test (no feed)
 python3 -I tools/gitverse/publish_release.py --unpublish v0.0.1-x --git-tag                    # remove a test
+
+# the update feed entry (after the release is on the own mirror; the release skill's step 6a3)
+python3 -I tools/gitverse/publish_feed_entry.py --tag v1.6.2 --dry-run   # the entry and the tags, nothing pushed
+python3 -I tools/gitverse/publish_feed_entry.py --tag v1.6.2             # add it, wait until the feed is served
+python3 -I tools/gitverse/publish_feed_entry.py --drop v1.6.2 --dry-run  # a rollback: what would be left
+python3 -I tools/gitverse/publish_feed_entry.py --drop v1.6.2            # remove the entry
 
 # the remote config (data/remote/config.json; the app reads it from both sites)
 python3 -I tools/gitverse/publish_config.py --dry-run     # check the file only

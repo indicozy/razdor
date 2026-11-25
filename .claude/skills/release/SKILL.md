@@ -122,6 +122,10 @@ without an Android or iOS file gets no offer on that system.
    slow): tell the owner with the server's sync log (`journalctl -u razdor-mirror-sync`); the release stands, GitHub
    is still the first source. Exit 2: the tool could not run (no host, ssh refused): tell the owner, do not block the
    release. The mirror is never a reason to hold a release.
+6a3. GitVerse feed (the owner's decision, 2026-11-25): only when 6a2 exited 0, run `python3 -I tools/gitverse/publish_feed_entry.py --tag vX.Y.Z`
+   (with `--dry-run` first). It adds the release to `https://indicozy.gitverse.site/razdor-community/releases.json` with links to the own
+   mirror, for 1.6.0 copies that read GitVerse. When 6a2 did not finish, run it later, once the mirror lists the release. A failure is
+   reported to the owner and never holds the release.
 6b. Update check (the owner's decision, 2026-11-15): after 6a (the GitHub Pages feed is read first from 1.5.x on, the owner's decision 2026-11-22),
    once the pipeline is green and the release is published,
    `$(ai-resources prefix) python3 -I tools/release/update_check.py <the list> --to vX.Y.Z` (the list is
@@ -166,7 +170,7 @@ without an Android or iOS file gets no offer on that system.
    platforms, the requirements, the install steps, the video when the owner gives a new one).
    Commit `Site: X.Y.Z …`, push as a fast-forward to `gh-pages` (never force), remove the worktree.
 8. Tell the owner: the version, the release link, what is in it (plain words), test results, and the
-   own mirror's result (step 6a2), the update checks (3b and 6b: the
+   own mirror's result (step 6a2), the GitVerse feed (6a3), the update checks (3b and 6b: the
    `--from` list and one row per `--from`; 6c: the Android table, or that it follows after the release).
    Add the download statistics: run `python3 -I tools/stats/downloads.py` (it appends a live
    snapshot to the private CSV; the default path needs no argument, or see `CLAUDE.local.md`)
@@ -209,7 +213,7 @@ kind "proactive", level "critical"); `--apply` is public, so it runs on the owne
    published release is vPREV. It prints what it changed; a failure says what may have changed: check the feed and
    the GitHub release by hand. Then it starts the own download mirror's sync and waits until the mirror lists vPREV
    and no longer lists vBAD (`mirror_sync.py --tag vPREV --gone vBAD`). A mirror that does not confirm exits 2 with
-   that command to run by hand, once the server is fixed; tell the owner.
+   that command to run by hand, once the server is fixed; tell the owner. Also run `python3 -I tools/gitverse/publish_feed_entry.py --drop vBAD` (the GitVerse feed).
 3. Tell the owner at once (stolik, kind "proactive", one or two sentences): the bad release, the rollback's result
    and what it changed.
 4. Players already on the bad release are not moved back: the updaters never offer an older release. They get the

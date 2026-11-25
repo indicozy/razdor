@@ -194,8 +194,9 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 - Mirrors (the owner's decision, 2026-11-24): GitHub is the main host and the owner's server
   `razdor.indicozy.dev` (`/hub/`, filled by `razdor-mirror` pulling from GitHub, see
   `docs/specs/own-mirror-2026-11-24.md`) the only fallback, tried in that order on every request, nothing
-  remembered. GitVerse was dropped as a mirror (it throttled downloads); its repos and Pages are left as
-  they are, nothing is published there.
+  remembered. GitVerse was dropped as a mirror (it throttled downloads), but its update feed gets every
+  release's entry, with links to the own mirror (the owner, 2026-11-25: 1.6.0 copies still read it); nothing else is
+  published there.
 - "release" / "make a release": the `release` skill. The Discord release post goes out together with
   the release's start (right after the tag is pushed), without waiting for the release pipeline to
   finish (the owner's decision, 2026-10-27).
