@@ -54,7 +54,8 @@ Recipes with the real function names are in `patterns.md`. The short form:
 
 Do not:
 
-- redesign (colours, panels, tab styles, a new component layer) beyond what was asked;
+- redesign (colours, panels, tab styles, a new component layer) beyond what was asked; the one
+  layer the owner approved is `src/ui/flex.rs`, used through the `ui-design` skill;
 - make a phone window full-screen, stack full-width buttons, or move a row into columns unasked;
 - stretch grid cells to fill the area the old layout took;
 - shrink a label below 12 sp to make it fit (`widgets::text_fit` doing that is a layout bug: make room);

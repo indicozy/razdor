@@ -35,6 +35,8 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 - Off-screen screens and profiling: the `offscreen-snapshot` skill.
 - Phone screens (every text measured in sp, every touch target in dp, small and crowded ones
   listed; specs on request): the `mobile-ui` skill.
+- New look for a screen (HTML mockups first, then built on `src/ui/flex.rs`, the taffy layer): the
+  `ui-design` skill.
 - Player wiki (Starlight in `wiki/`, published to https://indicozy.github.io/razdor/wiki/ by
   `.github/workflows/pages.yml`): the `wiki` skill.
 - UI regression check (renders the scene list off-screen, compares with the goldens outside the
@@ -207,6 +209,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   decision, 2026-10-26). Only the owner's tags count; anyone else's stay normal reports.
 - "bring back X" / "as before": restore that one aspect on top of the current work; never revert the rest.
 - "update the wiki" / "wiki page for X" / "вики": the `wiki` skill.
+- "design ideas" / "mockups" / "redesign" / "макет" / "дизайн": the `ui-design` skill.
 - "minor version": bump the middle number (0.4.17 → 0.5.0); otherwise bump the last.
 - A Discord link, screenshot, video or save from a player: the `player-report` skill.
 - "check the original" / "is it parity" / "reverse engineer X" / "RE it" / anything in Ghidra:
@@ -222,6 +225,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 - `.claude/skills/offscreen-snapshot/SKILL.md`: screenshots and profiling without a window.
 - `.claude/skills/mobile-ui/SKILL.md`: measuring text and touch target sizes on phone screens.
 - `.claude/skills/wiki/SKILL.md`: writing and updating the player wiki.
+- `.claude/skills/ui-design/SKILL.md`: the mockups-first design pipeline and flex.rs.
 - `docs/reference/original-mechanics/README.md`: the spec index.
 - `changelog/README.md`: changelog layout.
 - `CLAUDE.local.md` (not in git): this machine's own rules.
