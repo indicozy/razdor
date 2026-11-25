@@ -206,7 +206,7 @@ come from the TOML file (`--config`, or `RAZDOR_CONFIG`) and `RAZDOR_*` environm
   frame the battle screen was first shown); `battle_autobattle` (`battle_view`'s `quick_battle`: the tag); the
   reload flag (`save_loaded` while a capture is open); `hint_opened` (`main_menu::help_button`, the «?» buttons).
 - `src/ui/telemetry_view.rs`: the consent window (`«Помочь Раздору?»`, asked at the first start and once
-  after an update), the crash question, and the three Settings panels (show id with copy, delete my data,
+  until answered; the answer is kept across updates), the crash question, and the three Settings panels (show id with copy, delete my data,
   new id). `src/ui/main_menu.rs` `Row::Telemetry*`: the four rows in the Other group.
 
 ### Rules that hold (tests pin them)

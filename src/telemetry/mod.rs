@@ -121,9 +121,10 @@ impl Hub {
         }
     }
 
-    /// Whether the question «Помочь Раздору?» is due: never answered, or not asked in this version yet.
-    pub fn question_due(&self, version: &str) -> bool {
-        self.with_state(|s| s.consent == Consent::Unknown || s.asked_version.as_deref() != Some(version))
+    /// Whether the question «Помочь Раздору?» is due: only while never answered; an answer is kept across
+    /// updates (the owner, 2026-11-25).
+    pub fn question_due(&self, _version: &str) -> bool {
+        self.with_state(|s| s.consent == Consent::Unknown)
     }
 
     /// The install id, made at the first call (a random id, `state::new_install_id`).
@@ -470,13 +471,17 @@ mod tests {
     }
 
     #[test]
-    fn the_question_is_due_until_answered_and_again_after_an_update() {
+    fn the_question_is_due_until_answered_and_kept_across_updates() {
+        let (hub_yes, dir_yes) = hub("question-yes");
         let (hub, dir) = hub("question");
         assert!(hub.question_due("1.5.4"));
         hub.set_consent(Consent::No, "1.5.4");
         assert!(!hub.question_due("1.5.4"));
-        assert!(hub.question_due("1.5.5"), "asked once after an update");
+        assert!(!hub.question_due("1.5.5"), "a No stays No after an update");
+        hub_yes.set_consent(Consent::Yes, "1.5.4");
+        assert!(!hub_yes.question_due("1.5.5"), "a Yes stays Yes after an update");
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir_yes);
     }
 
     #[test]

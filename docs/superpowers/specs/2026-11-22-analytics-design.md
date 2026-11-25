@@ -8,7 +8,7 @@ the game crashes, how it performs on real devices and settings, how experiments 
 to train the AI (backlog 1577).
 
 ## Consent and offline play
-- Opt-in window at the first start and once after an update: «Помочь Раздору?» [Да] [Нет]. Everything below is
+- Opt-in window until the player answers; the answer is kept across updates (the owner, 2026-11-25): «Помочь Раздору?» [Да] [Нет]. Everything below is
   off until «Да», except the daily ping. Changeable in the settings at any time. The window is UI: the owner
   approves its screenshots before `main`.
 - The daily ping is always sent, consent or not, so it carries nothing about the person.

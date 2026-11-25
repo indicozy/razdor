@@ -1,5 +1,5 @@
-//! The analytics' windows (`telemetry`): the two questions («Помочь Раздору?» at the first start and
-//! once after an update; the crash question after a crash) and the three panels of Settings («Мой
+//! The analytics' windows (`telemetry`): the two questions («Помочь Раздору?» until the player answers;
+//! the crash question after a crash) and the three panels of Settings («Мой
 //! идентификатор», «Удалить мои данные», «Новый идентификатор»). All use the map import's frame and
 //! buttons (the same look as the other questions). Nothing shows when the analytics are off
 //! (`telemetry::active`), except in the snapshots' own switches: `RAZDOR_SCENE_CONSENT=1`,
@@ -15,7 +15,7 @@ use razdor::telemetry::{self, crash, state::Consent, Hub};
 use super::map_import;
 use super::widgets::esc_pressed;
 
-/// The version the questions are asked in (asked again after an update).
+/// The version the questions are asked in (recorded with the answer; the consent is not asked again after an update).
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The consent window was closed without an answer: not shown again in this run (it is asked at the next start).
