@@ -12,7 +12,9 @@ army, a guard, a building to take), moves the hero, and starts the step's game t
 → `begin_slice`: the clock moves, and the AI armies' moves begin, `ai_move_begin`). `ai_move_run`
 plays the armies' arrivals on in time order; then `slice_tail` moves the armies the AI does not
 steer, runs the scenario's event scan (`run_script`) and pays the hero's noon if the scan fired
-nothing (`new_day`). `walk_tail` then lets an AI army greet or attack him (`ai_contact` → `meet`),
+nothing (`new_day`); a noon held back for a contact the walk is about to meet waits for it. `walk_tail`
+then lets an AI army greet or attack him (`ai_contact` → `meet`; `meet_as` takes a due noon in that
+scan, `pay_noon_report`, and then no battle opens),
 and the route's end opens its building. A frame's budget (8 ms, `AI_FRAME_BUDGET` in
 `ui/world_view.rs`) can stop the arrivals of a step between two of them: the step waits (see *A
 paused step* below), and the screen keeps drawing. Anything that needs a window
@@ -41,7 +43,7 @@ ui/world_view.rs  click on the map
         run_pause()            the same frame, or a later one (the budget)
           ai_move_run()        AI steps, arrivals, midnight in between
           ai_move_end()        the clock back to the tick's end
-          slice_tail()         the gang armies; the noon; run_script → EventEngine::tick
+          slice_tail()         the gang armies; the noon (not while a contact waits); run_script → EventEngine::tick
                                (rules/events.rs) → script_events()
           walk_tail()          ai_contact → meet(); route's end: arrive_at_end → enter_building()
           or wait_tail()       ai_contact → meet() while he waits

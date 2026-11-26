@@ -108,6 +108,12 @@ cleared only when the scan goes idle).
 **Noon.** If no event was taken in the pass, now ≥ the next noon and no world spell is being
 cast, the scan does the noon processing (Ranger healing, wages, the noon report; see
 [economy.md](economy.md)). **code**
+At a contact (the hero's step onto an army, 0x4ad94c; an army's arrival next to him, 0x4ade3c) the
+same scan runs with the army met. When no event fires in it and the noon is due, the noon report is
+the scan's event: it is paid and shown, no battle opens, and the army forgets him as after any
+event window. The hero stays where he is and the army stays next to him. Traced under Wine
+2026-11-26 (Проклятое озеро, army 17): the next noon set to the contact minute gives the report at
+both kinds of contact, and the next noon moves a day. **traced**
 
 **When the scan goes idle** (nothing taken, no noon report): every event whose *last fired*
 lies in the future is set back to now (0x4ac369), the met army is cleared (0x4ac3a0), and the
@@ -657,6 +663,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Ask with empty message | Yes finishes it at once: artifacts, units and spells never applied | Artifacts, units and spells are never applied (§6.2) | Matches |
 | When results apply | Dialog-time results (artifacts, units, spells) when the window opens; the finish-time results (gold, mana, XP, activations, flags, journal, victory, relative starts) and the queued battle, spell and delay at the window's OK (`EventEngine::show`, `finish`, `window_closed` in `src/rules/events.rs`) | Dialog-time results (artifacts, units, spells) when the window opens; the finish-time results and the queued battle, spell and delay at OK (0x4c206c calls 0x4ab1ec) (§6.1, §7.2) | Matches (gap G1, fixed 2026-11-09; the recordings' clock and draws agree, see `docs/OPEN_QUESTIONS.md`, Settled) |
 | Events behind a window | A message window holds the scan: the next events, and the shown event's chain, run when it is closed (`EventEngine::window_closed`, `Game::event_window_closed`; the interface and the replay call it at the window's OK). A battle-only event ends the scan too (`battle_queued`, 2026-11-08): the events after it run in the scan after the battle | The scan stops at a shown window and runs again after its OK (§2); a battle-only event stops it the same way, and the scan after the battle runs the rest | Matches (2026-11-26): a lantern, a shown army or a spell ends the scan too; the chain callback resumes it (§2, §8) |
+| Noon at a contact | A contact's scan takes a due noon (no event fired, no spell read): the noon is paid, the report shown, no battle, the army forgets him as after an event window (`Game::meet_as`, `pay_noon_report`); a held noon waits for a walk's or wait's contact (`slice_tail`) | The contact's scan takes the noon (0x4abfbc from 0x4ad94c and 0x4ade3c), returns 1, opens no battle (traced 2026-11-26, Проклятое озеро, army 17) | Matches (traced) |
 | Flag test | Substring search of the one flag string; first `^` dropped; `/` negates; empty or `end_tutorial` passes | Substring of the flag string (§5) | Matches |
 | Flag action | `+X` appends X with a non-breaking space if not a substring yet; `-X` removes the first occurrence and the next character; counters only with `^`; `-X^` without X changes nothing; actions of ≤ 2 characters ignored | Same (§5), but `-X^` does not check that X exists and lowers an unrelated character (bug) | Matches; Razdor fixes the original's bug (`-X^`) |
 | Engine flags | `Sea` added when the hero goes to sea and removed when he lands; `EnterShipyard` set when he walks into the ship's shipyard from outside, removed when he leaves a building for open ground, when he boards, and when the ship is removed (`Game::sea_changed`, `Game::yard_flags`, `Game::ship_removed`) | `Sea` aboard a ship, `EnterShipyard` in the ship logic (0x497c68, 0x496d28, 0x49704c) | Matches (P6, 2026-11-07); the ship's shipyard is kept in `Game::ship_yard` |

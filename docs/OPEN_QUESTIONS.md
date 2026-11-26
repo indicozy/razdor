@@ -200,17 +200,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   them. The p. 132 screen's scroll bar and the stock pictures' wrong colours (the exe loads them as UGS, not LIT:
   0x48d09c; plausible cause, unknown) are not traced. Whether a shipped map or mod uses 202 is not scanned: a
   one-off scan of every event record's picture byte (+0x52) settles it.
-- **A lantern or show plus a spell at contact: is an ally met at noon fought?** (guide 9.5, p. 259; 2026-11-26,
-  the parity round, item 7). The guide says the player's army can stand next to an allied army when the 12:00
-  report comes, and the player can then fight the ally. decomp-read (0x4ad94c, 0x4abfbc): a contact's scan returns
-  1 on a noon report (the noon branch runs when nothing was taken and the noon is due), so no battle is opened
-  then, with any army, hostile ones too. Razdor pays the noon in its own step and opens the battle or the meeting
-  instead (`src/rules/game.rs`, the noon after the time-tick scan; `src/rules/script.rs` `meet_as`). What lets the
-  player fight the ally afterwards is unknown: a spent meeting event (the second click finds it spent, so the scan
-  returns 0 and the battle opens) is the leading candidate; no trace. Not changed: the noon would then be paid at
-  every contact with the noon due, which the owner decides. Settle by a Frida trace of 0x4abfbc (return value,
-  0x68dc7c, the noon branch) with an ally next to the hero at 11:59 to 12:00, then the owner's call.
-
 - **Managed armies skip the revival on activation** (2026-11-05, the Hristos editor-guide analysis,
   docs/reference/editor-guide.md, gap G8). `src/rules/script.rs:340-343` returns an army that
   `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the
@@ -920,6 +909,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   `--keep`, profile the per-frame additions if the cost persists, run db-zoomout repeatedly to catch the panic.
 
 ## Settled
+
+- **A contact at noon gives the noon report, not the battle (guide 9.5, p. 259; traced under Wine 2026-11-26,
+  Проклятое озеро, army 17).** With the next noon set to the contact minute, both the army's arrival (0x4ade3c)
+  and the hero's step (0x4ad94c) run the scan (0x4abfbc). It opens the noon report (wages paid, the next noon a
+  day later), returns 1 and opens no battle; the army stays next to him. Razdor does the same (`meet_as`, the noon
+  as the scan's event, `pay_noon_report`). The ally fight the guide describes follows from the spent noon: the
+  next contact finds no noon due and fights. That step was inferred from the rule, not traced. The trace is in the
+  parity-review scratch folder (`trace-noon-contact.md`).
 
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23; settled 2026-11-26, as original,
   frame pace).** A diff test on РК1 (knight, 48 one-hour waits) has the sea pirates (army 9) sail 4 cells in the first

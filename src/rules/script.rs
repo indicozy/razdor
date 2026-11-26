@@ -289,7 +289,23 @@ impl Game {
         // goes on, and when it runs out it returns 0 (0x4a7b80 clears the silent-run flag
         // 0x674966 on each event that does not pass), so the battle opens all the same.
         // РК4's «- Колдуны мертвы» fires silently on every scan once the warlocks are beaten.
-        let fired = after.iter().any(super::game::fires);
+        let mut fired = after.iter().any(super::game::fires);
+        // The noon (0x4abfbc): when no event opens a window in this scan, no spell is being read
+        // and the noon is due, the noon report is the scan's event. It is paid here (`pay_noon`)
+        // and the battle does not open; a meeting event that fires wins, and the noon waits for
+        // the next scan. Traced under Wine 2026-11-26 (Проклятое озеро, army 17): the contact
+        // at noon gives the report, not the battle. The original's contact scan 0x4abfbc is
+        // reached from both contacts, the hero's step (0x4ad94c) and an army's arrival (0x4ade3c).
+        let scan_starts_battle = after.iter().any(|e| matches!(e, Event::Encounter(_)));        if let Some(day) = self.due_noon() {
+            if fired {
+                if self.noon_due.is_none() {
+                    self.noon_due = Some(day);
+                }
+            } else if self.reading.is_none() && !scan_starts_battle {
+                self.pay_noon_report(day, events);
+                fired = true;
+            }
+        }
         // A step's `Encounter` is already decided by `Game::hero_step` (hostile, clicked, or any
         // army with the option off), so it fights; an attack fights only a hostile army.
         let fights = |a: &Army| on_step || a.hostile();
@@ -2945,6 +2961,26 @@ mod tests {
         assert!(g.set_destination((8, 4)));
         let events = walk(&mut g);
         (g, events)
+    }
+
+    #[test]
+    fn a_meeting_at_noon_gives_the_meeting_and_the_noon_waits() {
+        // 0x4abfbc: the scan takes the noon only when no event fired in it; the meeting event
+        // fires first, so the noon stays due for the next scan (traced under Wine 2026-11-26).
+        let mut talk = ev(EventKind::Global);
+        talk.conditions.meet_army = 2;
+        let mut s = world(vec![talk]);
+        s.armies = vec![army(2, 3, 2, 1, &[troop(4, 0, 1)])];
+        let mut g = start(&s);
+        read(&mut g);
+        let day = g.clock.day_index();
+        g.noon_due = Some(day);
+        let gold = g.gold;
+        let mut events = Vec::new();
+        assert!(g.meet(Event::Met(0), &mut events), "{events:?}");
+        assert_eq!(fired(&events), vec![1], "{events:?}");
+        assert!(!events.iter().any(|e| matches!(e, Event::NewDay(_))), "{events:?}");
+        assert_eq!((g.gold, g.noon_due), (gold, Some(day)), "the noon waits");
     }
 
     #[test]

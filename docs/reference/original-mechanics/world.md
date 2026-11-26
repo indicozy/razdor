@@ -366,6 +366,10 @@ battle. Razdor: `Army::own_attitude` (friendly tests) and `Army::attitude` (rela
 friendly tests read the own byte: the minimap's ally colour (0x49e3c9), the hostile tooltip
 frame (0x4ca9f0), the building guard (0x4ccc8a), the friendly question mark and the curse
 refusal (magic-items.md §3.5). **code**
+A contact's scan (0x4abfbc, run from the hero's step at 0x4ad94c and from an army's arrival at
+0x4ade3c) takes the hero's noon when no event fires in it, the noon is due and no spell is being
+read: the noon report is then the scan's event and no battle opens; the army stays where it is
+(traced under Wine 2026-11-26, Проклятое озеро, army 17; events.md, the noon). **code, traced**
 A hostile army in contact attacks the hero when its cached battle score
 against him is > 0; a target standing in a building is attacked only when the building is a
 bridge or the target's own (otherwise both armies' scores against each other are tripled, cap

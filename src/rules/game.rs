@@ -2049,7 +2049,10 @@ impl Game {
         }
         it.append(&mut p.events);
         let later = self.ai_move_end(p.job);
-        frame_probe::time(Stage::Armies, || self.slice_tail(p.minutes, (p.now, p.hero_tile), &p.hero, p.ticks, later, it));
+        // A walk's or a wait's tail takes the army's contact next (`walk_tail`, `wait_tail`): the
+        // noon waits for that contact's scan (`meet_as`), as the original's contact scan takes it.
+        let consumes_contact = matches!(p.kind, StepKind::Walk | StepKind::Wait);
+        frame_probe::time(Stage::Armies, || self.slice_tail(p.minutes, (p.now, p.hero_tile), &p.hero, p.ticks, later, consumes_contact, it));
         let stepping = matches!(p.kind, StepKind::Walk | StepKind::FlyOver);
         if stepping {
             self.step_from = None;
@@ -2500,6 +2503,16 @@ impl Game {
     /// next to him (|dx| ≤ 1 and |dy| ≤ 1) and he is not in a building other than a bridge or
     /// his own.
     pub(crate) fn ai_contact(&mut self) -> Option<Event> {
+        let e = self.contact_army()?;
+        if let Event::Encounter(i) = e {
+            self.foe = Some(Foe::Army(i));
+        }
+        Some(e)
+    }
+
+    /// The contact an army's arrival makes with the hero, read without changing anything
+    /// ([`Game::ai_contact`]); `None` when none is due.
+    fn contact_army(&self) -> Option<Event> {
         if self.foe.is_some() {
             return None;
         }
@@ -2522,7 +2535,6 @@ impl Game {
             !ai::managed(a) && !peace && !sheltered && a.arrived && (t.0 - here.0).abs() <= 1 && (t.1 - here.1).abs() <= 1 && a.hostile()
         };
         let i = self.world.armies.iter().rposition(|a| (contact(a, ai::Contact::Attack) || gang(a)) && now >= a.ignore_until)?;
-        self.foe = Some(Foe::Army(i));
         Some(Event::Encounter(i))
     }
 
@@ -2669,7 +2681,8 @@ impl Game {
     /// 12:00 comes in that scan when no event fired and no spell is being read, 0x4abfbc, else at a
     /// later scan. His first noon is the day after the start, even after a morning start
     /// (0x4b4388); the AI's armies keep theirs).
-    fn slice_tail(&mut self, minutes: f32, at: (f64, Tile), hero: &HeroCells, ticks: Vec<Tick>, later: Vec<f64>, events: &mut Vec<Event>) {
+    #[allow(clippy::too_many_arguments)]
+    fn slice_tail(&mut self, minutes: f32, at: (f64, Tile), hero: &HeroCells, ticks: Vec<Tick>, later: Vec<f64>, consumes_contact: bool, events: &mut Vec<Event>) {
         // The clock and the hero's tile when the armies moved.
         let (now, hero_tile) = at;
         events.append(&mut self.ai_events);
@@ -2730,18 +2743,37 @@ impl Game {
         let script = frame_probe::time(Stage::Script, || self.run_script());
         let fired = script.iter().any(fires);
         events.extend(script);
-        if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none()) {
-            self.noon_due = None;
-            // The next noon is the day after now (0x4a41d8): a noon paid late, after
-            // midnight, skips that day's own noon (the original's behaviour).
-            self.noon_from = Some(self.clock.day_index() + 1);
-            if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
-                events.push(Event::NewDay(report));
-                // The original autosaves as the noon report opens, named by the date; a noon
-                // with no report (no wages, no income) writes none (0x4abfbc).
-                self.autosave_due = Some(super::save::date_name(&self.clock));
-            }
+        // A contact the walk or wait is about to meet takes the noon in its scan (`meet_as`).
+        let deferred = consumes_contact && self.contact_army().is_some();
+        if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none() && !deferred) {
+            self.pay_noon_report(day, events);
         }
+    }
+
+    /// Pays the noon of `day` (0x4abfbc): the wages, the Ranger's heal and the report
+    /// ([`Game::new_day`]). The next noon is the day after now (0x4a41d8): a noon paid late,
+    /// after midnight, skips that day's own noon (the original's behaviour).
+    pub(crate) fn pay_noon_report(&mut self, day: u64, events: &mut Vec<Event>) {
+        self.noon_due = None;
+        self.noon_from = Some(self.clock.day_index() + 1);
+        if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
+            events.push(Event::NewDay(report));
+            // The original autosaves as the noon report opens, named by the date; a noon
+            // with no report (no wages, no income) writes none (0x4abfbc).
+            self.autosave_due = Some(super::save::date_name(&self.clock));
+        }
+    }
+
+    /// The noon a contact's scan takes, if one is due (`meet_as`): a noon the time held back
+    /// (`noon_due`), or the hero's next noon (`noon_from`, 12:00) already passed: the original
+    /// tests now against his next noon (hero +0x170c). Its day.
+    pub(crate) fn due_noon(&self) -> Option<u64> {
+        if let Some(day) = self.noon_due {
+            return Some(day);
+        }
+        let day = self.noon_from.unwrap_or(self.start_day + 1);
+        let noon = (day * super::clock::MINUTES_PER_DAY + super::clock::MINUTES_PER_DAY / 2) as f64;
+        (self.clock.total_minutes() >= noon).then_some(day)
     }
 
     /// Price to hire unit type `kind`: its `Cost` (in mana for elementals).
@@ -5105,6 +5137,82 @@ mod tests {
         assert_eq!(g.pack, vec![ItemId(7)]);
         assert_eq!(g.clock.label(), "1204, month 5, day 19, 9 h");
         assert!(!g.won(), "no camps: not won by clearing them");
+    }
+
+    /// A contact with the noon due gives the noon report, not the battle: the hero's step onto
+    /// the army (0x4ad94c) and the army's arrival next to him (0x4ade3c) both run the scan
+    /// (0x4abfbc), which takes the noon. Traced under Wine 2026-11-26 (Проклятое озеро, army 17).
+    #[test]
+    fn contact_at_noon_gives_the_report_not_the_battle() {
+        let mut s = strip();
+        s.armies = vec![army(1, 12, 2, -2, &[troop(4, 0, 2)])];
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        // A stationary guard (it never steps or arrives, so the hero's step is the contact).
+        (g.world.armies[0].patrols, g.world.armies[0].patrol_radius) = (true, 0);
+        g.first_noon_today();
+        let day = g.clock.day_index();
+        // Past 12:00 of the day, its noon not yet paid (no tick has come for it): due at the
+        // contact. A held noon would be paid by the step's own time before the army.
+        g.clock.set_total_minutes((day * crate::rules::clock::MINUTES_PER_DAY + 12 * 60 + 5) as f64);
+        let gold = g.gold;
+        // The hero's step onto it: the report, no battle, the army where it stood, him too.
+        let at = g.world.armies[0].tile(&g.world.map);
+        assert!(g.set_destination(at));
+        let events = walk_until_stopped(&mut g);
+        let report = events.iter().find_map(|e| match e {
+            Event::NewDay(r) => Some(r.clone()),
+            _ => None,
+        });
+        assert!(report.as_ref().is_some_and(|r| r.day == day && r.gold == gold), "{events:?}");
+        let r = report.unwrap();
+        assert!(r.wages > 0, "the wages are paid: {r:?}");
+        assert!(g.gold < gold, "the wages come out: {gold} -> {}", g.gold);
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
+        assert_eq!(g.foe, None);
+        assert_eq!((g.noon_due, g.noon_from), (None, Some(day + 1)), "the next noon is the next day's");
+        assert_ne!(g.tile(), at, "he does not step onto the army's cell");
+        assert_eq!(g.world.armies.len(), 1);
+        assert!(g.world.map.distance(g.tile(), g.world.armies[0].tile(&g.world.map)) <= 1, "the army stays next to him");
+    }
+
+    #[test]
+    fn contact_at_noon_gives_the_report_not_the_battle_when_the_army_arrives() {
+        // The army's arrival (0x4ade3c): an attack meets the scan with the noon due.
+        let mut s = strip();
+        s.armies = vec![army(1, 12, 2, -2, &[troop(4, 0, 2)])];
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        g.first_noon_today();
+        let day = g.clock.day_index();
+        g.noon_due = Some(day);
+        let h = g.tile();
+        g.world.armies[0].pos = g.world.map.center((h.0 + 1, h.1));
+        let mut events = Vec::new();
+        let fired = g.meet(Event::Encounter(0), &mut events);
+        assert!(fired, "{events:?}");
+        assert!(events.iter().any(|e| matches!(e, Event::NewDay(r) if r.day == day)), "{events:?}");
+        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
+        assert_eq!((g.foe, g.noon_due), (None, None));
+        assert_eq!(g.world.armies.len(), 1);
+    }
+
+    #[test]
+    fn a_contact_with_the_noon_not_due_still_gives_the_battle() {
+        let mut s = strip();
+        s.armies = vec![army(1, 12, 2, -2, &[troop(4, 0, 2)])];
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        g.first_noon_today();
+        let day = g.clock.day_index();
+        // The next noon is tomorrow's: nothing is due.
+        g.noon_from = Some(day + 1);
+        let at = g.world.armies[0].tile(&g.world.map);
+        assert!(g.set_destination(at));
+        let events = walk_until_stopped(&mut g);
+        assert_eq!(events.last(), Some(&Event::Encounter(0)), "{events:?}");
+        assert_eq!(g.foe, Some(Foe::Army(0)));
+        assert!(!events.iter().any(|e| matches!(e, Event::NewDay(_))), "{events:?}");
     }
 
     #[test]
