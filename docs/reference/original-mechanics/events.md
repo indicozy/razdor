@@ -308,8 +308,11 @@ campaign quest only after both. Razdor: the same (`rk2_the_peasant_offers_and_th
   title contains `#VICTORY`, or when it is the victory event of a map with no next map. The
   style changes the frame and the music only; it does not end the game. **code**
 - **Picture** (82): 0 the event's own picture; 200 the defeat
-  picture; 201 the victory picture; 202 the portrait of the met army's leader; any other
-  value the portrait of that unit type. **code**
+  picture; 201 the victory picture; 202 the portrait of the leader (first unit slot) of the army
+  of the last contact (0x68dc90, set at every contact, not cleared by the idle reset); 203 to 255
+  index past the unit table (unknown, drawn as no picture by Razdor); any other value the
+  portrait of that unit type. The exe uses the event's own picture only when this byte is 0
+  (decomp-read, 2026-11-26; Razdor still lets a custom picture win, OPEN_QUESTIONS). **code**
 - **Title**: the title text before the first `%`, then before the first `#`, with trailing
   spaces removed (0x4833f0); empty gives the language file's default title key. So `#` starts
   an editor note that is never shown (378 shipped titles have one). **code**

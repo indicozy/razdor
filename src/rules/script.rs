@@ -67,6 +67,15 @@ impl Game {
         self.script.as_deref()
     }
 
+    /// The leader of the army of the last contact, for picture 202 (0x4a8ae8): the unit in the
+    /// army's first slot, when the army is still in the world (or inactive) and the unit exists.
+    pub fn last_met_leader(&self) -> Option<UnitId> {
+        let army = self.script()?.last_met()?;
+        let a = self.world.armies.iter().chain(&self.world.inactive).find(|a| a.id == army)?;
+        let unit = a.leader()?;
+        self.content.try_unit(unit).map(|_| unit)
+    }
+
     /// Victory or defeat by a scenario event.
     pub fn script_end(&self) -> Option<ScriptEnd> {
         match self.script()?.ended()? {
@@ -1652,6 +1661,20 @@ mod tests {
         assert_ne!(g.rng.state(), draws.state(), "the wander points drawn");
         assert!(!g.world.armies[0].mind.clean.contains(&3), "its pairs dirty");
         assert_eq!(g.world.locations[0].owner, crate::rules::world::Owner::Army(3));
+    }
+
+    /// Picture 202 (0x4a8ae8, 0x68dc90): the leader of the army of the last contact. The later
+    /// contact replaces it; the army's first unit is the leader.
+    #[test]
+    fn picture_202_is_the_leader_of_the_last_met_army() {
+        let mut s = world(Vec::new());
+        s.armies = vec![army(3, 10, 8, -2, &[troop(4, 0, 2)]), army(5, 14, 2, 0, &[troop(5, 0, 2)])];
+        let mut g = start(&s);
+        assert_eq!(g.last_met_leader(), None, "no contact yet");
+        g.meet_as(Event::Met(0), &mut Vec::new(), false);
+        assert_eq!(g.last_met_leader(), Some(UnitId(4)));
+        g.meet_as(Event::Met(1), &mut Vec::new(), false);
+        assert_eq!(g.last_met_leader(), Some(UnitId(5)), "the newer contact");
     }
 
     #[test]

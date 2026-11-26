@@ -10,7 +10,7 @@ use macroquad::prelude::*;
 use razdor::i18n::{n_, tr};
 use razdor::rules::content::{ItemId, UnitId};
 use razdor::trf;
-use razdor::rules::events::{ArmyId, EventId, EventOutcome, PICTURE_DEFEAT, PICTURE_VICTORY};
+use razdor::rules::events::{ArmyId, EventId, EventOutcome, PICTURE_DEFEAT, PICTURE_LEADER, PICTURE_VICTORY};
 use razdor::rules::game::Game;
 use razdor::rules::journal::Tab;
 
@@ -58,6 +58,8 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
         // 0x674638 + 4·v, loaded at 0x4dc871 / 0x4dc880; 0x4aa105).
         (_, PICTURE_DEFEAT) => super::chrome::win_ugs("Stnd-1").map(Picture::Still),
         (_, PICTURE_VICTORY) => super::chrome::win_ugs("Stnd-2").map(Picture::Still),
+        // 202: the leader of the army of the last contact (0x68dc90); none when it has none.
+        (_, PICTURE_LEADER) => game.last_met_leader().map(Picture::Unit),
         (_, 0) => None,
         (_, u) => game.content.try_unit(UnitId(u as u32)).map(|_| Picture::Unit(UnitId(u as u32))),
     };

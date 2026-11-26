@@ -26,6 +26,8 @@ pub const OWNER_NOT_PLAYER: u8 = 6;
 /// Picture codes of byte 82.
 pub const PICTURE_DEFEAT: u8 = 200;
 pub const PICTURE_VICTORY: u8 = 201;
+/// Picture 202: the leader of the army of the last contact (0x68dc90; [`EventEngine::last_met`]).
+pub const PICTURE_LEADER: u8 = 202;
 
 /// At most this many events fire in one [`EventEngine::tick`] (or answer, or hall entry);
 /// more means a script loop. The original has no such guard (a Razdor safety net).
@@ -544,6 +546,10 @@ pub struct EventEngine {
     /// the run that followed the meeting ends or a "no meeting" result clears it.
     #[serde(default)]
     meeting: Option<ArmyId>,
+    /// The army of the last contact (0x68dc90): set at every meeting, not cleared by the idle
+    /// reset (which clears only `meeting`). Picture 202 shows its leader.
+    #[serde(default)]
+    last_met: Option<ArmyId>,
     ended: Option<EventOutcome>,
     #[serde(skip)]
     extensions: Vec<(EventId, Extension)>,
@@ -774,6 +780,7 @@ impl EventEngine {
             last_place: None,
             fresh_visit: false,
             meeting: None,
+            last_met: None,
             ended: None,
             extensions,
             edits: Vec::new(),
@@ -1175,7 +1182,13 @@ impl EventEngine {
     /// meeting in force (the original's current meeting, 0x68dc7c).
     pub fn meet(&mut self, w: &mut dyn EventWorld, army: ArmyId) -> Vec<EventOutcome> {
         self.meeting = Some(army);
+        self.last_met = Some(army);
         self.tick(w)
+    }
+
+    /// The army of the last contact (0x68dc90), whose leader picture 202 shows.
+    pub fn last_met(&self) -> Option<ArmyId> {
+        self.last_met
     }
 
     /// The army being met, while the run after the meeting goes on.
@@ -3039,6 +3052,22 @@ mod tests {
         assert!(tick_at(&mut g, &mut w, 10).is_empty(), "the guard holds within the minute");
         assert_eq!(g.last_fired(2), Some(10), "the next scan's idle reset");
         assert_eq!(tick_at(&mut g, &mut w, 10), vec![2], "the event may fire again");
+    }
+
+    /// Picture 202's army (0x68dc90): the army of the last contact, kept through the idle reset
+    /// (which clears only the met army, 0x68dc7c).
+    #[test]
+    fn last_met_is_kept_through_the_idle_reset() {
+        let mut g = engine(vec![global()]);
+        let mut w = MockWorld::new();
+        assert_eq!(g.last_met(), None);
+        g.meet(&mut w, 4);
+        assert_eq!(g.last_met(), Some(4));
+        g.tick(&mut w);
+        assert_eq!(g.meeting(), None, "the idle reset ends the meeting");
+        assert_eq!(g.last_met(), Some(4), "the last contact stays");
+        g.meet(&mut w, 6);
+        assert_eq!(g.last_met(), Some(6));
     }
 
     /// A delay ends the scan (0x4ae280): the event after it waits for the next scan, and its
