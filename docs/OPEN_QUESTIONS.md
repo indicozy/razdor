@@ -928,6 +928,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis, gap G7; settled
+  2026-11-26, decomp-read of 0x4abfbc). The exe's idle reset (last fired → now, the met army cleared) runs only at
+  the end of a top-level scan call that returns 0. A chain tail never runs a scan and never resets (0x4ab1ec →
+  0x4abf44 only), a non-silent event that took the scan does not reset, and a victory or defeat returns 1 without
+  a reset. No nested scan re-enters 0x4abfbc, so the guide's "nested passes" do not exist. Razdor: the end of
+  `EventEngine::run` (with the `ended` guard), `resume` after a chain that ran at once; test
+  `rules::events::chain_tail_does_not_reset_the_guard`.
 - **Lanterns, a shown army, a spell and a delay: do they end the scan?** (2026-11-08; settled 2026-11-26, parity
   round, decomp-read of 0x4abfbc, 0x4ab1ec and the chain timer 0x4af658.) Yes. A non-silent event that a lantern,
   a shown army or a spell makes ends the scan; the chain timer's callback, 250 ms later, opens the chained event as

@@ -3022,6 +3022,25 @@ mod tests {
         assert_eq!(fired(&g.tick(&mut w)), vec![3], "the next tick runs the scan");
     }
 
+    /// G7 (0x4abfbc, 0x4ac369): the idle reset (last fired back to now) runs only at the end of a
+    /// top-level scan that returns 0. A chain tail, here a window's OK, sets no reset: the chained
+    /// event keeps last fired = now + 1 until the next scan, which resets it and lets it fire again.
+    #[test]
+    fn chain_tail_does_not_reset_the_guard() {
+        let mut shown = with_message(global());
+        shown.results.chained_event = 2;
+        let repeat = many(global());
+        let mut g = engine(vec![shown, repeat]);
+        let mut w = MockWorld::new();
+        w.now = 10;
+        assert_eq!(fired(&g.tick(&mut w)), vec![1]);
+        assert_eq!(fired(&g.window_closed(&mut w)), vec![2]);
+        assert_eq!(g.last_fired(2), Some(11), "no idle reset after the chain tail");
+        assert!(tick_at(&mut g, &mut w, 10).is_empty(), "the guard holds within the minute");
+        assert_eq!(g.last_fired(2), Some(10), "the next scan's idle reset");
+        assert_eq!(tick_at(&mut g, &mut w, 10), vec![2], "the event may fire again");
+    }
+
     /// A delay ends the scan (0x4ae280): the event after it waits for the next scan, and its
     /// chain is dropped.
     #[test]

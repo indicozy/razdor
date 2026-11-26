@@ -114,6 +114,12 @@ lies in the future is set back to now (0x4ac369), the met army is cleared (0x4ac
 rescan-on-close flag is cleared. After the dialog machinery is idle, the "meeting event
 waiting" marks are recomputed (§9). **code**
 
+The reset runs only at the end of a top-level scan call that returns 0: not after a chain tail
+(§8, which runs no scan), not after a non-silent event that took the scan (a window, a battle,
+a delay, a lantern, a shown army or a spell), and not after a victory or defeat. Nested scans
+do not exist: no scan re-enters 0x4abfbc. (decomp-read, 2026-11-26; the guide does not mention
+the reset.) **code**
+
 ## 3. Eligibility: once, guard, window, class
 
 Checked first, in this order (0x4a7b80). **code**
