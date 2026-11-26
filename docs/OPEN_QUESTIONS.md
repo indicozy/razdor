@@ -508,16 +508,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   planner walks every army through the fort (ai.md §7.3, §9.1), so this detour is gone. Not checked: why an army
   on the bridge finds no route to the south-west building «Дозорная башня» (40, 177), even for faction 4
   (the fort is open to it), which may be the planner or the building's cell.
-- **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
-  test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
-  pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12
-  in the second; over two days the original's ship makes 4–6 cells an hour with whole hours
-  standing still, Razdor's 7–12. The SHIP costs match (world.md §1: coastal 1, shallows 2), so
-  the difference is in how an AI ship's steps are timed (ai.md §2, §13). Settles it: RE of the
-  AI step clock for ship armies (0x4a1ff0 loader, the step cost and delay in the per-frame
-  driver), then the same diff test equal. Players catch the pirates in the village in the
-  original because they sail slowly and wait.
-
 - **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
   code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
   0xadd084); the green frame in the original's screenshot is most likely the selected unit
@@ -930,6 +920,17 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   `--keep`, profile the per-frame additions if the cost persists, run db-zoomout repeatedly to catch the panic.
 
 ## Settled
+
+- **AI ships move about twice as fast as the original's (report 1082, 2026-10-23; settled 2026-11-26, as original,
+  frame pace).** A diff test on РК1 (knight, 48 one-hour waits) has the sea pirates (army 9) sail 4 cells in the first
+  hour in the original and 7 in Razdor, 6 against 12 in the second. Measured 2026-11-26: over 48 hours army 9 covers
+  4.6 cells an hour in Razdor and 5.7 in the original (net displacement); the report compared the first two hours of two
+  runs that took different wander targets (whole run: original 244 cells in 43 h, Razdor 222 in 48 h). The original's
+  straight runs top out at 10 (5 steps a tick) where Razdor reaches 12, and the model of the step clock (0x4a399c) gives
+  exactly 6, 8, 10, 12 for 3, 4, 5, 6+ frames a tick. It is the frame pace of the Wine harness (`tools/difftest/FINDINGS.md`
+  §5), not a rule; no code change. SHIP costs and speed match (speed byte 13 via 0x4b4824; cost map as world.md §1).
+  Not proven by a frame trace: a Frida `--trace ai` run logging army 9's step `dt` would settle it (the owner's go).
+  Razdor's rate is pinned by `rules::ai::` (ships on a strip: 12 cells an hour on cost 1, 6 on cost 2).
 
 - **An event's own picture and a non-zero picture byte: which one shows** (settled 2026-11-26, fix batch 2). The exe
   draws the event's own picture only when byte 82 is 0 (0x4a8ae8, decomp-read). Razdor (`src/ui/story.rs`

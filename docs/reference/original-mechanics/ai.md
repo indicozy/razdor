@@ -582,6 +582,7 @@ footprints). The ship type byte only picks its picture. Ships have no AI of thei
 targets on cells the SHIP map closes (land) are dropped, so ships go for other ships, the
 player at sea, and buildings (footprints are open). Repulsion only acts between armies on the
 same medium; contacts (§8) do not check the medium.
+A ship's coastal step (5 min) is shorter than a coarse frame, so at a frame pace below six frames a tick the original's ships make one step per frame (3 frames: 6 cells an hour, 5 frames: 10); Razdor plays the unlimited pace: 12 cells an hour on cost-1 water (report 1082, 2026-11-26; the test `rules::ai::` ship rate).
 
 ## 14. Noon and midnight for the AI
 

@@ -2495,3 +2495,31 @@ fn a_bridge_army_does_not_attack_a_ship_or_the_hero_aboard() {
     g.world.armies[0].mind.clean.insert(HERO);
     assert_eq!(arrive(&mut g, land_key), Some(Contact::Attack));
 }
+
+/// Report 1082 (2026-11-26, the ship-speed RE): on straight water a ship makes one step per
+/// 5-minute coastal cell, so an hour is 12 cells on cost-1 coast and 6 on cost-2 shallows. The
+/// original's coarse frames give 6, 8 or 10 an hour (0x4a399c, the step clock; the model of
+/// the frame pace); Razdor plays the unlimited pace.
+#[test]
+fn a_ship_makes_twelve_cells_an_hour_on_coast_and_six_on_shallows() {
+    use crate::dt::dtm::Surface;
+    for (surface, want) in [(Surface::CoastalWater, 12), (Surface::ShallowsFords, 6)] {
+        let mut s = map();
+        for y in 9..12 {
+            for x in 0..60 {
+                tk::set(&mut s, x, y, surface);
+            }
+        }
+        let mut ship = army(1, (2, 10), 2, ALLY, 0, &[troop(4, 0, 1)]);
+        ship.ship = crate::rules::ships::kind::PIRATE;
+        s.armies = vec![ship];
+        let mut g = start(&s);
+        assert!(g.world.armies[0].sails(), "placed on water");
+        g.world.armies[0].mind.scripted = true;
+        g.world.armies[0].path = (3..=58).map(|x| (x, 10)).collect();
+        let from = g.world.armies[0].tile(&g.world.map).0;
+        g.wait(1);
+        let moved = g.world.armies[0].tile(&g.world.map).0 - from;
+        assert!((moved as i32 - want).abs() <= 1, "{surface:?}: {moved} cells in an hour, want about {want}");
+    }
+}
