@@ -515,9 +515,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   target), and the armies share bridge cells as the original allows (ai.md §2). The report's army
   «Велитрий» is not in the install or the community folders (no such name in any file), and the
   report has no save, so its faction, target and state are unknown. Settles it: a save from before
-  the jam, or the army's faction and its target. Known: `bars_army` (ai.md §7.3, Razdor-only) closes
-  the fort for a faction 2 army south of it (attitude −2), which sends it on a 210-cell detour instead
-  of through the fort to the bridge; a faction 4 army walks through the fort. Not checked: why an army
+  the jam, or the army's faction and its target. Known (before 2026-11-26): `bars_army` closed
+  the fort for a faction 2 army south of it (attitude −2), which sent it on a 210-cell detour instead
+  of through the fort to the bridge; a faction 4 army walked through the fort. Since 2026-11-26 the
+  planner walks every army through the fort (ai.md §7.3, §9.1), so this detour is gone. Not checked: why an army
   on the bridge finds no route to the south-west building «Дозорная башня» (40, 177), even for faction 4
   (the fort is open to it), which may be the planner or the building's cell.
 - **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff

@@ -1546,9 +1546,9 @@ fn the_plan_goes_for_the_best_target_through_the_flood() {
 }
 
 #[test]
-fn the_plan_keeps_to_the_heros_roads_around_a_hostile_fort() {
-    // Razdor's choice: a fort it may not walk through ([`bars_army`]), on the straight way to
-    // its village, is closed to its flood; its own fort is not.
+fn the_plan_walks_through_a_fort_it_would_assault_on_its_way() {
+    // ai.md §7.3: only a building with a negative score is closed to the flood; a hostile fort
+    // (score 0) is walked through, and the arrival in it is the assault (§9.1).
     let mut s = map();
     let mut fort = building(BuildingType::Fort, 35, 10, (1, 1));
     fort.faction = 2;
@@ -1556,23 +1556,54 @@ fn the_plan_keeps_to_the_heros_roads_around_a_hostile_fort() {
     let mut a = army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)]);
     a.no_random_targets = 1;
     s.armies = vec![a];
-    let walk = |own: bool| {
+    let walk = |fort_score: i32, own: bool| {
         let mut g = start_with(&s, with_priorities());
         if own {
             g.world.locations[1].owner = Owner::Army(g.world.armies[0].id);
         }
         g.world.armies[0].gold = 0;
         g.world.armies[0].mind.scores.insert(HERO, 0);
-        g.world.armies[0].mind.buildings = vec![100, 0];
+        g.world.armies[0].mind.buildings = vec![100, fort_score];
         plan(&mut g, 0);
-        let fort: Vec<Tile> = (0..60).flat_map(|x| (0..20).map(move |y| (x, y))).filter(|&t| g.world.location_covering(t) == Some(1)).collect();
-        assert!(bars_army(&g.world.armies[0], &g.world.locations[1]) != own);
         let path = g.world.armies[0].path.clone();
         assert_eq!(path.last(), Some(&(40, 10)), "{path:?}");
-        path.iter().any(|t| fort.contains(t))
+        path.iter().any(|&t| g.world.location_covering(t) == Some(1))
     };
-    assert!(walk(true), "its own fort is on its way");
-    assert!(!walk(false), "around the hostile one");
+    assert!(walk(0, false), "a hostile fort of score 0 is on its way");
+    assert!(walk(0, true), "its own fort is on its way");
+    assert!(!walk(-1, false), "a fort of negative score is closed");
+}
+
+#[test]
+fn an_arrival_in_a_hostile_fort_on_the_way_is_an_assault() {
+    // ai.md §9.1: the army that steps into a hostile fort fights its garrison (none here, so it
+    // is won at once) and takes it.
+    let mut s = map();
+    let mut fort = building(BuildingType::Fort, 35, 10, (1, 1));
+    fort.faction = 2;
+    s.buildings = vec![fort];
+    s.armies = vec![army(1, (35, 10), 4, ENEMY, 0, &[troop(6, 0, 1)])];
+    let mut g = start(&s);
+    assert_eq!(g.world.locations[0].owner, Owner::Neutral);
+    arrive(&mut g, 1);
+    assert_eq!(g.world.locations[0].owner, Owner::Army(1));
+}
+
+#[test]
+fn an_unmanaged_armys_route_keeps_off_a_hostile_fort() {
+    // Razdor's choice, kept for the demo's gangs (no arrival rules): their route goes round
+    // the fort [`bars_army`] names, a scenario army's walks through it.
+    let mut s = map();
+    let mut fort = building(BuildingType::Fort, 35, 10, (1, 1));
+    fort.faction = 2;
+    s.buildings = vec![fort];
+    s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])];
+    let mut g = start(&s);
+    let route = |g: &Game| super::army_path(&g.world, &g.world.armies[0], (30, 10), (40, 10), 20_000);
+    let through = |p: &[Tile]| p.contains(&(35, 10));
+    assert!(through(&route(&g)), "a scenario army walks through");
+    g.world.armies[0].ai.enabled = false;
+    assert!(!through(&route(&g)), "a demo gang keeps off");
 }
 
 #[test]

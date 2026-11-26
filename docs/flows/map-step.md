@@ -117,8 +117,9 @@ event's dialog.
 
 **AI armies on the map** (`src/rules/ai.rs`, ai.md §2–§15). Armies bank the hero's minutes and step
 when they cover the cell's cost × speed (×1.5 diagonally). Every step is an arrival: talk counters
-grow, the army may re-plan (`ai_plan`: one flood seeded with every target, with repulsion cones),
-then its arrival rules run (`ai_arrive`). Wander points: `ai_wander`. Respawns: `ai_respawns`. Noon
+grow, the army may re-plan (`ai_plan`: one flood seeded with every target, with repulsion cones;
+it closes only the buildings of negative score, so an army walks through the others, ai.md §7.3),
+then its arrival rules run (`ai_arrive`): an arrival in a hostile building is an assault (§9.1). Wander points: `ai_wander`. Respawns: `ai_respawns`. Noon
 per army at its first arrival after 12:00 (`ai_noon`). Attitude between sides: `relation`,
 `player_attitude_to` (`src/rules/world.rs`); a merchant ship keeps its file attitude (b3e247f).
 The army's own attitude to the player (its file byte +0x16af, `Army::own_attitude`) is what the

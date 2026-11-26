@@ -312,11 +312,13 @@ On a per-plan multiplier map (all 1 to start):
 The effective cost of a cell is `cost × multiplier`; 0 is impassable. Seeds on a closed cell
 still count (an army can target a stationary guard).
 
-*Razdor:* it also closes the footprints of buildings the army may not walk through
-(`bars_army`: castles and forts not its own or a friend's, ruins not its own, buildings it
-would assault) with a score of 0, except the one it stands in, so AI armies keep to the
-hero's roads as they did before the parity pass. The original walks them through any
-building of score 0 or more.
+*Razdor:* the same. Until 2026-11-26 Razdor also closed the score-0 castles, forts and ruins it
+may not walk through, and the buildings it would assault, so AI armies kept to the hero's roads.
+Only the negative-score footprints are
+closed now; an army walks through any other building, and the arrival in a hostile one is the
+assault of §9.1. The loop is in the planner, 0x4a2d88. The demo's gangs (`Game::move_armies`,
+no arrival rules) still route round the buildings `bars_army` names (Razdor's choice, a route
+for an unmanaged army only).
 
 ### 7.4 Repulsion cone
 For strength S and slope f around cell (x, y): every scanned cell whose value
@@ -634,6 +636,7 @@ after the parity pass.
 | Danger | Two repulsion cones per danger on the multiplier map (`repulsion`, the original's box), ×5 slope for guards, same medium only | Repulsion cones around losing matchups (§7.4), ×5 slope for guards | Matches |
 | Peasants | Score armies and buildings (no assault, villages ×3), talk and wander | Peasants score armies, buildings (no assault, ×3 villages), talk and wander like others (§6, §7) | Matches |
 | Building score | The four parts of §6 (`Game::building_score`); −1 forbids and closes the footprint | The four parts of §6, smallest positive wins; −1 forbids and blocks the footprint | Matches |
+| AI path through buildings | Only footprints of negative score are closed (0x4a2d88, §7.3); any other building is walked through, and an arrival in a hostile one is an assault (§9.1) | Same: only negative-score footprints are closed; a hostile building on the way is walked into and assaulted (§9.1); the demo gangs' routes alone keep off castles, forts and ruins not theirs | Matches |
 | Healing | The heal seed lowers the stored scores of friendly service buildings; heals priced by the current HP, `HealingTime` busy from the last; the dead raised dearest first in towns and churches | Heal seed lowers existing scores only (§7.2); heal cost uses current HP; busy `HealingTime` once (§9.4) | Matches |
 | Village gold | Feudal, any village it stands on, its mana thrown away; the village part for villages and its own buildings with stock | Feudal, any village it stands on (§9.2); score part for villages and own buildings with stock | Matches |
 | Shopping | Sells the pack at half, then buys by tactical gain above 5 while the spare gold covers it, the buyer's values worked out again after each buy, a good of negative price at its absolute price; markets and churches, or altars for an undead leader | Sell the pack at half, then buy by tactical-cost gain > 5 (§9.3); markets/churches or altars by leader nature; values not recomputed, so a good bought for a unit that can no longer wear it is paid and lost (bug) | Matches; Razdor fixes the original's bug (the values) |

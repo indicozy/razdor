@@ -491,11 +491,11 @@ fn ds1_the_ai_sees_the_hero_on_the_cell_he_leaves() {
     let s = &states[10];
     let a = s.armies.iter().find(|a| a.id == 1).unwrap();
     assert_eq!((s.hero.x, s.hero.y, s.clock), (86, 13, 1733), "{notes:?}");
-    // The original: army 1 at (68, 5), the generator at 2 236 314 233. Razdor keeps AI
-    // armies to the hero's roads (bars_army on the flood, its choice since 0.2.0), so army
-    // 1's way west goes round the buildings it may not cross and parts from the original's.
-    assert_eq!((a.x, a.y), (Some(82), Some(8)));
-    assert_eq!(s.rng, 3_559_346_025);
+    // The original: army 1 at (68, 5), the generator at 2 236 314 233. Its way west walks
+    // through the buildings it does not close (only negative-score footprints are closed, ai.md
+    // §7.3), as the original's does; before 2026-11-26 Razdor closed the hostile ones (bars_army).
+    assert_eq!((a.x, a.y), (Some(68), Some(5)));
+    assert_eq!(s.rng, 2_236_314_233);
 }
 
 /// FINDINGS.md §21 (candidate C1004-041105, Другой берег): the archmage hires and casts in
