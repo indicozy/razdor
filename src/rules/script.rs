@@ -351,6 +351,18 @@ impl Game {
                 (self.world.respawns[k].army.clone(), Some(k))
             }
         };
+        // The ship-summoning marker (leader 0xFE): 0x4969b8 calls only Ship_Place (0x496ec4), which
+        // moves the single ship to the army's own cell with no terrain test and leaves the
+        // army off the map, so it can be summoned again. The old cell keeps its ship code in the
+        // original; Razdor keeps one ship record, so a second summon just moves it. A hero who
+        // is aboard keeps sailing (the exe moves the parked-ship record only; unknown here).
+        // Razdor's narrowest guard for the guide's "several ships" (pp. 205-206, OPEN_QUESTIONS G9).
+        if respawning.is_none() && a.ship_marker {
+            if !self.aboard() {
+                self.ship = Some(super::ships::Ship { tile: a.post, aboard: false });
+            }
+            return None;
+        }
         let tile = self.world.placement(&a)?;
         match respawning {
             Some(k) => {
@@ -762,6 +774,12 @@ impl EventWorld for Game {
     }
 
     fn deactivate_army(&mut self, army: ArmyId) {
+        // The ship-summoning marker (0x496900 → Ship_Remove 0x49704c): its ship goes.
+        if self.world.inactive.iter().any(|a| a.id == army && a.ship_marker) {
+            self.ship = None;
+            self.ship_removed();
+            return;
+        }
         if let Some(i) = self.army_index(army) {
             let mut a = self.take_army(i);
             a.path.clear();
@@ -941,51 +959,64 @@ impl EventWorld for Game {
         }
     }
 
-    /// The army or building takes the group's attitude towards the player from the
-    /// scenario's relations; a building that joins the player's group becomes his *(guess)*.
+    /// Opcode 9 (0xc27862): the faction byte only (army +0x16AB, building +0x151). The owner
+    /// and the attitudes stay. An army's cached attitude is worked out again for its new
+    /// faction, as loading derives it: the player's row towards the faction, combined with the
+    /// army's own attitude to the player (`relation`, 0x4a0868).
     fn set_faction(&mut self, holder: Holder, group: u8) {
-        let attitude = self.world.relations[(group - 1) as usize][0];
-        let army_attitude = super::world::relation(super::world::player_attitude_to(&self.world.relations, group), attitude);
+        let relations = self.world.relations;
         match holder {
             Holder::Army(a) => {
                 if let Some(a) = self.army_mut(a) {
                     a.faction = group;
-                    a.attitude = if group == 1 { 3 } else { army_attitude };
+                    a.attitude = super::world::relation(super::world::player_attitude_to(&relations, group), a.own_attitude());
                 }
             }
             Holder::Building(b) => {
                 if let Some(l) = self.world.locations.iter_mut().find(|l| l.id == b) {
                     l.faction = group;
-                    l.attitude = if group == 1 { 3 } else { attitude };
-                    if group == 1 {
-                        l.owner = super::world::Owner::Player;
-                    }
                 }
             }
+            // Holder 0 (the hero's record) gets the faction byte too in the original; it is copied
+            // into the buildings he captures later. Razdor keeps no hero faction and its captures do
+            // not copy one: not done, unknown (OPEN_QUESTIONS).
             Holder::Player => {}
         }
     }
 
-    /// Only the relation towards the player is kept (there is no AI diplomacy yet): other
-    /// groups are a recorded no-op.
-    fn set_relation(&mut self, holder: Holder, group: u8, value: i8) {
-        if group != 0 {
+    /// Opcode 10 (0xc27862): byte `index` of the army's attitudes (+0x16AF+index) or the
+    /// building's (+0x152+index), for any row. Row 0 is the attitude to the player: the
+    /// army's cached attitude and a building's `attitude` follow it, as loading derives them.
+    fn set_relation(&mut self, holder: Holder, index: u8, value: i8) {
+        let i = index as usize;
+        if i >= 4 {
             return;
         }
+        let relations = self.world.relations;
         match holder {
             Holder::Army(a) => {
-                let relations = self.world.relations;
                 if let Some(a) = self.army_mut(a) {
-                    a.attitude = super::world::relation(super::world::player_attitude_to(&relations, a.faction), value);
-                    a.ai.relations[0] = value;
+                    a.ai.relations[i] = value;
+                    a.attitude = super::world::relation(super::world::player_attitude_to(&relations, a.faction), a.own_attitude());
                 }
             }
             Holder::Building(b) => {
                 if let Some(l) = self.world.locations.iter_mut().find(|l| l.id == b) {
-                    l.attitude = value;
+                    l.relations[i] = value;
+                    l.attitude = l.relations[0];
                 }
             }
-            Holder::Player => {}
+            // Holder 0 is the hero's own record (0x75a940): its row is the scenario's first row,
+            // the one every army's cached attitude is worked out from. Those caches are
+            // recomputed here (Razdor-only cache; the exe has none).
+            Holder::Player => {
+                self.world.relations[0][i] = value;
+                let relations = self.world.relations;
+                let armies = self.world.armies.iter_mut().chain(self.world.inactive.iter_mut()).chain(self.world.respawns.iter_mut().map(|r| &mut r.army));
+                for a in armies {
+                    a.attitude = super::world::relation(super::world::player_attitude_to(&relations, a.faction), a.own_attitude());
+                }
+            }
         }
     }
 
@@ -3136,7 +3167,149 @@ mod tests {
         assert_eq!(l.garrison[0].level, level);
         assert_eq!(l.garrison[0].xp, left, "an AI troop keeps what is left towards the next level");
         assert!(level > 1);
-        assert_eq!((l.faction, l.owner), (1, crate::rules::world::Owner::Player), "the fort joins the player");
+        assert_eq!((l.faction, l.owner), (1, crate::rules::world::Owner::Neutral), "opcode 9 sets the faction byte only: the fort does not join the player");
+    }
+
+    /// Opcode 10 writes byte i of the army's attitudes (+0x16AF+i) for any row, and the AI's
+    /// relations read the bytes live: byte 2 is `attitude_of(.., 3)` (the row's third byte;
+    /// the events' group 2 neighbour), the cached attitude to the player stays on byte 0.
+    #[test]
+    fn opcode_10_writes_any_attitude_byte_of_an_army_and_the_ai_follows() {
+        // The map's start already runs its events, so the "before" army is a game without them.
+        let mut plain = world(vec![]);
+        plain.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
+        let before = start(&plain).world.armies.iter().find(|a| a.id == 2).unwrap().clone();
+        assert_eq!(before.ai.relations, [1, 0, 0, 0]);
+        let mut s = world(vec![op(10, 2, 2, -2)]);
+        s.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
+        let g = start(&s);
+        let a = g.world.armies.iter().find(|a| a.id == 2).unwrap();
+        assert_eq!(a.ai.relations, [1, 0, -2, 0], "byte 2 is written, the others are kept");
+        assert_eq!(a.attitude, before.attitude, "the cached attitude to the player reads byte 0 only");
+        assert_eq!(crate::rules::ai::attitude_of(&a.ai.relations, 3), -2);
+        // The AI relation to a faction-3 side (byte 2 of the other row is 2) follows the new byte.
+        let other = [0, 0, 2, 0];
+        let relation = |atts: &[i8; 4]| crate::rules::ai::relation_between((a.faction, atts), (3, &other));
+        assert_eq!(relation(&before.ai.relations), 1, "(0 + 2) div 2 before");
+        assert_eq!(relation(&a.ai.relations), -2, "a negative side's attitude decides after the event");
+    }
+
+    /// Opcode 10 on a building writes its row (+0x152+i); index 0 is also its attitude to the
+    /// player.
+    #[test]
+    fn opcode_10_writes_a_building_row_and_its_player_attitude_with_index_0() {
+        let events = vec![op(10, -1, 2, -5), op(10, -1, 0, -3)];
+        let mut s = world(events);
+        let mut fort = building(BuildingType::Fort, 9, 2, (1, 1));
+        fort.relations = [1, 0, 0, 0];
+        s.buildings = vec![fort];
+        let mut g = start(&s);
+        read(&mut g);
+        let l = &g.world.locations[0];
+        assert_eq!(l.relations, [-3, 0, -5, 0], "index 2 written unclamped (-5), index 0 too");
+        assert_eq!(l.attitude, -3, "its attitude to the player is its row's byte 0");
+    }
+
+    /// Opcode 10 on holder 0 (the hero's record) writes the hero's row, which every army's
+    /// cached attitude is worked out from; the caches follow it.
+    #[test]
+    fn opcode_10_on_the_hero_writes_his_row_and_the_armies_follow() {
+        let mut plain = world(vec![]);
+        let mut hunter = army(2, 12, 10, 1, &[troop(4, 0, 1)]);
+        hunter.faction = 2;
+        plain.armies = vec![hunter.clone()];
+        let before = start(&plain).world.armies.iter().find(|a| a.id == 2).unwrap().clone();
+        let mut s = world(vec![op(10, 0, 1, 2)]);
+        s.armies = vec![hunter];
+        let mut g = start(&s);
+        read(&mut g);
+        assert_eq!(g.world.relations[0][1], 2, "the hero's attitude to faction 2 is written");
+        let a = g.world.armies.iter().find(|a| a.id == 2).unwrap();
+        assert_eq!(a.ai.relations, before.ai.relations, "the army's own row is not touched");
+        assert_eq!(a.attitude, crate::rules::world::relation(crate::rules::world::player_attitude_to(&g.world.relations, 2), 1));
+    }
+
+    /// Opcode 9 sets the faction byte only: the owner and the attitudes stay as they are.
+    #[test]
+    fn opcode_9_changes_only_the_faction() {
+        let mut s = world(vec![op(9, 2, 2, 0), op(9, -1, 4, 0)]);
+        s.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
+        let mut fort = building(BuildingType::Fort, 9, 2, (1, 1));
+        fort.relations = [2, 1, 0, 0];
+        s.buildings = vec![fort];
+        let mut plain = world(vec![]);
+        plain.armies = vec![army(2, 12, 10, 1, &[troop(4, 0, 1)])];
+        let mut plain_fort = building(BuildingType::Fort, 9, 2, (1, 1));
+        plain_fort.relations = [2, 1, 0, 0];
+        plain.buildings = vec![plain_fort];
+        let plain = start(&plain);
+        let a0 = plain.world.armies.iter().find(|a| a.id == 2).unwrap().clone();
+        let l0 = plain.world.locations[0].clone();
+        let mut g = start(&s);
+        read(&mut g);
+        let a = g.world.armies.iter().find(|a| a.id == 2).unwrap();
+        assert_eq!(a.faction, 2);
+        assert_eq!((a.ai.relations, a.attitude), (a0.ai.relations, crate::rules::world::relation(crate::rules::world::player_attitude_to(&g.world.relations, 2), 1)));
+        let l = &g.world.locations[0];
+        assert_eq!((l.faction, l.owner, l.attitude, l.relations), (4, crate::rules::world::Owner::Neutral, l0.attitude, l0.relations));
+    }
+
+    /// A ship-summoning marker: a waiting army with leader 0xFE (0x4969b8 → Ship_Place 0x496ec4).
+    fn ship_marker(id: u8, x: u16, y: u16) -> crate::dt::dtm::Army {
+        let mut m = army(id, x, y, 1, &[]);
+        m.leader_unit = crate::rules::world::SHIP_MARKER_LEADER;
+        m.inactive = 1;
+        m
+    }
+
+    fn ship_at(g: &Game) -> Option<((i32, i32), bool)> {
+        g.ship.map(|s| (s.tile, s.aboard))
+    }
+
+    /// Activating a marker puts the one ship on its cell, land or water, without a terrain
+    /// test; the marker stays waiting and never comes onto the map. A second summon moves the
+    /// same ship (Razdor keeps one ship record).
+    #[test]
+    fn a_summoned_ship_marker_moves_the_one_ship_and_never_appears_on_the_map() {
+        use crate::rules::events::EventWorld as _;
+        let mut s = world(vec![]);
+        s.armies = vec![ship_marker(5, 6, 4), ship_marker(6, 9, 7)];
+        let mut g = start(&s);
+        assert_eq!(ship_at(&g), None, "no ship before a summon");
+        g.activate_army(5);
+        assert_eq!(ship_at(&g), Some(((6, 4), false)), "on the marker's cell, ashore");
+        g.activate_army(5);
+        assert_eq!(ship_at(&g), Some(((6, 4), false)), "a second summon of the same marker: still one ship there");
+        g.activate_army(6);
+        assert_eq!(ship_at(&g), Some(((9, 7), false)), "the second marker moves the ship");
+        assert!(g.world.armies.iter().all(|a| a.id != 5 && a.id != 6), "a marker never comes onto the map");
+        assert_eq!(g.world.inactive.iter().filter(|a| a.ship_marker).count(), 2, "both stay waiting");
+    }
+
+    /// Deactivating a marker (0x496900 → Ship_Remove 0x49704c) takes its ship away.
+    #[test]
+    fn deactivating_a_ship_marker_removes_the_ship() {
+        use crate::rules::events::EventWorld as _;
+        let mut s = world(vec![]);
+        s.armies = vec![ship_marker(5, 6, 4)];
+        let mut g = start(&s);
+        g.activate_army(5);
+        g.deactivate_army(5);
+        assert_eq!(ship_at(&g), None);
+    }
+
+    /// An ordinary waiting army still comes onto the map; the marker branch is only for 0xFE.
+    #[test]
+    fn an_ordinary_waiting_army_still_comes_onto_the_map() {
+        use crate::rules::events::EventWorld as _;
+        let mut s = world(vec![]);
+        let mut waiting = army(7, 3, 3, 1, &[troop(4, 0, 1)]);
+        waiting.inactive = 1;
+        s.armies = vec![waiting];
+        let mut g = start(&s);
+        g.activate_army(7);
+        assert!(g.world.armies.iter().any(|a| a.id == 7), "on the map");
+        assert_eq!(ship_at(&g), None, "no ship for an ordinary army");
     }
 
     #[test]

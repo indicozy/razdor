@@ -701,6 +701,7 @@ Razdor's code read for this table: `src/rules/map.rs`, `fog.rs`, `game.rs`, `wor
 | Minimap size | 400×400 frame by default; the player can drag its left and bottom edges or their corner to any size (kept in the settings; a double click on an edge restores the square), a player's request 2026-10-08 | 200 px under 100 cells wide, else 400 | small |
 | Minimap click | centres the view | clicked cell ~15 cells from the view corner | small |
 | Hero class change by event | sight, speed and cast divisor keep the starting class; a Community speed event sets his speed (`Game::start_class`, `speed_set`) | sight, speed and cast divisor keep the starting class (Community: an event may set the hero's speed directly) | Matches |
+| Ship summoned by an event (leader 0xFE marker) | The marker is never on the map: its activation puts the one ship record on the marker's post with no water test (`activate`, `src/rules/script.rs`; `ship_marker` on `Army`); a second summon moves it; deactivation removes it (`Ship_Remove`: `ship_removed`). Old cell not cleared, hero aboard keeps sailing (unknown in the exe) | 0x4969b8 → Ship_Place 0x496ec4 (no terrain test, one record, marker stays off the map); 0x496900 → Ship_Remove 0x49704c; the blocking effect of a stale N+2 cell is unknown | Differs: one ship record moves instead of several ships (the guide pp. 205-206 calls it a bug; the narrowest guard; OPEN_QUESTIONS G9) |
 
 ## Unknowns
 

@@ -753,6 +753,11 @@ pub struct Army {
     /// Ship type (`.DTm` army byte 72): 0 a land army, else it sails (`rules::ships::kind`).
     #[serde(default)]
     pub ship: u8,
+    /// The ship-summoning marker: its leader is type 0xFE (`.DTm` army byte 26). It never
+    /// stands on the map; an event that activates it puts the player's ship on its post
+    /// (`Game::activate`, 0x4969b8, 0x496ec4). It has no units.
+    #[serde(default)]
+    pub ship_marker: bool,
     /// What the scenario says about its behaviour (`rules::ai`); `enabled` is false for the
     /// demo's gangs, which keep the simple chase-and-patrol rules.
     #[serde(default)]
@@ -761,6 +766,9 @@ pub struct Army {
     #[serde(default)]
     pub mind: AiMind,
 }
+
+/// The leader byte of the ship-summoning marker army (`.DTm` army byte 26).
+pub const SHIP_MARKER_LEADER: u8 = 0xFE;
 
 /// The original's MapObject_Name (0x4973a0), which cuts a scenario name at its first `#`
 /// and trims trailing spaces; used by the army and building tooltips alike.
@@ -1169,7 +1177,7 @@ impl World {
 
         for a in &s.armies {
             let mut entries = Vec::new();
-            if a.leader_unit != 0 {
+            if a.leader_unit != 0 && a.leader_unit != SHIP_MARKER_LEADER {
                 entries.push((a.leader_unit as u32, a.leader_level as i32 + 1, 1));
             }
             entries.extend(dt_entries(&a.troops));
@@ -1177,7 +1185,7 @@ impl World {
             world.dropped_units += dropped;
             // An army record without units is kept as it is (0x4b2504 fills every slot): an
             // event may give it units and activate it (Проклятое озеро's army 44).
-            if a.leader_unit != 0 {
+            if a.leader_unit != 0 && a.leader_unit != SHIP_MARKER_LEADER {
                 // The leader draws no wage (economy.md §1, kind 0).
                 if let Some(leader) = troops.first_mut() {
                     leader.kind = WageKind::Leader;
@@ -1237,6 +1245,7 @@ impl World {
                 named: 0,
                 old_effects: Vec::new(),
                 ship,
+                ship_marker: a.leader_unit == SHIP_MARKER_LEADER,
                 ai: AiProfile::from_dt(a),
                 mind: AiMind::default(),
             };
@@ -1569,6 +1578,7 @@ impl World {
             named: 0,
             old_effects: Vec::new(),
             ship: 0,
+            ship_marker: false,
             // A gang pays the player's XP in full (a map's army gives its byte 71).
             ai: AiProfile { exp_correction: 100, ..AiProfile::default() },
             mind: AiMind::default(),

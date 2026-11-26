@@ -442,10 +442,12 @@ pub trait EventWorld {
     fn replace_unit(&mut self, holder: Holder, unit: u8, with: u8);
     /// Opcode 8: the army's speed correction (the editor's −3..5).
     fn set_army_speed(&mut self, holder: Holder, correction: i8);
-    /// Opcode 9: the army or building joins group 1 player, 2 ally, 3 neighbour, 4 enemy.
+    /// Opcode 9: the army's or building's faction byte becomes group 1 player, 2 ally,
+    /// 3 neighbour, 4 enemy. Nothing else changes (the owner, the attitudes).
     fn set_faction(&mut self, holder: Holder, group: u8);
-    /// Opcode 10: its relation (−3..3) towards group 0 player, 1 ally, 2 neighbour, 3 enemy.
-    fn set_relation(&mut self, holder: Holder, group: u8, value: i8);
+    /// Opcode 10: byte `index` (0–3) of its attitudes becomes `value` (−3..3): index 0 is the
+    /// attitude to the player, 1–3 the rest of the row.
+    fn set_relation(&mut self, holder: Holder, index: u8, value: i8);
     /// Opcode 11: slot k of the unit(s) holds spell k of `spells` for good, or nothing for
     /// a 0.
     fn set_spells(&mut self, holder: Holder, unit: Option<u8>, spells: &[u8]);
@@ -1751,7 +1753,8 @@ impl EventEngine {
             }
             10 => {
                 if let (Some(h), Some(group)) = (holder, unit.filter(|u| *u <= 3)) {
-                    w.set_relation(h, group, m.clamp(-3, 3) as i8);
+                    // The original stores the low byte of the value, unclamped (0xc27862).
+                    w.set_relation(h, group, m as i8);
                 }
             }
             11 => {

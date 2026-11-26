@@ -676,6 +676,8 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Chain depth | Cut at 32 levels (`CHAIN_DEPTH`, `src/rules/events.rs`): the chained event does not run and the cut is reported as `EventOutcome::ChainCut`, which the UI logs | No depth limit and no cycle guard (§8) | Differs, deliberate: a safety net against infinite recursion; whether a shipped map reaches 32 levels is not checked |
 | Guard | *Last fired* := now + 1; with a duration L ≤ now, without L < now − 60; set back to now when the scan goes idle | Same scan blocked (idle reset to now); duration 0: more than 60 min after `now + 1` | Matches |
 | Opcode mode test | Byte 148 = 1 and byte 17 ≠ 0 (signed); pokes of one byte across records, the run-time bytes 156–162 included; strict < and >; op 18 the digit of the event's `^` flag; op 21 only with byte 17 = 21 | Byte 148 = 1 and byte 17 ≠ 0; op 21 needs byte 17 = 21; no spell-removal extension | Matches |
+| Event opcode 9 (faction := value) | Writes the faction byte only, for groups 1–4 (army +0x16AB, building +0x151); the owner and the attitudes stay. An army's cached attitude is worked out again for its new faction (`set_faction`, `src/rules/script.rs`); a value outside 1–4 is dropped. Holder 0 (the hero) is not written: the original copies his faction into the buildings he captures later, which Razdor does not model (unknown) | One byte: army +0x16AB or building +0x151 = +0x55 (0xc27862; notes `docs/notes/map/00c27186-00c2a3d9.md`), any value | Matches for groups 1–4 on armies and buildings; differs for other values and for holder 0 (kept, see Unknowns) |
+| Event opcode 10 (attitude i := value) | Stores the low byte of the value, unclamped, in byte i (0–3) of the army's attitudes (+0x16AF+i) or the building's (+0x152+i). Holder 0 (the hero's record) writes the scenario's first row, and every army's cached attitude is recomputed from it. Byte 0 of a building is also its `attitude`. An index of 4 or more is dropped (`set_relation`, `events.rs`) | One byte: army +0x16AF+i or building +0x152+i = +0x59, any i, no range check (0xc27862; events RE item 6) | Matches for i 0–3 and holder 0 (the hero's row; its side effects on captures are unknown); differs for i 4 and up (kept, see Unknowns) |
 | Placeholders | `#HERONAME` only; titles cut at `%` and `#` | `#HERONAME` only; titles cut at `#` | Matches |
 | Double spaces | Collapsed when the game loads the map's events, names and descriptions | Collapsed at load | Matches |
 | Defeat by army loss | Game over screen | Defeat report, then the main menu; the defeat event does not fire | Matches in effect |
@@ -696,3 +698,10 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 - Byte 150 ("generate the battle army"): no reader was found in the event code.
 - Whether removing the hero by a type match (§7.1) was ever reachable in practice.
 - The restart snapshot's role at the first map (taken at new game, 0x4c1124) versus loads.
+- Opcodes 9 and 10 with a value or index outside their rows (faction outside 1–4, index 4 and up): the
+  original writes the byte anyway (an index of 4 on a building lands on the garrison pointer at +0x156,
+  and on an army on the bytes after its row). Razdor drops them. Whether a shipped or community map does
+  this was checked on the community maps (both installs, 2026-11-26): no event uses opcode 9 or 10.
+- Opcode 9 on holder 0 (the hero): the original's copy of his faction into later captures is not modelled.
+- Whether the original keeps a cached attitude anywhere: the events RE found none (the relation is read on
+  demand); Razdor keeps one per army and recomputes it on opcodes 9 and 10 and on the hero's row.

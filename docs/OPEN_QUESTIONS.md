@@ -226,14 +226,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   building copy and the wander points (`script.rs:344-366`). The exe has no such test (0x4969b8).
   `AiProfile::from_dt` sets `enabled: true` (`ai.rs:203`), so only a save-compatibility path sets it
   false. Settled by finding that path; then make the revival unconditional or document the path.
-- **A player's ship summon is not special-cased** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, gap G9). `activate` (`src/rules/script.rs:305-320`) places any
-  waiting army through `placement` (`src/rules/ships.rs:133`). The exe treats leader type 0xFE as
-  the hero's single parked-ship record: the summon at 0x4969b8 → 0x496ec4, the dismissal at 0x496900
-  → 0x49704c. The only 0xFE handling in `src/rules` is for event units
-  (`src/rules/events.rs:78-86`). Known: in the exe a second summon leaves the old cell's occupancy
-  set (the guide's "blocked" claim); Razdor keeps one parked tile. Open: whether a second ship is
-  drawn at once. Settled by two summons in game, then the leader-type rule.
+- **A player's ship summon (gap G9, 2026-11-05; code 2026-11-26)**. Leader type 0xFE is a marker: 0x4969b8
+  calls only Ship_Place (0x496ec4), which moves the one ship record to the army's cell with no terrain
+  test, and the marker stays off the map (so a summon repeats). Razdor does this (`activate`,
+  `ship_marker` on `Army`, `src/rules/script.rs`); deactivation (0x496900 → Ship_Remove 0x49704c) removes
+  the ship. Razdor keeps one ship, so a second summon moves it; the guide (pp. 205-206) calls the exe's
+  "several ships" a bug, so this is the narrowest guard. Open: what the exe's stale N+2 cell blocks
+  (the old cell keeps its code; MoveToCell treats it as the parked ship, world.md §8); what the hero aboard
+  does when a marker is summoned (Razdor keeps `aboard` and the tile). Settled by two summons in game.
 - **Game draw order: buildings draw above trees, rocks and mountains in one cell** (2026-11-05, the
   Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G12, unverified).
   `src/ui/world_view.rs:1640-1655` (`LAYER_BUILDING` 2 above the object layers 0 and 1, from
