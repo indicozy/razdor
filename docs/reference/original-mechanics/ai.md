@@ -317,8 +317,8 @@ may not walk through, and the buildings it would assault, so AI armies kept to t
 Only the negative-score footprints are
 closed now; an army walks through any other building, and the arrival in a hostile one is the
 assault of §9.1. The loop is in the planner, 0x4a2d88. The demo's gangs (`Game::move_armies`,
-no arrival rules) still route round the buildings `bars_army` names (Razdor's choice, a route
-for an unmanaged army only).
+no arrival rules) walk through the buildings too and just pass them (Razdor's choice since
+2026-11-26; before, they routed round the hostile ones).
 
 ### 7.4 Repulsion cone
 For strength S and slope f around cell (x, y): every scanned cell whose value
