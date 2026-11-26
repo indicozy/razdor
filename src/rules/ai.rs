@@ -1255,6 +1255,15 @@ impl Game {
         }
     }
 
+    /// An army standing on a bridge does not attack a party afloat (a ship army, or the hero
+    /// aboard). The guide, p. 208 (the owner's decision 2026-11-26); the exe's contact
+    /// (0x4a548c) has no medium test found. A ship still attacks the bridge army: the bridge
+    /// is open to it (see `ai_arrive_rules`).
+    fn bridge_bars_ship(&self, here: Tile, p: Party) -> bool {
+        let on_bridge = self.world.location_covering(here).is_some_and(|l| self.world.locations[l].kind.is_bridge());
+        on_bridge && self.afloat(p)
+    }
+
     /// The building `p` stands in (the hero: the one he entered).
     fn standing_in(&self, p: Party) -> Option<usize> {
         match p {
@@ -2385,7 +2394,8 @@ impl Game {
     /// 2. contacts, the hero first: a friendly party's talk counter grows by relation + 1; a
     ///    hostile neighbour (|dx| ≤ 1, |dy| ≤ 1) in no building, on a bridge or in its own
     ///    building is attacked when the cached score is positive and it is not ignored (the
-    ///    hero: [`Contact::Attack`]); one inside someone else's building triples both scores;
+    ///    hero: [`Contact::Attack`]); an army on a bridge attacks no party afloat (guide p. 208,
+    ///    [`Self::bridge_bars_ship`]); one inside someone else's building triples both scores;
     ///    a friendly neighbour is greeted (the hero only after his step);
     /// 3. in a building: assault and capture, village gold, shopping, healing, resurrection,
     ///    hiring, garrison buying and reshuffle; the building's stored score is zeroed.
@@ -2469,7 +2479,7 @@ impl Game {
                     }
                 };
                 if open {
-                    if self.cached(i, key) > 0 && !self.ignored(p) {
+                    if self.cached(i, key) > 0 && !self.ignored(p) && !self.bridge_bars_ship(here, p) {
                         match p {
                             Party::Hero => result = Some(Contact::Attack),
                             Party::Army(j) => {

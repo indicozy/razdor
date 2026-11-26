@@ -2454,3 +2454,44 @@ fn faster_ai_sets_the_planner_searches() {
     let small = search_for(ExperimentalRules { fast_ai: true, ..Default::default() }, 200 * 200);
     assert_eq!((small.window, small.direct), (None, true));
 }
+
+/// The guide, p. 208 (the owner's decision 2026-11-26): an army on a bridge does not attack a
+/// party afloat (a ship, or the hero aboard); a ship attacks the bridge army as before.
+#[test]
+fn a_bridge_army_does_not_attack_a_ship_or_the_hero_aboard() {
+    use crate::rules::ships::{kind, Ship};
+    let mut s = scenario(30, 10);
+    for y in 0..10 {
+        for x in 10..20 {
+            tk::set(&mut s, x, y, crate::dt::dtm::Surface::CoastalWater);
+        }
+    }
+    // The hero stands at sea, next to the bridge army; hostile to faction 1 (the hero).
+    s.header.heroes[0] = hero(16, 5, 100, &[troop(4, 0, 1)]);
+    s.buildings = vec![building(BuildingType::WoodenBridge, 15, 5, (1, 1))];
+    let mut ship = army(2, (16, 6), 2, ENEMY, 0, &[troop(4, 0, 1)]);
+    ship.ship = kind::PIRATE;
+    s.armies = vec![army(1, (15, 5), 4, [-2, -2, 1, 3], 0, &[troop(4, 0, 1)]), ship];
+    let mut g = start(&s);
+    let bridge = (15, 5);
+    let sea = (16, 6);
+    assert!(g.world.armies[1].sails(), "the ship is afloat");
+    // Armies: the bridge army is barred from the ship; the ship is not barred from the bridge.
+    let ship_key = g.world.armies[1].uid;
+    let land_key = g.world.armies[0].uid;
+    let j = |g: &Game, uid| g.army_by_uid(uid).unwrap();
+    let (bi, si) = (j(&g, land_key), j(&g, ship_key));
+    assert!(g.bridge_bars_ship(bridge, Party::Army(si)), "bridge army vs ship: barred");
+    assert!(!g.bridge_bars_ship(bridge, Party::Army(bi)), "bridge army vs a land army: open");
+    assert!(!g.bridge_bars_ship(sea, Party::Army(bi)), "a ship at sea attacks the bridge army");
+    // The hero aboard: the bridge army does not attack him (his score is positive, he is adjacent).
+    g.ship = Some(Ship { tile: sea, aboard: true });
+    g.world.armies[0].mind.scores.insert(HERO, 50);
+    g.world.armies[0].mind.clean.insert(HERO);
+    assert_eq!(arrive(&mut g, land_key), None, "the hero aboard is not attacked from a bridge");
+    // The same hero on foot, on the bridge's neighbour: attacked as before.
+    g.ship = None;
+    g.world.armies[0].mind.scores.insert(HERO, 50);
+    g.world.armies[0].mind.clean.insert(HERO);
+    assert_eq!(arrive(&mut g, land_key), Some(Contact::Attack));
+}
