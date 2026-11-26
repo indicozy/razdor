@@ -596,9 +596,15 @@ impl Location {
         !self.kind.holds_garrison() || occupied || !self.garrison.is_empty() || !self.stationed.is_empty()
     }
 
-    /// A garrison that fights the player when he steps in.
+    /// A garrison that fights the player when he steps in (0x4adb63, world.md §4.2 rule 3): a
+    /// castle, fort or camp at attitude 0 or less, or ruins at any attitude, with troops left.
+    /// The exe has no owner test on this path, so the player's own castle at attitude 0 or less
+    /// fights him too, as the guide says (pp. 17, 38). Unlike [`Location::hostile`].
     pub fn defended(&self) -> bool {
-        self.kind.defends() && self.hostile() && !self.cleared && !self.garrison.is_empty()
+        self.kind.defends()
+            && !self.cleared
+            && !self.garrison.is_empty()
+            && (self.attitude <= HOSTILE_BELOW || self.kind == LocationKind::Ruins)
     }
 
     /// The player may leave troops here: his own castles and forts.

@@ -2370,14 +2370,15 @@ impl Game {
     /// What stops or changes the hero's step onto `next` (world.md §4.2, 0x4ad94c), in this
     /// order:
     /// 1. An army stands there: it is engaged, friendly or not, unless the cell belongs to a
-    ///    town, tavern, church, smithy, shipyard, altar or dungeon, or the army is well
-    ///    disposed to him (attitude above 0) and the cell is a building other than a bridge.
+    ///    town, market, tavern, church, smithy, shipyard or altar (a dungeon entrance does not
+    ///    shelter it), or the army's own attitude (+0x16af) is above 0 and the cell is a building
+    ///    other than a bridge.
     /// 2. A cell of a village, castle, fort, ruins or bridge: the last army on the map
     ///    standing in it (+0x3788, the building it stands in, not its home) guards it, and is
-    ///    engaged when ill-disposed to him (0 or less) or on a bridge.
-    /// 3. Unguarded: a castle or fort whose attitude is 0 or less, or ruins, with an empty
-    ///    garrison is taken (else the garrison is engaged); a village is taken whatever its
-    ///    owner, also when the route only crosses it.
+    ///    engaged when its own attitude (+0x16af) is 0 or less, or on a bridge.
+    /// 3. Unguarded: a castle, fort or camp at attitude 0 or less, or ruins, with troops left
+    ///    fights him ([`Location::defended`]); with none it is taken. A village is taken whatever
+    ///    its owner, also when the route only crosses it.
     fn step_contact(&self, next: Tile) -> Option<StepContact> {
         use LocationKind as K;
         let w = &self.world;
@@ -2385,8 +2386,13 @@ impl Game {
         let building = w.location_covering(next);
         let kind = building.map(|l| w.locations[l].kind);
         if let Some(i) = w.armies.iter().position(|a| a.tile(map) == next) {
-            let sheltered = matches!(kind, Some(K::Town | K::Tavern | K::Church | K::Smithy | K::Shipyard | K::Altar | K::Entrance));
-            let welcome = w.armies[i].attitude > 0 && kind.is_some_and(|k| !k.is_bridge());
+            // The guide p. 30 (the owner's decision 2026-11-26) over the exe's list at 0x4ad94c
+            // (market 6 out, entrance 11 in): a market, a church and a town shelter the army
+            // standing in them, a dungeon entrance does not. Tavern, smithy, shipyard and altar
+            // as the exe has them.
+            let sheltered = matches!(kind, Some(K::Town | K::Market | K::Tavern | K::Church | K::Smithy | K::Shipyard | K::Altar));
+            // 0x4ad94c reads the army's own attitude (+0x16af), not the combined relation.
+            let welcome = w.armies[i].own_attitude() > 0 && kind.is_some_and(|k| !k.is_bridge());
             if !sheltered && !welcome {
                 return Some(StepContact::Army(i));
             }
@@ -2397,20 +2403,20 @@ impl Game {
             return None;
         }
         if let Some(g) = w.armies.iter().rposition(|a| a.mind.standing == Some(l)) {
-            if w.armies[g].attitude <= 0 || loc.kind.is_bridge() {
+            // 0x4ad94c reads the guard's own attitude (+0x16af), not the combined relation.
+            if w.armies[g].own_attitude() <= 0 || loc.kind.is_bridge() {
                 return Some(StepContact::Army(g));
             }
             return None;
         }
+        // 0x4adb63: the garrison fights when `defended` (attitude 0 or less, ruins always, troops
+        // left); with no troops left a castle, fort or ruins is taken.
+        if loc.defended() {
+            return Some(StepContact::Garrison(l));
+        }
         match loc.kind {
             K::Village => Some(StepContact::Captured(l)),
-            K::Castle | K::Fort | K::Ruins | K::Camp if loc.attitude <= 0 || loc.kind == K::Ruins => {
-                if loc.cleared || loc.garrison.is_empty() {
-                    (loc.kind != K::Camp).then_some(StepContact::Captured(l))
-                } else {
-                    Some(StepContact::Garrison(l))
-                }
-            }
+            K::Castle | K::Fort | K::Ruins if loc.attitude <= 0 || loc.kind == K::Ruins => Some(StepContact::Captured(l)),
             _ => None,
         }
     }
@@ -5470,6 +5476,88 @@ mod tests {
         assert!(g.set_destination((5, 2)), "the army clicked");
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)));
+    }
+
+    #[test]
+    fn the_hero_steps_onto_an_army_in_a_building_by_its_own_attitude_and_the_building_kind() {
+        // 0x4ad94c (world.md §4.2): an army in a building is engaged unless the building is a
+        // town, market, tavern, church, smithy, shipyard or altar (the guide p. 30, the owner's
+        // decision 2026-11-26, over the exe's list: the market is sheltered, the dungeon
+        // entrance is not), or the army's own attitude (+0x16af) is above 0 and the building is
+        // no bridge. The player's row gives faction 3 −1, so an army of faction 3 with own +1 is
+        // hostile by the relation (0x4a0868) but well disposed by its own row.
+        let contact = |kind: BuildingType, own: i8| {
+            let mut s = strip();
+            s.header.relations[0] = [3, 2, -1, -2];
+            s.buildings = vec![building(kind, 5, 2, (1, 1))];
+            s.armies = vec![army(1, 5, 2, own, &[troop(4, 0, 1)])];
+            let g = start(&s);
+            assert!(g.world.armies[0].hostile(), "{kind:?}, own {own}: hostile by relation");
+            assert_eq!(g.world.armies[0].own_attitude(), own);
+            g.step_contact((5, 2))
+        };
+        assert_eq!(contact(BuildingType::Obelisk, 1), None, "well disposed by its own row: let pass");
+        assert_eq!(contact(BuildingType::Obelisk, -1), Some(StepContact::Army(0)), "ill-disposed: engaged");
+        assert_eq!(contact(BuildingType::StoneBridge, 1), Some(StepContact::Army(0)), "a bridge is no building for this rule");
+        for kind in [BuildingType::Town, BuildingType::Market, BuildingType::Church, BuildingType::Tavern, BuildingType::Smithy, BuildingType::Shipyard, BuildingType::Altar] {
+            assert_eq!(contact(kind, -1), None, "{kind:?} shelters a hostile army");
+        }
+        assert_eq!(contact(BuildingType::DungeonEntrance, -1), Some(StepContact::Army(0)), "a dungeon entrance does not shelter it");
+    }
+
+    #[test]
+    fn a_building_guard_is_engaged_by_its_own_attitude() {
+        // 0x4ad94c (world.md §4.2 rule 2): the last army standing in a village guards it, and
+        // is engaged when its own attitude (+0x16af) is 0 or less, or on a bridge. The combined
+        // relation (0x4a0868) does not count. A guard that is not engaged also stops the capture.
+        // The player's row gives faction 3 the value `row`, so the combined relation is the
+        // mean of it and the guard's own attitude (or the lower of the two when one is below 0).
+        let guard = |kind: BuildingType, own: i8, row: i8| {
+            let mut s = strip();
+            s.header.relations[0] = [3, 2, row, -2];
+            s.buildings = vec![building(kind, 5, 2, (2, 1))];
+            s.armies = vec![army(1, 6, 2, own, &[troop(4, 0, 1)])];
+            let mut g = start(&s);
+            g.world.armies[0].mind.standing = Some(0);
+            g.world.armies[0].mind.scripted = true;
+            g
+        };
+        let g = guard(BuildingType::Village, 1, -1);
+        assert_eq!((g.world.armies[0].own_attitude(), g.world.armies[0].attitude), (1, -1));
+        assert_eq!(g.step_contact((5, 2)), None, "well disposed by its own row: no fight, no capture");
+        let g = guard(BuildingType::Village, 0, 2);
+        assert_eq!(g.world.armies[0].attitude, 1, "the relation is above 0");
+        assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "own attitude 0: engaged");
+        let g = guard(BuildingType::StoneBridge, 3, 2);
+        assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "a bridge guard is always engaged");
+    }
+
+    #[test]
+    fn a_castle_at_attitude_0_fights_the_hero_and_one_above_0_does_not() {
+        // 0x4adb63 (world.md §4.2 rule 3): a castle, fort or camp at attitude 0 or less with
+        // troops in it fights him; at 1 it does not; ruins fight at any attitude. With no troops
+        // left the castle is taken. The exe has no owner test on this path, so the player's own
+        // castle at attitude −1 with troops fights him too.
+        let contact = |kind: BuildingType, attitude: i8, troops: bool, owned: bool| {
+            let mut s = strip();
+            let mut b = building(kind, 5, 2, (1, 1));
+            b.relations = [attitude, 0, 0, 0];
+            if troops {
+                b.garrison[0] = troop(4, 0, 2);
+            }
+            s.buildings = vec![b];
+            let mut g = start(&s);
+            if owned {
+                g.world.locations[0].owner = crate::rules::world::Owner::Player;
+            }
+            g.step_contact((5, 2))
+        };
+        assert_eq!(contact(BuildingType::Castle, 0, true, false), Some(StepContact::Garrison(0)), "0 is hostile");
+        assert_eq!(contact(BuildingType::Castle, 1, true, false), None, "1 is friendly: walked through");
+        assert_eq!(contact(BuildingType::Castle, -1, true, true), Some(StepContact::Garrison(0)), "the player's own, no test");
+        assert_eq!(contact(BuildingType::Castle, 0, false, false), Some(StepContact::Captured(0)), "empty: taken");
+        assert_eq!(contact(BuildingType::Fort, 0, true, false), Some(StepContact::Garrison(0)));
+        assert_eq!(contact(BuildingType::Ruins, 3, true, false), Some(StepContact::Garrison(0)), "ruins always");
     }
 
     #[test]

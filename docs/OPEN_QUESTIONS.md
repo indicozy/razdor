@@ -1200,3 +1200,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Original fonts on dt-original** (2026-10-14). Ported as dt-original's only mode (sheets,
   shadow sheets, scale rule, Benguiat for event and village texts; no «Шрифт» setting):
   dt-original 8b94705.
+- **Hero's step onto an army in a building: the guide's shelter list wins over the exe's** (2026-11-26, the parity
+  round's hostility pass). The exe's list at 0x4ad94c shelters types 1, 5, 7–11 (town, tavern, church, smithy,
+  shipyard, altar, dungeon entrance) and leaves the market (6) out. The guide (p. 30) says no fights in a town,
+  tavern, market, church, shipyard, altar or smithy and fights possible at the entrance. By the owner's decision
+  (2026-11-26) the guide wins: `Game::step_contact` shelters the market and not the entrance. Other kinds as the exe
+  has them. The exe's own-attitude rule (+0x16af) is kept as the exe has it. Settled by that decision; the AI's
+  arrival rule (`ai_arrive_rules`, its own shelter test) is not changed.

@@ -318,14 +318,18 @@ the 8 neighbours.
 Checked for the cell he is about to enter, before he moves (§2.2):
 
 1. **An AI army stands there** (occupant code of an army, not the ship): it is engaged,
-   **friendly or not**, unless the cell belongs to a town, tavern, church, smithy, shipyard,
-   altar or dungeon (types 1, 5, 7–11), or the army's own attitude to the player (+0x16af)
-   is > 0 and the cell is a building other than a bridge. On open ground every army is engaged.
+   **friendly or not**, unless the cell belongs to a town, market, tavern, church, smithy,
+   shipyard or altar (types 1, 6, 5, 7–10), or the army's own attitude to the player (+0x16af)
+   is > 0 and the cell is a building other than a bridge. A dungeon entrance (type 11) does not
+   shelter it. The shelter list is the guide's (p. 30, the owner's decision 2026-11-26), which
+   wins over the exe's list at 0x4ad94c (types 1, 5, 7–11: the market, 6, out and the entrance,
+   11, in). On open ground every army is engaged.
 2. Else, **a building cell** of a village, castle, fort, ruins or bridge (types 2–4, 12–14):
    the last on-map army **standing in** that building guards it (army +0x3788, the building
    under its cell, cleared when it leaves; not its home building: a castle's own army away
    on patrol does not guard it); the guard is engaged when its own attitude to the player
-   (+0x16af, 0x4ccc8a) is ≤ 0, or always on a bridge.
+   (+0x16af, read by 0x4ad94c itself; 0x4ccc8a is the cursor's read of the same byte) is ≤ 0, or always on
+   a bridge (types 13, 14). A guard above 0 on a non-bridge building stops nothing and stops the capture too.
 3. No guard: a castle, fort or ruins whose attitude (+0x152) is ≤ 0 (ruins always) with a
    garrison record: an empty garrison means the building is **captured** (owner = player,
    the hero's faction and attitudes copied); otherwise the garrison is engaged. An unguarded
@@ -665,6 +669,9 @@ Razdor's code read for this table: `src/rules/map.rs`, `fog.rs`, `game.rs`, `wor
 | Stationary guards' clock | skipped (no bank) | skipped | Matches |
 | Pacing | 150 ms per step / wait tick, game time added per step | same; game time also interpolated inside the step | none for rules |
 | Contact on the hero's step | the cell he steps onto: an army (any on open ground; a friend is fought like a foe when no event fires, as the original, unless the advanced setting "let pass" is on, then met; with the advanced setting "armies on bridges: let pass" an army on a bridge that is not ill-disposed, not a stationary guard and not the army clicked is walked through, cell and guard rules alike), a guard, a garrison (`Game::step_contact`); AI armies that stepped next to him after his step | the cell he steps onto holds an army (any army on open ground); a building's guard is an army standing in it (+0x3788); AI adjacency after AI steps | Matches (until 2026-10-04 Razdor's guard was the army whose home it is, wherever it stood) |
+| Army standing in a building on the hero's step | engaged unless the building is a town, market, tavern, church, smithy, shipyard or altar (the guide p. 30, the owner's decision 2026-11-26) or the army's own attitude (`Army::own_attitude`, +0x16af) is above 0 on a non-bridge; a dungeon entrance is fought (`Game::step_contact`) | the exe's list at 0x4ad94c: town, tavern, church, smithy, shipyard, altar, dungeon (types 1, 5, 7–11), own attitude > 0 on a non-bridge | Matches the guide, differs from the exe's list on two kinds: the market (sheltered here, fought in the exe) and the entrance (fought here, sheltered in the exe) |
+| Building guard on the hero's step | the last army standing in a village, castle, fort, ruins or bridge is engaged when its own attitude (`Army::own_attitude`) is 0 or less, or on a bridge (`Game::step_contact`, citing 0x4ad94c) | +0x16af, the same | Matches (fixed 2026-11-26; the combined relation was read until then) |
+| Garrison at attitude exactly 0 on the step | `Location::defended` (castle, fort, camp at 0 or less, ruins always; no owner test), used by the step, the building window's tabs and the click on the building he stands in | 0x4adb63: signed ≤ 0, no owner test | Matches (`Location::hostile` stays `< 0` for the battle's defence and the other callers) |
 | Village crossed on the way | an unguarded village (or an empty castle, fort or ruins) stepped on is his, with no window; the walk goes on | captured when crossed, no window, the walk goes on | Matches (Razdor showed a capture window that stopped the walk until 2026-10-03) |
 | Building under an event's window on the way | the walk an event's window cuts short ends on his cell; the clicked building he stands in opens after the windows (`Game::stop_for_reading`) | 0x4aed41 → 0x4ae5d8, pending 0x4aed64 | Matches (until 2026-10-04 Razdor left him on the map) |
 | Building entered when crossed | entered on its second footprint cell or where the walk ends; the window only at the end (`Game::move_to_cell`) | entered when 2+ footprint cells are crossed (events may fire), window only at the end | Matches |
