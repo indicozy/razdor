@@ -26,7 +26,7 @@ pub const QUEST_COMPLETED: &str = n_("Quest completed");
 /// 0x4a8ae8, 0x4833f0), Razdor's own «Событие» without it; English keeps its own text.
 pub fn event_title(game: &Game, id: EventId) -> String {
     let install = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| super::chrome::ui_text("Event", "Title")).flatten();
-    game.event_title_or(id, &untitled_window(install, &tr("Event")))
+    game.event_title_or(id, &untitled_window(install, tr("Event")))
 }
 
 /// The event's own picture is drawn only for picture byte 0 (+0x52, 0x4a8ae8); any other byte
