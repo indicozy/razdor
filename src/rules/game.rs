@@ -232,11 +232,13 @@ pub enum Foe {
     Army(usize),
 }
 
-/// What a battle may change before it is settled: the squad and the armies as the battle began.
+/// What a battle may change before it is settled: the squad and the armies as the battle began, and
+/// the garrison of the building fought (its location and its troops; a battle writes their HP back).
 #[derive(Debug)]
 pub(crate) struct BattleUndo {
     squad: Vec<Unit>,
     armies: Vec<Army>,
+    garrison: Option<(usize, Vec<Troop>)>,
 }
 
 /// The whole game state. It is saved with serde (`rules::save`), except the content and the
@@ -2136,7 +2138,8 @@ impl Game {
                 self.goal = None;
                 self.talk_to = None;
                 self.foe = Some(Foe::Garrison(l));
-                self.back_to = None;
+                // He has not moved yet: the cell he stands on is the one «Отступить» goes back to.
+                self.back_to = Some(from);
                 it.push(Event::Arrived(l));
                 return Some(false);
             }
@@ -2835,7 +2838,11 @@ impl Game {
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
         // The undo of «Отступить» (`retreat_battle`): the squad and the armies as the battle begins.
-        self.battle_undo = Some(BattleUndo { squad: self.squad.clone(), armies: self.world.armies.clone() });
+        let garrison = match self.foe {
+            Some(Foe::Garrison(l)) => Some((l, self.world.locations[l].garrison.clone())),
+            _ => None,
+        };
+        self.battle_undo = Some(BattleUndo { squad: self.squad.clone(), armies: self.world.armies.clone(), garrison });
         // The cells the army stands in now, before `Battle::begin`'s start fix moves its back
         // row forward (4d2141); `settle_battle` returns the units to them when `keep_formation`.
         self.formation_before_battle = Some(self.squad.iter().map(|u| u.slot).collect());
@@ -2971,19 +2978,27 @@ impl Game {
     }
 
     /// Whether the player may «Отступить» from the pending battle (Razdor's deviation, the owner's
-    /// decision of 2026-11-13, backlog 1607; the screen offers it only before the battle's first
-    /// action). Offered for an army that stepped onto him, or caught him, in the open. Not for a
-    /// garrison (a siege, or his own building's defence), not for a fight in a building (his, or the
-    /// army's own), and not for a battle the scenario's events start (`back_to` is `None` there).
+    /// decision of 2026-11-13, backlog 1607, extended by the owner's decision of 2026-11-26, backlog
+    /// 1706; the screen offers it only before the battle's first action). Offered when the hero
+    /// stepped into the fight (`back_to` is set; a battle a scenario's events start has none), for
+    /// an army (in the open, or standing in its own building) and for a garrison (a building he
+    /// attacks). Not when the fight is a defence of his own building (`hero_building_defence`).
     pub fn can_retreat(&self) -> bool {
-        let Some(Foe::Army(i)) = self.foe else { return false };
-        self.back_to.is_some() && i < self.world.armies.len() && self.hero_building_defence() == 0 && self.army_home_defence(i) == 0
+        let Some(foe) = self.foe else { return false };
+        if self.back_to.is_none() || self.hero_building_defence() != 0 {
+            return false;
+        }
+        match foe {
+            Foe::Army(i) => i < self.world.armies.len(),
+            Foe::Garrison(l) => l < self.world.locations.len(),
+        }
     }
 
     /// «Отступить» (Razdor's, see [`Game::can_retreat`]), at any moment of the battle the game allows it
     /// ([`Game::retreat_open`], the owner's rule of 2026-11-17). Everything rewinds to before the fight: the
-    /// squad and the armies are put back as the battle began (`battle_undo`), so nobody died, no experience,
-    /// no loot and no change to either army. The battle's only trace is a lost battle with no losses on
+    /// squad and the armies are put back as the battle began (`battle_undo`), and so is the garrison of a
+    /// building fought, so nobody died, no experience, no loot and no change to either army or building.
+    /// A garrison has no army to leave: only the army foe's `ignore_until` is set. The battle's only trace is a lost battle with no losses on
     /// either side in the chronicle (battles lost). The hero goes back to the cell he came from when no army
     /// or building holds it now, else he stays where he is. The army he left stays on the map and does not
     /// come at him for 120 minutes (the same as an army that withdrew, `resolve_battle`), and his route ends
@@ -2994,17 +3009,22 @@ impl Game {
         if !self.retreat_open(battle) {
             return false;
         }
-        let (Some(Foe::Army(i)), Some(back)) = (self.foe, self.back_to.take()) else { return false };
+        let (Some(foe), Some(back)) = (self.foe, self.back_to.take()) else { return false };
         let start = self.chronicle_battle_start();
         self.chronicle_battle_retreat(start);
         if let Some(undo) = self.battle_undo.take() {
             self.squad = undo.squad;
             self.world.armies = undo.armies;
+            if let Some((l, garrison)) = undo.garrison {
+                self.world.locations[l].garrison = garrison;
+            }
         }
         self.foe = None;
         self.battle_troops.clear();
         self.formation_before_battle = None;
-        self.world.armies[i].ignore_until = self.clock.total_minutes() + 120.0;
+        if let Foe::Army(i) = foe {
+            self.world.armies[i].ignore_until = self.clock.total_minutes() + 120.0;
+        }
         self.path.clear();
         self.goal = None;
         self.talk_to = None;
@@ -4111,14 +4131,78 @@ mod tests {
         assert_eq!(g.tile(), here, "an army holds that cell now");
     }
 
+    /// The hero walked into the garrison of a hostile fort and stands at its gate (backlog 1706).
+    fn walked_into_fort() -> Game {
+        let mut s = strip();
+        let mut fort = building(BuildingType::Fort, 16, 3, (2, 2));
+        fort.faction = 4;
+        fort.relations = [-2, 0, 0, 0];
+        fort.gold_per_day = 40;
+        fort.mana_per_day = 5;
+        fort.garrison[0] = troop(4, 0, 2);
+        fort.garrison_extra_defence = 12;
+        s.buildings = vec![fort];
+        let mut g = start(&s);
+        g.fog = Fog::disabled(24, 6);
+        assert!(g.set_destination((15, 2)));
+        let events = walk_until_stopped(&mut g);
+        assert_eq!(events.last(), Some(&Event::Arrived(0)));
+        g
+    }
+
     #[test]
-    fn a_garrison_or_a_scripted_battle_has_no_retreat() {
+    fn a_garrison_fight_offers_the_retreat_and_puts_the_building_back() {
+        let mut g = walked_into_fort();
+        assert_eq!(g.back_to, Some(g.tile()), "the cell he stands on is the one he goes back to");
+        assert!(g.can_retreat(), "a building he attacks: the retreat is offered");
+        let squad: Vec<(i32, Slot)> = g.squad.iter().map(|u| (u.hp, u.slot)).collect();
+        let garrison = format!("{:?}", g.world.locations[0].garrison);
+        let (gold, here) = (g.gold, g.tile());
+        let mut b = g.start_battle();
+        b.begin();
+        // The fight wrote a garrison troop's HP back, as a battle round does.
+        let k = b.fighters.iter().position(|f| f.team == Team::Enemy).unwrap();
+        b.fighters[k].hp -= 1;
+        g.battle_write_back(&b);
+        assert_ne!(format!("{:?}", g.world.locations[0].garrison), garrison, "the fight changed the garrison");
+        assert!(g.retreat_battle(&b));
+        assert_eq!(format!("{:?}", g.world.locations[0].garrison), garrison, "the garrison is as before the fight");
+        assert_eq!(g.squad.iter().map(|u| (u.hp, u.slot)).collect::<Vec<_>>(), squad, "the squad is as before the fight");
+        assert_eq!((g.gold, g.tile(), g.foe.is_none()), (gold, here, true), "no loot, he stays at the gate, the battle is over");
+    }
+
+    #[test]
+    fn an_army_in_its_own_building_offers_the_retreat() {
+        let (mut g, _from) = caught_by_army();
+        let camp = g.world.index_of("Bandit camp");
+        g.world.locations[camp].garrison_defence = 12;
+        g.world.armies[0].pos = g.world.map.center(g.world.locations[camp].tile);
+        assert_eq!(g.army_home_defence(0), 12, "the army stands in its own hostile building");
+        assert!(g.can_retreat(), "an army in its building: the retreat is offered too");
+        let b = g.start_battle();
+        assert!(g.retreat_battle(&b), "and it goes through");
+        assert!(g.foe.is_none());
+    }
+
+    #[test]
+    fn a_defence_of_his_own_building_has_no_retreat() {
+        let (mut g, _from) = caught_by_army();
+        let camp = g.world.index_of("Bandit camp");
+        g.world.give_to_player(camp);
+        g.world.locations[camp].garrison_defence = 12;
+        g.location = Some(camp);
+        assert!(!g.can_retreat(), "his own building's defence is a siege he holds: no retreat");
+        g.foe = Some(Foe::Garrison(camp));
+        assert!(!g.can_retreat(), "a garrison's defence of his building: no retreat");
+    }
+
+    #[test]
+    fn a_scripted_battle_has_no_retreat() {
         let (mut g, _) = caught_by_army();
-        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
-        assert!(!g.can_retreat(), "a garrison's battle is a siege or a defence");
-        g.foe = Some(Foe::Army(0));
         g.back_to = None;
         assert!(!g.can_retreat(), "the scenario's battle is forced");
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        assert!(!g.can_retreat(), "the scenario's battle is forced, a building's too");
     }
 
     #[test]
