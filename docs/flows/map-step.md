@@ -99,7 +99,10 @@ is asked again on the next visit. A question blocks the engine until answered. R
 the army recount it and mark the hero's AI pairs dirty (`script_events`). An event that starts a
 battle reports `Event::Encounter` after all its effects. A battle-only event ends the scan the way a
 message does (`battle_queued`, 2026-11-08): the events after it run in the scan that `resolve_battle`
-starts after the battle. Text placeholders: only `#HERONAME`
+starts after the battle. A lantern, a shown army or a spell also ends the scan: the chain callback
+(`EventEngine::run`, `animation`) runs the chained event as it is, and no scan follows a chain; a
+delay ends it until the next tick (`delay_queued`). Finishes outside the scan go through `resume`
+(events.md §2, §8). Text placeholders: only `#HERONAME`
 (`Game::fill_text`).
 
 **Clock and daily moments** (world.md §6). `Clock::advance` reports `Tick::Midnight` and

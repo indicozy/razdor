@@ -90,7 +90,10 @@ The scan (0x4abfbc, §2) is started from these places. **code**
   step 1. A run of silent events is therefore applied in one go.
 - Otherwise the loop stops; the dialog (or, for an event with no texts but with a spell,
   lanterns, a shown army, a battle or a delay, a direct finish) takes over, and the scan is
-  started again when it ends.
+  started again when it ends. With a lantern, a shown army or a spell the scan resumes from the
+  chain timer, 250 ms after the animations (0x4af658, §8): that callback runs the chained event
+  as it is, and no scan follows a chain; with no chain it is a fresh scan. A delay ends the scan
+  until the wait timer's next tick (0x4ae280, §8). **code** (decomp-read, 2026-11-26)
 
 So the events after a shown window, a silent one too, are not even checked until that window
 is closed: its OK finishes it (0x4c206c → 0x4ab1ec), then its chain runs or the scan starts
@@ -430,12 +433,14 @@ After an ordinary event is closed (0x4ab51b tail): **code**
   both.
 - **Battle**: the army is activated and the battle opens.
 - **Lanterns or a shown army**: the scroll and reveal animations run; a timer then runs the
-  chain 250 ms after they end (0x4af658).
+  chain 250 ms after they end (0x4af658). The scan ends at the event; the callback resumes it.
 - **Spell**: its animation runs and the spell is cast on the hero's army (free, long duration:
-  [economy.md](economy.md) §4); the chain timer runs after it.
+  [economy.md](economy.md) §4); the chain timer runs after it. With a lantern or a shown army
+  and a spell in one event, the finish queues two timer entries (the decomp shows one chain
+  callback per entry); the effect of the second callback is not traced (OPEN_QUESTIONS).
 - **Delay**: the hero waits *delay* hours (2 ticks of 30 minutes per hour, the world going on,
-  events checked every tick). **A chain behind a delay is dropped**: the delay path starts no
-  chain timer. No shipped event has a delay.
+  events checked every tick; the wait timer 0x4ae280 runs a scan at each tick). **A chain
+  behind a delay is dropped**: the delay path starts no chain timer. No shipped event has a delay.
 - **None of lanterns, shown army, spell or delay**: the chain runs at once; with no chain, the
   scan runs again. A battle does not count here: an event with a battle and none of the four
   opens the battle and then, in the same step, its chain (or a new scan). No shipped event has
@@ -445,6 +450,10 @@ After an ordinary event is closed (0x4ab51b tail): **code**
 done flag, window, guard, once flag, class, place and conditions are not checked. If it is
 silent it is applied at once (and its own chain follows); otherwise its dialog opens, with
 its question if it asks one. The exe has no depth limit or cycle guard for chains. **code**
+**No scan follows a chain tail** (0x4ab1ec → 0x4abf44 only): after a chained event the scan
+does not run again in that call, and the idle reset does not run either (§2). The next scan
+is the next tick, the next meeting, or the loop of the scan that opened the chain when that
+chain was silent (its loop goes on from the top). **code** (decomp-read, 2026-11-26)
 
 ## 9. Meetings
 
@@ -638,7 +647,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Yes answer | Yes clears ask and sets once := byte 149 xor 1; ask is set back for later firings, with a message or without | Yes sets once := byte 149 xor 1; the question returns for later firings (§6.2), but without a message the write misses the event and ask stays 0 (bug) | Razdor fixes the original's bug (no message) |
 | Ask with empty message | Yes finishes it at once: artifacts, units and spells never applied | Artifacts, units and spells are never applied (§6.2) | Matches |
 | When results apply | Dialog-time results (artifacts, units, spells) when the window opens; the finish-time results (gold, mana, XP, activations, flags, journal, victory, relative starts) and the queued battle, spell and delay at the window's OK (`EventEngine::show`, `finish`, `window_closed` in `src/rules/events.rs`) | Dialog-time results (artifacts, units, spells) when the window opens; the finish-time results and the queued battle, spell and delay at OK (0x4c206c calls 0x4ab1ec) (§6.1, §7.2) | Matches (gap G1, fixed 2026-11-09; the recordings' clock and draws agree, see `docs/OPEN_QUESTIONS.md`, Settled) |
-| Events behind a window | A message window holds the scan: the next events, and the shown event's chain, run when it is closed (`EventEngine::window_closed`, `Game::event_window_closed`; the interface and the replay call it at the window's OK). A battle-only event ends the scan too (`battle_queued`, 2026-11-08): the events after it run in the scan after the battle | The scan stops at a shown window and runs again after its OK (§2); a battle-only event stops it the same way, and the scan after the battle runs the rest | Matches; an event without texts that only shows lanterns, an army or a spell does not hold the scan in Razdor (the original waits for the animation; open in OPEN_QUESTIONS) |
+| Events behind a window | A message window holds the scan: the next events, and the shown event's chain, run when it is closed (`EventEngine::window_closed`, `Game::event_window_closed`; the interface and the replay call it at the window's OK). A battle-only event ends the scan too (`battle_queued`, 2026-11-08): the events after it run in the scan after the battle | The scan stops at a shown window and runs again after its OK (§2); a battle-only event stops it the same way, and the scan after the battle runs the rest | Matches (2026-11-26): a lantern, a shown army or a spell ends the scan too; the chain callback resumes it (§2, §8) |
 | Flag test | Substring search of the one flag string; first `^` dropped; `/` negates; empty or `end_tutorial` passes | Substring of the flag string (§5) | Matches |
 | Flag action | `+X` appends X with a non-breaking space if not a substring yet; `-X` removes the first occurrence and the next character; counters only with `^`; `-X^` without X changes nothing; actions of ≤ 2 characters ignored | Same (§5), but `-X^` does not check that X exists and lowers an unrelated character (bug) | Matches; Razdor fixes the original's bug (`-X^`) |
 | Engine flags | `Sea` added when the hero goes to sea and removed when he lands; `EnterShipyard` set when he walks into the ship's shipyard from outside, removed when he leaves a building for open ground, when he boards, and when the ship is removed (`Game::sea_changed`, `Game::yard_flags`, `Game::ship_removed`) | `Sea` aboard a ship, `EnterShipyard` in the ship logic (0x497c68, 0x496d28, 0x49704c) | Matches (P6, 2026-11-07); the ship's shipyard is kept in `Game::ship_yard` |
@@ -672,7 +681,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Lantern with radius 0 | Not lit | Not lit | Matches |
 | Move army to hero | Army 136 only, not activated, cheapest neighbour | Army 136 only, not activated, cheapest neighbour by terrain cost | Matches |
 | Patrol change | Radius, and the box back around the home cell; in opcode mode the opcode is the delta | Radius and the patrol box around home | Matches |
-| Chain timing | Dropped behind a delay unless lanterns, a shown army or a spell start the chain timer; a battle does not stop it; nothing after a victory or defeat (no spell, battle or delay either) | After animations; dropped behind a delay; not after a victory or defeat | Matches |
+| Chain timing | Dropped behind a delay unless lanterns, a shown army or a spell start the chain timer; the chain runs from the callback after them, and no scan follows a chain (2026-11-26); a battle does not stop it; nothing after a victory or defeat (no spell, battle or delay either) | After animations; dropped behind a delay; not after a victory or defeat; no scan after a chain | Matches |
 | Chain depth | Cut at 32 levels (`CHAIN_DEPTH`, `src/rules/events.rs`): the chained event does not run and the cut is reported as `EventOutcome::ChainCut`, which the UI logs | No depth limit and no cycle guard (§8) | Differs, deliberate: a safety net against infinite recursion; whether a shipped map reaches 32 levels is not checked |
 | Guard | *Last fired* := now + 1; with a duration L ≤ now, without L < now − 60; set back to now when the scan goes idle | Same scan blocked (idle reset to now); duration 0: more than 60 min after `now + 1` | Matches |
 | Opcode mode test | Byte 148 = 1 and byte 17 ≠ 0 (signed); pokes of one byte across records, the run-time bytes 156–162 included; strict < and >; op 18 the digit of the event's `^` flag; op 21 only with byte 17 = 21 | Byte 148 = 1 and byte 17 ≠ 0; op 21 needs byte 17 = 21; no spell-removal extension | Matches |

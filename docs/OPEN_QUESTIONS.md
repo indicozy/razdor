@@ -156,11 +156,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Guide screen readings to check on the original page image** (2026-11-05, the editor-guide screenshot pass; grouped). Each is a transcription point, not a rule: (a) 6.5 (p.146): the gold result shows "750" with no visible minus, and the text says the offer takes 750; the sign of the stored value is unclear. (b) 6.12 (p.162): the check of event 5 is captioned "Флаг", not "Проверить флаг" (the editor's condition caption, `docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt`, LabelTestFlag at Left 5; "Флаг" is the result column's label at Left 496); the "-JOFF" sign is unclear. (c) 6.14 (p.167): the "box unclear" for the named-character check row. (d) 6.16.1 and 7.3 (p.199): the counter check reads "RANDC^^" (a glyph between RAND and ^^ that may be an artefact). Its meaning does not change: `RAND^^` never matches (`events.md §5`). (e) 6.6 (p.148): the start date is read as 02.11.1222 at low resolution. Settled by a look at the original page image at a higher resolution, or by the editor.
 
 - **A trailing `=` in a result flag: the editor's side is open** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 7, 7.3). The guide's `+DRAW=` (p.199) is written by the editor as `name%+DRAW=` (dtm-format §9 copies the flag field). The game's side is settled (see Settled): the action is `+DRAW` and the test is empty, which passes. What is open is whether the editor drops the trailing `=` when the field is typed, as the guide says. The validator rejects `=` in names (`src/editor/events.rs:190`). Settled by typing `+DRAW=` in the editor and reading the saved title.
-- **Picture window title: the original shows "Произошло событие!" on a picture event** (2026-11-05, the
-  editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 5, gap G13). The screens of pp. 132-135
-  show that fixed title for an event with a picture. A plain event's window shows the event's name (pp. 91,
-  101). Razdor uses the event name for every window (`src/ui/story.rs:41`). A known difference, and a UI change,
-  so the owner decides. Settled by the exe's picture-window title path (not traced), then the owner's call.
+- **Picture window title: an untitled event's fallback text** (2026-11-05, gap G13; the title rule settled
+  2026-11-26). The exe takes the event's own title (cut at `%` and `#`) for every window, and only an empty one
+  falls back to the install's `[Event] Title`, "Произошло событие!" (0x4a8ae8, 0x4833f0). The guide's four
+  picture screens show untitled test events, so there is no fixed title for picture events: not a difference.
+  Still open, a text difference: Razdor's fallback is the catalog key `Event` = "Событие" (`src/rules/journal.rs:163`,
+  `data/lang/ru/game.txt:285`), not the exe's "Произошло событие!". Fix with a catalog key for the event fallback
+  only (the journal's own fallback stays), with the English text from the install's ini.
 
 - **Group colour range: dtm says 0-5, the editor offers 14 colours** (2026-11-05, the editor-guide screenshot
   pass, docs/reference/editor-guide.md, chapter 5, 5.1-5.2). `dtm-format.md §9` (byte 0) says 0-5. The event
@@ -198,28 +200,15 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   found; whether any code branches on model 9 for a point is not checked here. Not changed in this pass (no code
   changes); fix the comment with the next change to `dtm.rs`.
 
-- **Lanterns, a shown army, a spell and a delay: do they end the scan like a battle does?** (2026-11-08, the
-  parity pass, P3). The exe's scan (0x4abfbc) loops over silent events only (0x674966: no texts, spell, battle,
-  lanterns, show army, delay), so by that definition all of these end it. `events.md §2` and the spec's table say
-  they hold nothing. Razdor now ends the scan at a battle-only event (2026-11-08) and not at these four. Settled by
-  a Frida or difftest trace of an event with lanterns and no text (the second event of the scan fires in the same
-  scan or the next one), then the change.
+- **Picture ids 203 and up (G5, the rest of it)** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G5; part settled 2026-11-26). Settled: 202 is the leader of the army of the
+  last contact (0x68dc90, set at every contact; `EventEngine::last_met`, `story.rs`), and 200/201 are the stock
+  pictures `Stnd_1`/`Stnd_2` (0x4a8ae8). Open: the exe draws any other id from 203 to 255 as a unit id past its unit
+  table (the index runs past the table: a garbage pointer or a crash, unknown). Razdor draws no picture for
+  them. The p. 132 screen's scroll bar and the stock pictures' wrong colours (the exe loads them as UGS, not LIT:
+  0x48d09c; plausible cause, unknown) are not traced. Whether a shipped map or mod uses 202 is not scanned: a
+  one-off scan of every event record's picture byte (+0x52) settles it.
 
-- **Picture 202 (the met army's leader) is not drawn, and the editor cannot pick it** (2026-11-05, the
-  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G5; the screenshot pass). `src/ui/story.rs:53-63`
-  treats any picture value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting
-  caption (`story.rs:133-137`) shows only the leader's name. The editor's list (`src/ui/editor/events.rs:98-101`)
-  holds none, 200, 201 and the portraits below 200. The original's list also holds the install's global images
-  from id 200 up (records §9.1, dt-editor), and the p. 132 screen has a scroll bar. `events.md §6.3` lists 202 as
-  the met army's leader. Settled by finding the install's global images and checking the shipped maps for 202
-  and any other id above 201. The install's `.ini` files have no picture keys under that name, so the source is
-  not located yet. If a shipped map uses 202, draw the leader's portrait and add the id to the editor's list.
-
-- **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, gap G7). The idle reset (`src/rules/events.rs:1297-1308`) runs at
-  the end of `run`; the exe resets in each idle pass, including the nested passes of chain tails
-  (0x4abfbc tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. Low risk.
-  Settled by the S10 variant (a window-opening chain inside a procedure) and the exe's tail order.
 - **Managed armies skip the revival on activation** (2026-11-05, the Hristos editor-guide analysis,
   docs/reference/editor-guide.md, gap G8). `src/rules/script.rs:340-343` returns an army that
   `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the
@@ -326,11 +315,14 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   taking the hero's unit can make the earliest-joined character the leader (not traced). Settled by
   a test (empty the hero's army in an event, then open the army window) and a trace of the leader
   choice in 0x4961d0.
-- **A lantern, army show or spell in one event with another effect** (2026-11-05, the Hristos
-  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 9, 5.13 and 9.9). The guide
-  says the first runnable event fires without its conditions being checked, causing random events
-  and crashes. `events.md §8` describes the chain timer, not this effect. Settled by tracing
-  0x4ab1ec and 0x4af658 for the condition test on a chained lantern, show or spell.
+- **A lantern or army show and a spell in one event: two chain callbacks** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 9, 5.13 and 9.9; the mechanism found
+  2026-11-26). The guide says the first runnable event fires without its conditions being checked, causing random
+  events and crashes. The exe's finish queues one chain-timer entry for the lantern or show and a second one for the
+  spell (decomp-read, 0x4ab1ec, 0x4af658). With both, the first callback runs before the spell is cast and the second
+  after. The effect of that double callback is not traced: Razdor runs one callback and no second one (its
+  `animation` slot holds one chain). Settle by a Frida trace of 0x4af658 on such an event, then emulate it (the
+  owner's call on the default, the bug is in the guide). Single lantern, show or spell: settled, see `events.md §8`.
 - **Crash, UI and size claims the guide makes and nobody has traced** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, chapters 1 and 5-9; grouped). Map sizes 400
   and 800 break the game and the editor (chapter 1); text limits of about 25,000 Cyrillic and 16,000
@@ -936,6 +928,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **Lanterns, a shown army, a spell and a delay: do they end the scan?** (2026-11-08; settled 2026-11-26, parity
+  round, decomp-read of 0x4abfbc, 0x4ab1ec and the chain timer 0x4af658.) Yes. A non-silent event that a lantern,
+  a shown army or a spell makes ends the scan; the chain timer's callback, 250 ms later, opens the chained event as
+  it is (no condition check), and no scan follows a chain. A chain of 0 leaves a fresh scan to the callback. A
+  delay starts no chain timer: its chain is dropped and the scan waits for the wait timer. Razdor: `EventEngine::run`
+  (`animation`, `delay_queued`), `resume`; tests `rules::events::` (`lantern_chain_is_not_followed_by_a_scan`,
+  `delay_ends_the_scan_and_drops_its_chain`). The 250 ms are not modelled: the callback runs in the same call.
 - **Replays: the battle that starts on a walk's last steps, and the campaign drift at stretch 463** (2026-11-11;
   settled 2026-11-11, replays determinism pass). Four causes, all in the recording and playback: (1) a player's card
   press (`Battle::act_with`) was engine-only, so it was never recorded (now `BattleAct::ActWith`); (2) a contact step
