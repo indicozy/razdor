@@ -1167,7 +1167,7 @@ impl EventWorld for Game {
         if let Some(i) = self.army_index(army) {
             let w = &self.world;
             let here = w.armies[i].tile(&w.map);
-            let path = if w.map.passable(to) { super::ai::army_path(w, &w.armies[i], here, to, AI_TARGET_NODES) } else { Vec::new() };
+            let path = if w.map.passable(to) { super::ai::army_path(w, here, to, AI_TARGET_NODES) } else { Vec::new() };
             let a = &mut self.world.armies[i];
             a.post = to;
             a.chasing = false;

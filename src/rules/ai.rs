@@ -524,32 +524,12 @@ fn has_garrison(kind: LocationKind) -> bool {
     matches!(kind, LocationKind::Town | LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins)
 }
 
-/// Army `a`'s route from `from` to `to`. A scenario army (`managed`) walks through every
-/// building, as its plans do: an arrival in a hostile one is an assault (ai.md §9.1). The
-/// demo's gangs (`Game::move_armies`) have no arrival rules, so they keep round the buildings
-/// [`bars_army`] names (Razdor's choice, kept for them).
-pub fn army_path(world: &World, a: &Army, from: Tile, to: Tile, max_nodes: usize) -> Vec<Tile> {
-    let (start, end) = (world.location_covering(from), world.location_covering(to));
-    let keep_off = !managed(a);
-    world.map.path_where(from, to, max_nodes, &|t| match world.location_covering(t) {
-        Some(l) if keep_off && Some(l) != start && Some(l) != end => !bars_army(a, &world.locations[l]),
-        _ => true,
-    })
-}
-
-/// Army `a` keeps off building `l` on an unmanaged army's route ([`army_path`]): castles and
-/// forts that are not its own or a friend's, ruins not its own and not cleared, and any
-/// other building it would assault. Not used by the AI's plans, which close only the
-/// buildings with a negative score (ai.md §7.3).
-pub fn bars_army(a: &Army, l: &Location) -> bool {
-    let own = l.owner == Owner::Army(a.id);
-    let friend = own || l.attitude_to(a.faction) > 0;
-    match l.kind {
-        LocationKind::Castle | LocationKind::Fort => !friend,
-        LocationKind::Ruins => !own && !l.cleared,
-        k if k.is_bridge() => false,
-        _ => assaults(a, l),
-    }
+/// The route from `from` to `to` for any army. Every army walks through every building: an
+/// arrival in a hostile one is an assault for a scenario army (ai.md §9.1). The demo's gangs
+/// (`Game::move_armies`) have no arrival rules, so they just pass through (the owner's
+/// decision, 2026-11-26).
+pub fn army_path(world: &World, from: Tile, to: Tile, max_nodes: usize) -> Vec<Tile> {
+    world.map.path_where(from, to, max_nodes, &|_| true)
 }
 
 // ----------------------------------------------------------------------------------------

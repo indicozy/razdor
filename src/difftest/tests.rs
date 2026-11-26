@@ -493,7 +493,7 @@ fn ds1_the_ai_sees_the_hero_on_the_cell_he_leaves() {
     assert_eq!((s.hero.x, s.hero.y, s.clock), (86, 13, 1733), "{notes:?}");
     // The original: army 1 at (68, 5), the generator at 2 236 314 233. Its way west walks
     // through the buildings it does not close (only negative-score footprints are closed, ai.md
-    // §7.3), as the original's does; before 2026-11-26 Razdor closed the hostile ones (bars_army).
+    // §7.3), as the original's does (Razdor closed the hostile ones before 2026-11-26).
     assert_eq!((a.x, a.y), (Some(68), Some(5)));
     assert_eq!(s.rng, 2_236_314_233);
 }

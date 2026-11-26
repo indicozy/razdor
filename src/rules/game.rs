@@ -2695,10 +2695,10 @@ impl Game {
             a.budget = (a.budget + minutes).min(AI_BUDGET_CAP);
             let here = a.tile(map);
             let near = !peace && a.hostile() && now >= a.ignore_until && map.distance(here, hero_tile) <= CHASE_RADIUS;
-            let route = |a: &Army, from: Tile, to: Tile| ai::army_path(world, a, from, to, AI_PATH_NODES);
+            let route = |from: Tile, to: Tile| ai::army_path(world, from, to, AI_PATH_NODES);
             if near {
                 if !a.chasing || a.path.last() != Some(&hero_tile) {
-                    a.path = route(a, here, hero_tile);
+                    a.path = route(here, hero_tile);
                     a.chasing = true;
                 }
             } else if a.chasing {
@@ -2710,7 +2710,7 @@ impl Game {
                 for _ in 0..3 {
                     let t = (c.0 + self.rng.range(-r, r), c.1 + self.rng.range(-r, r));
                     if map.passable(t) && world.location_at(t).is_none() && map.distance(t, c) <= r {
-                        a.path = route(a, here, t);
+                        a.path = route(here, t);
                         if !a.path.is_empty() {
                             break;
                         }

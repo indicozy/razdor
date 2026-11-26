@@ -1590,20 +1590,20 @@ fn an_arrival_in_a_hostile_fort_on_the_way_is_an_assault() {
 }
 
 #[test]
-fn an_unmanaged_armys_route_keeps_off_a_hostile_fort() {
-    // Razdor's choice, kept for the demo's gangs (no arrival rules): their route goes round
-    // the fort [`bars_army`] names, a scenario army's walks through it.
+fn an_unmanaged_armys_route_walks_through_a_hostile_fort() {
+    // The owner's decision (2026-11-26): every army walks through every building, the demo's
+    // gangs too (they have no arrival rules, so they just pass).
     let mut s = map();
     let mut fort = building(BuildingType::Fort, 35, 10, (1, 1));
     fort.faction = 2;
     s.buildings = vec![fort];
     s.armies = vec![army(1, (30, 10), 4, ENEMY, 0, &[troop(4, 0, 1)])];
     let mut g = start(&s);
-    let route = |g: &Game| super::army_path(&g.world, &g.world.armies[0], (30, 10), (40, 10), 20_000);
+    let route = |g: &Game| super::army_path(&g.world, (30, 10), (40, 10), 20_000);
     let through = |p: &[Tile]| p.contains(&(35, 10));
     assert!(through(&route(&g)), "a scenario army walks through");
     g.world.armies[0].ai.enabled = false;
-    assert!(!through(&route(&g)), "a demo gang keeps off");
+    assert!(through(&route(&g)), "a demo gang walks through too");
 }
 
 #[test]
