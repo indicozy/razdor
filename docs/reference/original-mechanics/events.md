@@ -312,7 +312,7 @@ campaign quest only after both. Razdor: the same (`rk2_the_peasant_offers_and_th
   of the last contact (0x68dc90, set at every contact, not cleared by the idle reset); 203 to 255
   index past the unit table (unknown, drawn as no picture by Razdor); any other value the
   portrait of that unit type. The exe uses the event's own picture only when this byte is 0
-  (decomp-read, 2026-11-26; Razdor still lets a custom picture win, OPEN_QUESTIONS). **code**
+  (decomp-read, 2026-11-26; Razdor the same since the 2026-11-26 fix batch: `story::shows_own_picture`). **code**
 - **Title**: the title text before the first `%`, then before the first `#`, with trailing
   spaces removed (0x4833f0); empty gives the language file's default title key. So `#` starts
   an editor note that is never shown (378 shipped titles have one). **code**

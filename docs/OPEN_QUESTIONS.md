@@ -931,6 +931,10 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **An event's own picture and a non-zero picture byte: which one shows** (settled 2026-11-26, fix batch 2). The exe
+  draws the event's own picture only when byte 82 is 0 (0x4a8ae8, decomp-read). Razdor (`src/ui/story.rs`
+  `shows_own_picture`) now does the same. A one-off scan of every community install's and mod's `.DTm` (41 files,
+  3 events with an own picture) found no event with a byte set, so no shipped map changes its picture.
 - **Picture window title: an untitled event's fallback text** (settled 2026-11-26, the parity round's fix batch 2).
   The exe takes the event's own title (cut at `%` and `#`) for every window, and only an empty one falls back to the
   install's `[Event] Title`, "Произошло событие!" (0x4a8ae8, 0x4833f0). Razdor now uses that install text in Russian

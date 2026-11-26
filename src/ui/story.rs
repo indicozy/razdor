@@ -29,6 +29,12 @@ pub fn event_title(game: &Game, id: EventId) -> String {
     game.event_title_or(id, &untitled_window(install, &tr("Event")))
 }
 
+/// The event's own picture is drawn only for picture byte 0 (+0x52, 0x4a8ae8); any other byte
+/// picks the global picture or a unit, as the exe does.
+fn shows_own_picture(picture_byte: u8) -> bool {
+    picture_byte == 0
+}
+
 /// The title of an untitled event's window: the install's text when it has one, else ours.
 fn untitled_window(install: Option<String>, ours: &str) -> String {
     install.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| ours.to_string())
@@ -60,8 +66,11 @@ pub fn event_dialog(game: &Game, id: EventId, asking: bool) -> Dialog {
     // the map's defeat event. It changes the frame and the music, it does not end the game.
     d.defeat = e.title.contains("#DEFEAT") || game.script().is_some_and(|s| s.is_defeat_event(id));
     let r = &e.results;
+    // The event's own picture only when its picture byte (+0x52, event byte 82) is 0: the exe
+    // reads the byte first and draws the event's picture for 0 alone (0x4a8ae8). A byte set
+    // picks the global picture or a unit, even when the event has its own picture.
     d.picture = match (&e.custom_picture, r.picture) {
-        (Some(data), _) if custom_picture(data).is_some() => custom_picture(data).map(Picture::Image),
+        (Some(data), b) if shows_own_picture(b) && custom_picture(data).is_some() => custom_picture(data).map(Picture::Image),
         // 200 and 201: the defeat and victory pictures, `Stnd-1` and `Stnd-2` (the table
         // 0x674638 + 4·v, loaded at 0x4dc871 / 0x4dc880; 0x4aa105).
         (_, PICTURE_DEFEAT) => super::chrome::win_ugs("Stnd-1").map(Picture::Still),
@@ -342,6 +351,8 @@ mod tests {
     use super::*;
     use razdor::rules::journal::Row;
 
+    /// The caption is the leader's name as the tooltip writes it: spaces collapsed, the ends
+    /// trimmed; no name, no caption.
     /// The guide's picture screens (p. 132-135) and the exe's title rule: an untitled window
     /// takes the install's `[Event] Title`, and only without one Razdor's own text.
     #[test]
@@ -351,8 +362,14 @@ mod tests {
         assert_eq!(untitled_window(Some("  ".to_string()), "Событие"), "Событие", "an empty install text is no text");
     }
 
-    /// The caption is the leader's name as the tooltip writes it: spaces collapsed, the ends
-    /// trimmed; no name, no caption.
+    /// The exe reads the picture byte first (0x4a8ae8): the event's own picture only at 0, so a
+    /// set byte (200, 201, 202 or a unit) wins over the event's own picture.
+    #[test]
+    fn only_picture_byte_zero_shows_the_events_own_picture() {
+        assert!(shows_own_picture(0));
+        assert!([1, 200, 201, 202, 203].into_iter().all(|b| !shows_own_picture(b)));
+    }
+
     #[test]
     fn the_leader_caption_is_trimmed_and_collapsed_and_empty_is_none() {
         assert_eq!(leader_text("  Бенедикт   фон  Вайтлог "), Some("Бенедикт фон Вайтлог".to_string()));
