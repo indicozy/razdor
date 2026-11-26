@@ -18,6 +18,7 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use razdor::rules::game::Game;
 use razdor::rules::save::{self, SaveMeta};
+use razdor::rules::script::ScriptEnd;
 
 /// Seconds of play between two looks at the game (a snapshot is taken when its key changed).
 const SNAP_EVERY: f64 = 2.0;
@@ -117,11 +118,11 @@ fn forget_latest() {
 }
 
 /// Whether the game may be kept in the slot. Razdor's own rule (the session slot is Razdor's
-/// feature, not the original's): a lost game, where the hero's army has fallen (`Game::army_fallen`,
-/// the hero's defeat), is never written, so the slot keeps the last living state. The marker
-/// stays as it was: the slot holds a living state.
+/// feature, not the original's): a lost game is never written, so the slot keeps the last living
+/// state. A game is lost when the hero's army has fallen (`Game::army_fallen`) or the map's defeat
+/// event has ended it (`Game::script_end`). The marker stays as it was: the slot holds a living state.
 fn keepable(game: &Game) -> bool {
-    !game.army_fallen()
+    !game.army_fallen() && !matches!(game.script_end(), Some(ScriptEnd::Defeat(_)))
 }
 
 /// A cheap summary of the game: its clock, the hero's place and purse, the army's state. No
