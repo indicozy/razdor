@@ -14,7 +14,7 @@ sidebar:
 A Razdor addition. The leave-battle window (`Esc`, "Ways out of the battle") has buttons that a normal battle does not:
 
 * **"Restart"**: start this battle again, from its beginning. The battle begins at once again, as any battle does, with no arrangement.
-* **"Retreat"**: leave the battle at any moment the game allows it (not when defending your own building, and not in a battle a scenario event started; attacking a building, or an army inside one, does allow it). The battle is undone, as if it had not been fought: no experience and no loot, the armies, their losses and the building's garrison are as they were at the start, the hero goes back to the cell he came from, and the enemy army does not attack for two game hours. The chronicle and the totals still count the battle as lost, with no losses on either side.
+* **"Retreat"**: leave the battle at any moment the game allows it (not in a battle for a building, a siege or a defence, and not in a battle a scenario event started). The battle is undone, as if it had not been fought: no experience and no loot, the armies and their losses are as they were at the start, the hero goes back to the cell he came from, and the enemy army does not attack for two game hours. The chronicle and the totals still count the battle as lost, with no losses on either side.
 
 ## Quick battle
 

@@ -156,6 +156,12 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Guide screen readings to check on the original page image** (2026-11-05, the editor-guide screenshot pass; grouped). Each is a transcription point, not a rule: (a) 6.5 (p.146): the gold result shows "750" with no visible minus, and the text says the offer takes 750; the sign of the stored value is unclear. (b) 6.12 (p.162): the check of event 5 is captioned "Флаг", not "Проверить флаг" (the editor's condition caption, `docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt`, LabelTestFlag at Left 5; "Флаг" is the result column's label at Left 496); the "-JOFF" sign is unclear. (c) 6.14 (p.167): the "box unclear" for the named-character check row. (d) 6.16.1 and 7.3 (p.199): the counter check reads "RANDC^^" (a glyph between RAND and ^^ that may be an artefact). Its meaning does not change: `RAND^^` never matches (`events.md §5`). (e) 6.6 (p.148): the start date is read as 02.11.1222 at low resolution. Settled by a look at the original page image at a higher resolution, or by the editor.
 
 - **A trailing `=` in a result flag: the editor's side is open** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 7, 7.3). The guide's `+DRAW=` (p.199) is written by the editor as `name%+DRAW=` (dtm-format §9 copies the flag field). The game's side is settled (see Settled): the action is `+DRAW` and the test is empty, which passes. What is open is whether the editor drops the trailing `=` when the field is typed, as the guide says. The validator rejects `=` in names (`src/editor/events.rs:190`). Settled by typing `+DRAW=` in the editor and reading the saved title.
+- **Picture window title: the original shows "Произошло событие!" on a picture event** (2026-11-05, the
+  editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 5, gap G13). The screens of pp. 132-135
+  show that fixed title for an event with a picture. A plain event's window shows the event's name (pp. 91,
+  101). Razdor uses the event name for every window (`src/ui/story.rs:41`). A known difference, and a UI change,
+  so the owner decides. Settled by the exe's picture-window title path (not traced), then the owner's call.
+
 - **Group colour range: dtm says 0-5, the editor offers 14 colours** (2026-11-05, the editor-guide screenshot
   pass, docs/reference/editor-guide.md, chapter 5, 5.1-5.2). `dtm-format.md §9` (byte 0) says 0-5. The event
   form's group combo (`docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt`, ComboBoxGrupp) has 14 items, the
@@ -192,28 +198,49 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   found; whether any code branches on model 9 for a point is not checked here. Not changed in this pass (no code
   changes); fix the comment with the next change to `dtm.rs`.
 
-- **Picture ids 203 and up (G5, the rest of it)** (2026-11-05, the Hristos editor-guide analysis,
-  docs/reference/editor-guide.md, gap G5; part settled 2026-11-26). Settled: 202 is the leader of the army of the
-  last contact (0x68dc90, set at every contact; `EventEngine::last_met`, `story.rs`), and 200/201 are the stock
-  pictures `Stnd_1`/`Stnd_2` (0x4a8ae8). Open: the exe draws any other id from 203 to 255 as a unit id past its unit
-  table (the index runs past the table: a garbage pointer or a crash, unknown). Razdor draws no picture for
-  them. The p. 132 screen's scroll bar and the stock pictures' wrong colours (the exe loads them as UGS, not LIT:
-  0x48d09c; plausible cause, unknown) are not traced. Whether a shipped map or mod uses 202 is not scanned: a
-  one-off scan of every event record's picture byte (+0x52) settles it.
+- **Lanterns, a shown army, a spell and a delay: do they end the scan like a battle does?** (2026-11-08, the
+  parity pass, P3). The exe's scan (0x4abfbc) loops over silent events only (0x674966: no texts, spell, battle,
+  lanterns, show army, delay), so by that definition all of these end it. `events.md §2` and the spec's table say
+  they hold nothing. Razdor now ends the scan at a battle-only event (2026-11-08) and not at these four. Settled by
+  a Frida or difftest trace of an event with lanterns and no text (the second event of the scan fires in the same
+  scan or the next one), then the change.
+
+- **Picture 202 (the met army's leader) is not drawn, and the editor cannot pick it** (2026-11-05, the
+  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G5; the screenshot pass). `src/ui/story.rs:53-63`
+  treats any picture value other than 0, 200 and 201 as a unit id, so 202 gives no picture. The meeting
+  caption (`story.rs:133-137`) shows only the leader's name. The editor's list (`src/ui/editor/events.rs:98-101`)
+  holds none, 200, 201 and the portraits below 200. The original's list also holds the install's global images
+  from id 200 up (records §9.1, dt-editor), and the p. 132 screen has a scroll bar. `events.md §6.3` lists 202 as
+  the met army's leader. Settled by finding the install's global images and checking the shipped maps for 202
+  and any other id above 201. The install's `.ini` files have no picture keys under that name, so the source is
+  not located yet. If a shipped map uses 202, draw the leader's portrait and add the id to the editor's list.
+
+- **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G7). The idle reset (`src/rules/events.rs:1297-1308`) runs at
+  the end of `run`; the exe resets in each idle pass, including the nested passes of chain tails
+  (0x4abfbc tail, 0x4ab51b tail), so it can reset events fired earlier in the same tick. Low risk.
+  Settled by the S10 variant (a window-opening chain inside a procedure) and the exe's tail order.
 - **Managed armies skip the revival on activation** (2026-11-05, the Hristos editor-guide analysis,
   docs/reference/editor-guide.md, gap G8). `src/rules/script.rs:340-343` returns an army that
   `ai::managed` rejects (`src/rules/ai.rs:423-425`, which is `a.ai.enabled`) before the revival, the
   building copy and the wander points (`script.rs:344-366`). The exe has no such test (0x4969b8).
   `AiProfile::from_dt` sets `enabled: true` (`ai.rs:203`), so only a save-compatibility path sets it
   false. Settled by finding that path; then make the revival unconditional or document the path.
-- **A player's ship summon (gap G9, 2026-11-05; code 2026-11-26)**. Leader type 0xFE is a marker: 0x4969b8
-  calls only Ship_Place (0x496ec4), which moves the one ship record to the army's cell with no terrain
-  test, and the marker stays off the map (so a summon repeats). Razdor does this (`activate`,
-  `ship_marker` on `Army`, `src/rules/script.rs`); deactivation (0x496900 → Ship_Remove 0x49704c) removes
-  the ship. Razdor keeps one ship, so a second summon moves it; the guide (pp. 205-206) calls the exe's
-  "several ships" a bug, so this is the narrowest guard. Open: what the exe's stale N+2 cell blocks
-  (the old cell keeps its code; MoveToCell treats it as the parked ship, world.md §8); what the hero aboard
-  does when a marker is summoned (Razdor keeps `aboard` and the tile). Settled by two summons in game.
+- **A player's ship summon is not special-cased** (2026-11-05, the Hristos editor-guide analysis,
+  docs/reference/editor-guide.md, gap G9). `activate` (`src/rules/script.rs:305-320`) places any
+  waiting army through `placement` (`src/rules/ships.rs:133`). The exe treats leader type 0xFE as
+  the hero's single parked-ship record: the summon at 0x4969b8 → 0x496ec4, the dismissal at 0x496900
+  → 0x49704c. The only 0xFE handling in `src/rules` is for event units
+  (`src/rules/events.rs:78-86`). Known: in the exe a second summon leaves the old cell's occupancy
+  set (the guide's "blocked" claim); Razdor keeps one parked tile. Open: whether a second ship is
+  drawn at once. Settled by two summons in game, then the leader-type rule.
+- **Game draw order: buildings draw above trees, rocks and mountains in one cell** (2026-11-05, the
+  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G12, unverified).
+  `src/ui/world_view.rs:1640-1655` (`LAYER_BUILDING` 2 above the object layers 0 and 1, from
+  `object_layer`) and `:1682-1686`. The guide's p.240 screenshot shows stones over a town. The cell
+  pass follows 0x4c8864 by row and layer, as the comment says. Settled by 0x4c8864 and 0x4c9459 (the
+  layer of stones and trees against buildings), or by footage of a town with stones in its cell. Do
+  not change the order before then.
 - **The editor's draw order does not follow the editor's layers** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, gap E7). `src/ui/editor/canvas.rs:249-300`
   sorts terrain objects, buildings and armies by y only (the sort at `:278`). The original editor
@@ -299,14 +326,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   taking the hero's unit can make the earliest-joined character the leader (not traced). Settled by
   a test (empty the hero's army in an event, then open the army window) and a trace of the leader
   choice in 0x4961d0.
-- **A lantern or army show and a spell in one event: two chain callbacks** (2026-11-05, the Hristos
-  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 9, 5.13 and 9.9; the mechanism found
-  2026-11-26). The guide says the first runnable event fires without its conditions being checked, causing random
-  events and crashes. The exe's finish queues one chain-timer entry for the lantern or show and a second one for the
-  spell (decomp-read, 0x4ab1ec, 0x4af658). With both, the first callback runs before the spell is cast and the second
-  after. The effect of that double callback is not traced: Razdor runs one callback and no second one (its
-  `animation` slot holds one chain). Settle by a Frida trace of 0x4af658 on such an event, then emulate it (the
-  owner's call on the default, the bug is in the guide). Single lantern, show or spell: settled, see `events.md §8`.
+- **A lantern, army show or spell in one event with another effect** (2026-11-05, the Hristos
+  editor-guide analysis, docs/reference/editor-guide.md, chapters 5 and 9, 5.13 and 9.9). The guide
+  says the first runnable event fires without its conditions being checked, causing random events
+  and crashes. `events.md §8` describes the chain timer, not this effect. Settled by tracing
+  0x4ab1ec and 0x4af658 for the condition test on a chained lantern, show or spell.
 - **Crash, UI and size claims the guide makes and nobody has traced** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, chapters 1 and 5-9; grouped). Map sizes 400
   and 800 break the game and the editor (chapter 1); text limits of about 25,000 Cyrillic and 16,000
@@ -484,12 +508,21 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   target), and the armies share bridge cells as the original allows (ai.md §2). The report's army
   «Велитрий» is not in the install or the community folders (no such name in any file), and the
   report has no save, so its faction, target and state are unknown. Settles it: a save from before
-  the jam, or the army's faction and its target. Known (before 2026-11-26): `bars_army` closed
-  the fort for a faction 2 army south of it (attitude −2), which sent it on a 210-cell detour instead
-  of through the fort to the bridge; a faction 4 army walked through the fort. Since 2026-11-26 the
-  planner walks every army through the fort (ai.md §7.3, §9.1), so this detour is gone. Not checked: why an army
+  the jam, or the army's faction and its target. Known: `bars_army` (ai.md §7.3, Razdor-only) closes
+  the fort for a faction 2 army south of it (attitude −2), which sends it on a 210-cell detour instead
+  of through the fort to the bridge; a faction 4 army walks through the fort. Not checked: why an army
   on the bridge finds no route to the south-west building «Дозорная башня» (40, 177), even for faction 4
   (the fort is open to it), which may be the planner or the building's cell.
+- **AI ships move about twice as fast as the original's (report 1082, 2026-10-23).** A diff
+  test on РК1 (knight, the opening read, 48 one-hour waits, `tools/difftest`) has the sea
+  pirates (army 9) sail 4 cells in the first hour in the original and 7 in Razdor, 6 against 12
+  in the second; over two days the original's ship makes 4–6 cells an hour with whole hours
+  standing still, Razdor's 7–12. The SHIP costs match (world.md §1: coastal 1, shallows 2), so
+  the difference is in how an AI ship's steps are timed (ai.md §2, §13). Settles it: RE of the
+  AI step clock for ship armies (0x4a1ff0 loader, the step cost and delay in the per-frame
+  driver), then the same diff test equal. Players catch the pirates in the village in the
+  original because they sail slowly and wait.
+
 - **Held item: the green card and the acceptance line's face (report 1053, 2026-10-22).** The
   code gives a refused card state 4 (red) and an accepted one state 2 (blue, the block at
   0xadd084); the green frame in the original's screenshot is most likely the selected unit
@@ -902,56 +935,7 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   `--keep`, profile the per-frame additions if the cost persists, run db-zoomout repeatedly to catch the panic.
 
 ## Settled
-- **Game draw order of buildings, rocks and trees (G12)** (settled 2026-11-26, the parity round). The exe (0x4c8864)
-  draws per cell in row order: massif of class 5 and up, plants, the building once at its first (visible) footprint
-  cell, then figures. Razdor's flat view does the same (`first_footprint_cell`): a stone on a later footprint cell
-  covers the building, as on the guide's p. 240; checked off-screen on Другой берег (village at (74,127), stone at
-  (70,127)). Not copied: the exe keys a building to its first *visible* cell, so its order shifts while scrolling at
-  the top or left edge. 2.5D: the depth sort would differ only for a stone on a middle footprint row, north of the
-  foot; no shipped map has one (scan of every install map), so it is left as is.
 
-- **A contact at noon gives the noon report, not the battle (guide 9.5, p. 259; traced under Wine 2026-11-26,
-  Проклятое озеро, army 17).** With the next noon set to the contact minute, both the army's arrival (0x4ade3c)
-  and the hero's step (0x4ad94c) run the scan (0x4abfbc). It opens the noon report (wages paid, the next noon a
-  day later), returns 1 and opens no battle; the army stays next to him. Razdor does the same (`meet_as`, the noon
-  as the scan's event, `pay_noon_report`). The ally fight the guide describes follows from the spent noon: the
-  next contact finds no noon due and fights. That step was inferred from the rule, not traced. The trace is in the
-  parity-review scratch folder (`trace-noon-contact.md`).
-
-- **AI ships move about twice as fast as the original's (report 1082, 2026-10-23; settled 2026-11-26, as original,
-  frame pace).** A diff test on РК1 (knight, 48 one-hour waits) has the sea pirates (army 9) sail 4 cells in the first
-  hour in the original and 7 in Razdor, 6 against 12 in the second. Measured 2026-11-26: over 48 hours army 9 covers
-  4.6 cells an hour in Razdor and 5.7 in the original (net displacement); the report compared the first two hours of two
-  runs that took different wander targets (whole run: original 244 cells in 43 h, Razdor 222 in 48 h). The original's
-  straight runs top out at 10 (5 steps a tick) where Razdor reaches 12, and the model of the step clock (0x4a399c) gives
-  exactly 6, 8, 10, 12 for 3, 4, 5, 6+ frames a tick. It is the frame pace of the Wine harness (`tools/difftest/FINDINGS.md`
-  §5), not a rule; no code change. SHIP costs and speed match (speed byte 13 via 0x4b4824; cost map as world.md §1).
-  Not proven by a frame trace: a Frida `--trace ai` run logging army 9's step `dt` would settle it (the owner's go).
-  Razdor's rate is pinned by `rules::ai::` (ships on a strip: 12 cells an hour on cost 1, 6 on cost 2).
-
-- **An event's own picture and a non-zero picture byte: which one shows** (settled 2026-11-26, fix batch 2). The exe
-  draws the event's own picture only when byte 82 is 0 (0x4a8ae8, decomp-read). Razdor (`src/ui/story.rs`
-  `shows_own_picture`) now does the same. A one-off scan of every community install's and mod's `.DTm` (41 files,
-  3 events with an own picture) found no event with a byte set, so no shipped map changes its picture.
-- **Picture window title: an untitled event's fallback text** (settled 2026-11-26, the parity round's fix batch 2).
-  The exe takes the event's own title (cut at `%` and `#`) for every window, and only an empty one falls back to the
-  install's `[Event] Title`, "Произошло событие!" (0x4a8ae8, 0x4833f0). Razdor now uses that install text in Russian
-  for an untitled event's window (`src/ui/story.rs` `event_title`); the journal keeps its own "Событие" fallback, and
-  English keeps "Event".
-- **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis, gap G7; settled
-  2026-11-26, decomp-read of 0x4abfbc). The exe's idle reset (last fired → now, the met army cleared) runs only at
-  the end of a top-level scan call that returns 0. A chain tail never runs a scan and never resets (0x4ab1ec →
-  0x4abf44 only), a non-silent event that took the scan does not reset, and a victory or defeat returns 1 without
-  a reset. No nested scan re-enters 0x4abfbc, so the guide's "nested passes" do not exist. Razdor: the end of
-  `EventEngine::run` (with the `ended` guard), `resume` after a chain that ran at once; test
-  `rules::events::chain_tail_does_not_reset_the_guard`.
-- **Lanterns, a shown army, a spell and a delay: do they end the scan?** (2026-11-08; settled 2026-11-26, parity
-  round, decomp-read of 0x4abfbc, 0x4ab1ec and the chain timer 0x4af658.) Yes. A non-silent event that a lantern,
-  a shown army or a spell makes ends the scan; the chain timer's callback, 250 ms later, opens the chained event as
-  it is (no condition check), and no scan follows a chain. A chain of 0 leaves a fresh scan to the callback. A
-  delay starts no chain timer: its chain is dropped and the scan waits for the wait timer. Razdor: `EventEngine::run`
-  (`animation`, `delay_queued`), `resume`; tests `rules::events::` (`lantern_chain_is_not_followed_by_a_scan`,
-  `delay_ends_the_scan_and_drops_its_chain`). The 250 ms are not modelled: the callback runs in the same call.
 - **Replays: the battle that starts on a walk's last steps, and the campaign drift at stretch 463** (2026-11-11;
   settled 2026-11-11, replays determinism pass). Four causes, all in the recording and playback: (1) a player's card
   press (`Battle::act_with`) was engine-only, so it was never recorded (now `BattleAct::ActWith`); (2) a contact step
@@ -1216,10 +1200,3 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Original fonts on dt-original** (2026-10-14). Ported as dt-original's only mode (sheets,
   shadow sheets, scale rule, Benguiat for event and village texts; no «Шрифт» setting):
   dt-original 8b94705.
-- **Hero's step onto an army in a building: the guide's shelter list wins over the exe's** (2026-11-26, the parity
-  round's hostility pass). The exe's list at 0x4ad94c shelters types 1, 5, 7–11 (town, tavern, church, smithy,
-  shipyard, altar, dungeon entrance) and leaves the market (6) out. The guide (p. 30) says no fights in a town,
-  tavern, market, church, shipyard, altar or smithy and fights possible at the entrance. By the owner's decision
-  (2026-11-26) the guide wins: `Game::step_contact` shelters the market and not the entrance. Other kinds as the exe
-  has them. The exe's own-attitude rule (+0x16af) is kept as the exe has it. Settled by that decision; the AI's
-  arrival rule (`ai_arrive_rules`, its own shelter test) is not changed.

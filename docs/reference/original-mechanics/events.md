@@ -90,10 +90,7 @@ The scan (0x4abfbc, §2) is started from these places. **code**
   step 1. A run of silent events is therefore applied in one go.
 - Otherwise the loop stops; the dialog (or, for an event with no texts but with a spell,
   lanterns, a shown army, a battle or a delay, a direct finish) takes over, and the scan is
-  started again when it ends. With a lantern, a shown army or a spell the scan resumes from the
-  chain timer, 250 ms after the animations (0x4af658, §8): that callback runs the chained event
-  as it is, and no scan follows a chain; with no chain it is a fresh scan. A delay ends the scan
-  until the wait timer's next tick (0x4ae280, §8). **code** (decomp-read, 2026-11-26)
+  started again when it ends.
 
 So the events after a shown window, a silent one too, are not even checked until that window
 is closed: its OK finishes it (0x4c206c → 0x4ab1ec), then its chain runs or the scan starts
@@ -108,23 +105,11 @@ cleared only when the scan goes idle).
 **Noon.** If no event was taken in the pass, now ≥ the next noon and no world spell is being
 cast, the scan does the noon processing (Ranger healing, wages, the noon report; see
 [economy.md](economy.md)). **code**
-At a contact (the hero's step onto an army, 0x4ad94c; an army's arrival next to him, 0x4ade3c) the
-same scan runs with the army met. When no event fires in it and the noon is due, the noon report is
-the scan's event: it is paid and shown, no battle opens, and the army forgets him as after any
-event window. The hero stays where he is and the army stays next to him. Traced under Wine
-2026-11-26 (Проклятое озеро, army 17): the next noon set to the contact minute gives the report at
-both kinds of contact, and the next noon moves a day. **traced**
 
 **When the scan goes idle** (nothing taken, no noon report): every event whose *last fired*
 lies in the future is set back to now (0x4ac369), the met army is cleared (0x4ac3a0), and the
 rescan-on-close flag is cleared. After the dialog machinery is idle, the "meeting event
 waiting" marks are recomputed (§9). **code**
-
-The reset runs only at the end of a top-level scan call that returns 0: not after a chain tail
-(§8, which runs no scan), not after a non-silent event that took the scan (a window, a battle,
-a delay, a lantern, a shown army or a spell), and not after a victory or defeat. Nested scans
-do not exist: no scan re-enters 0x4abfbc. (decomp-read, 2026-11-26; the guide does not mention
-the reset.) **code**
 
 ## 3. Eligibility: once, guard, window, class
 
@@ -314,11 +299,8 @@ campaign quest only after both. Razdor: the same (`rk2_the_peasant_offers_and_th
   title contains `#VICTORY`, or when it is the victory event of a map with no next map. The
   style changes the frame and the music only; it does not end the game. **code**
 - **Picture** (82): 0 the event's own picture; 200 the defeat
-  picture; 201 the victory picture; 202 the portrait of the leader (first unit slot) of the army
-  of the last contact (0x68dc90, set at every contact, not cleared by the idle reset); 203 to 255
-  index past the unit table (unknown, drawn as no picture by Razdor); any other value the
-  portrait of that unit type. The exe uses the event's own picture only when this byte is 0
-  (decomp-read, 2026-11-26; Razdor the same since the 2026-11-26 fix batch: `story::shows_own_picture`). **code**
+  picture; 201 the victory picture; 202 the portrait of the met army's leader; any other
+  value the portrait of that unit type. **code**
 - **Title**: the title text before the first `%`, then before the first `#`, with trailing
   spaces removed (0x4833f0); empty gives the language file's default title key. So `#` starts
   an editor note that is never shown (378 shipped titles have one). **code**
@@ -448,14 +430,12 @@ After an ordinary event is closed (0x4ab51b tail): **code**
   both.
 - **Battle**: the army is activated and the battle opens.
 - **Lanterns or a shown army**: the scroll and reveal animations run; a timer then runs the
-  chain 250 ms after they end (0x4af658). The scan ends at the event; the callback resumes it.
+  chain 250 ms after they end (0x4af658).
 - **Spell**: its animation runs and the spell is cast on the hero's army (free, long duration:
-  [economy.md](economy.md) §4); the chain timer runs after it. With a lantern or a shown army
-  and a spell in one event, the finish queues two timer entries (the decomp shows one chain
-  callback per entry); the effect of the second callback is not traced (OPEN_QUESTIONS).
+  [economy.md](economy.md) §4); the chain timer runs after it.
 - **Delay**: the hero waits *delay* hours (2 ticks of 30 minutes per hour, the world going on,
-  events checked every tick; the wait timer 0x4ae280 runs a scan at each tick). **A chain
-  behind a delay is dropped**: the delay path starts no chain timer. No shipped event has a delay.
+  events checked every tick). **A chain behind a delay is dropped**: the delay path starts no
+  chain timer. No shipped event has a delay.
 - **None of lanterns, shown army, spell or delay**: the chain runs at once; with no chain, the
   scan runs again. A battle does not count here: an event with a battle and none of the four
   opens the battle and then, in the same step, its chain (or a new scan). No shipped event has
@@ -465,10 +445,6 @@ After an ordinary event is closed (0x4ab51b tail): **code**
 done flag, window, guard, once flag, class, place and conditions are not checked. If it is
 silent it is applied at once (and its own chain follows); otherwise its dialog opens, with
 its question if it asks one. The exe has no depth limit or cycle guard for chains. **code**
-**No scan follows a chain tail** (0x4ab1ec → 0x4abf44 only): after a chained event the scan
-does not run again in that call, and the idle reset does not run either (§2). The next scan
-is the next tick, the next meeting, or the loop of the scan that opened the chain when that
-chain was silent (its loop goes on from the top). **code** (decomp-read, 2026-11-26)
 
 ## 9. Meetings
 
@@ -662,8 +638,7 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Yes answer | Yes clears ask and sets once := byte 149 xor 1; ask is set back for later firings, with a message or without | Yes sets once := byte 149 xor 1; the question returns for later firings (§6.2), but without a message the write misses the event and ask stays 0 (bug) | Razdor fixes the original's bug (no message) |
 | Ask with empty message | Yes finishes it at once: artifacts, units and spells never applied | Artifacts, units and spells are never applied (§6.2) | Matches |
 | When results apply | Dialog-time results (artifacts, units, spells) when the window opens; the finish-time results (gold, mana, XP, activations, flags, journal, victory, relative starts) and the queued battle, spell and delay at the window's OK (`EventEngine::show`, `finish`, `window_closed` in `src/rules/events.rs`) | Dialog-time results (artifacts, units, spells) when the window opens; the finish-time results and the queued battle, spell and delay at OK (0x4c206c calls 0x4ab1ec) (§6.1, §7.2) | Matches (gap G1, fixed 2026-11-09; the recordings' clock and draws agree, see `docs/OPEN_QUESTIONS.md`, Settled) |
-| Events behind a window | A message window holds the scan: the next events, and the shown event's chain, run when it is closed (`EventEngine::window_closed`, `Game::event_window_closed`; the interface and the replay call it at the window's OK). A battle-only event ends the scan too (`battle_queued`, 2026-11-08): the events after it run in the scan after the battle | The scan stops at a shown window and runs again after its OK (§2); a battle-only event stops it the same way, and the scan after the battle runs the rest | Matches (2026-11-26): a lantern, a shown army or a spell ends the scan too; the chain callback resumes it (§2, §8) |
-| Noon at a contact | A contact's scan takes a due noon (no event fired, no spell read): the noon is paid, the report shown, no battle, the army forgets him as after an event window (`Game::meet_as`, `pay_noon_report`); a held noon waits for a walk's or wait's contact (`slice_tail`) | The contact's scan takes the noon (0x4abfbc from 0x4ad94c and 0x4ade3c), returns 1, opens no battle (traced 2026-11-26, Проклятое озеро, army 17) | Matches (traced) |
+| Events behind a window | A message window holds the scan: the next events, and the shown event's chain, run when it is closed (`EventEngine::window_closed`, `Game::event_window_closed`; the interface and the replay call it at the window's OK). A battle-only event ends the scan too (`battle_queued`, 2026-11-08): the events after it run in the scan after the battle | The scan stops at a shown window and runs again after its OK (§2); a battle-only event stops it the same way, and the scan after the battle runs the rest | Matches; an event without texts that only shows lanterns, an army or a spell does not hold the scan in Razdor (the original waits for the animation; open in OPEN_QUESTIONS) |
 | Flag test | Substring search of the one flag string; first `^` dropped; `/` negates; empty or `end_tutorial` passes | Substring of the flag string (§5) | Matches |
 | Flag action | `+X` appends X with a non-breaking space if not a substring yet; `-X` removes the first occurrence and the next character; counters only with `^`; `-X^` without X changes nothing; actions of ≤ 2 characters ignored | Same (§5), but `-X^` does not check that X exists and lowers an unrelated character (bug) | Matches; Razdor fixes the original's bug (`-X^`) |
 | Engine flags | `Sea` added when the hero goes to sea and removed when he lands; `EnterShipyard` set when he walks into the ship's shipyard from outside, removed when he leaves a building for open ground, when he boards, and when the ship is removed (`Game::sea_changed`, `Game::yard_flags`, `Game::ship_removed`) | `Sea` aboard a ship, `EnterShipyard` in the ship logic (0x497c68, 0x496d28, 0x49704c) | Matches (P6, 2026-11-07); the ship's shipyard is kept in `Game::ship_yard` |
@@ -697,12 +672,10 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 | Lantern with radius 0 | Not lit | Not lit | Matches |
 | Move army to hero | Army 136 only, not activated, cheapest neighbour | Army 136 only, not activated, cheapest neighbour by terrain cost | Matches |
 | Patrol change | Radius, and the box back around the home cell; in opcode mode the opcode is the delta | Radius and the patrol box around home | Matches |
-| Chain timing | Dropped behind a delay unless lanterns, a shown army or a spell start the chain timer; the chain runs from the callback after them, and no scan follows a chain (2026-11-26); a battle does not stop it; nothing after a victory or defeat (no spell, battle or delay either) | After animations; dropped behind a delay; not after a victory or defeat; no scan after a chain | Matches |
+| Chain timing | Dropped behind a delay unless lanterns, a shown army or a spell start the chain timer; a battle does not stop it; nothing after a victory or defeat (no spell, battle or delay either) | After animations; dropped behind a delay; not after a victory or defeat | Matches |
 | Chain depth | Cut at 32 levels (`CHAIN_DEPTH`, `src/rules/events.rs`): the chained event does not run and the cut is reported as `EventOutcome::ChainCut`, which the UI logs | No depth limit and no cycle guard (§8) | Differs, deliberate: a safety net against infinite recursion; whether a shipped map reaches 32 levels is not checked |
 | Guard | *Last fired* := now + 1; with a duration L ≤ now, without L < now − 60; set back to now when the scan goes idle | Same scan blocked (idle reset to now); duration 0: more than 60 min after `now + 1` | Matches |
 | Opcode mode test | Byte 148 = 1 and byte 17 ≠ 0 (signed); pokes of one byte across records, the run-time bytes 156–162 included; strict < and >; op 18 the digit of the event's `^` flag; op 21 only with byte 17 = 21 | Byte 148 = 1 and byte 17 ≠ 0; op 21 needs byte 17 = 21; no spell-removal extension | Matches |
-| Event opcode 9 (faction := value) | Writes the faction byte only, for groups 1–4 (army +0x16AB, building +0x151); the owner and the attitudes stay. An army's cached attitude is worked out again for its new faction (`set_faction`, `src/rules/script.rs`); a value outside 1–4 is dropped. Holder 0 (the hero) is not written: the original copies his faction into the buildings he captures later, which Razdor does not model (unknown) | One byte: army +0x16AB or building +0x151 = +0x55 (0xc27862; notes `docs/notes/map/00c27186-00c2a3d9.md`), any value | Matches for groups 1–4 on armies and buildings; differs for other values and for holder 0 (kept, see Unknowns) |
-| Event opcode 10 (attitude i := value) | Stores the low byte of the value, unclamped, in byte i (0–3) of the army's attitudes (+0x16AF+i) or the building's (+0x152+i). Holder 0 (the hero's record) writes the scenario's first row, and every army's cached attitude is recomputed from it. Byte 0 of a building is also its `attitude`. An index of 4 or more is dropped (`set_relation`, `events.rs`) | One byte: army +0x16AF+i or building +0x152+i = +0x59, any i, no range check (0xc27862; events RE item 6) | Matches for i 0–3 and holder 0 (the hero's row; its side effects on captures are unknown); differs for i 4 and up (kept, see Unknowns) |
 | Placeholders | `#HERONAME` only; titles cut at `%` and `#` | `#HERONAME` only; titles cut at `#` | Matches |
 | Double spaces | Collapsed when the game loads the map's events, names and descriptions | Collapsed at load | Matches |
 | Defeat by army loss | Game over screen | Defeat report, then the main menu; the defeat event does not fire | Matches in effect |
@@ -723,10 +696,3 @@ world, carry-over), `src/rules/journal.rs`, `src/dt/dtm.rs` (record and flag scr
 - Byte 150 ("generate the battle army"): no reader was found in the event code.
 - Whether removing the hero by a type match (§7.1) was ever reachable in practice.
 - The restart snapshot's role at the first map (taken at new game, 0x4c1124) versus loads.
-- Opcodes 9 and 10 with a value or index outside their rows (faction outside 1–4, index 4 and up): the
-  original writes the byte anyway (an index of 4 on a building lands on the garrison pointer at +0x156,
-  and on an army on the bytes after its row). Razdor drops them. Whether a shipped or community map does
-  this was checked on the community maps (both installs, 2026-11-26): no event uses opcode 9 or 10.
-- Opcode 9 on holder 0 (the hero): the original's copy of his faction into later captures is not modelled.
-- Whether the original keeps a cached attitude anywhere: the events RE found none (the relation is read on
-  demand); Razdor keeps one per army and recomputes it on opcodes 9 and 10 and on the hero's row.

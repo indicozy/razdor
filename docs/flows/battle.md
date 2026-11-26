@@ -38,13 +38,10 @@ open and the step animation has played, then calls `saves::battle` (`src/ui/save
    result in `BattleView::new(..).with_retreat(retreat)`: the battle begins at once (§2).
 
 Where «Отступить» comes from (Razdor's deviation, backlog 1607, on by default): `Game::back_to` is the cell the hero
-goes back to, set with the foe. A step onto an army or into a garrison sets it to the cell he stands on (he has not
-moved; `begin_walk`); a step that ends next to an army sets it to the cell he stepped off (`begin_walk`, then
-`walk_tail`); a wait sets it to the cell he stands on (`wait_tail`). A scenario's battle (`script.rs` `start_battle`)
-clears it.
-`Game::can_retreat` (backlog 1706, extends 1607; the owner's decision of 2026-11-26) is true for any foe with `back_to`
-set and no defence of his own building (`hero_building_defence` 0): an army in the open or standing in its own building,
-and a garrison he attacks. Only a scenario's battle (no `back_to`) and a defence of his own building have none.
+goes back to, set with the foe. A step onto an army sets it to the cell he stands on (he has not moved; `begin_walk`);
+a step that ends next to an army sets it to the cell he stepped off (`begin_walk`, then `walk_tail`); a wait sets it to
+the cell he stands on (`wait_tail`). A scenario's battle (`script.rs` `start_battle`) and a garrison's clear it.
+`Game::can_retreat` is true for an army foe with `back_to` set and no building defence (his building, the army's own).
 
 `Game::start_battle` (`src/rules/game.rs`):
 - records the player's cells per squad index (`Game::formation_before_battle`) before anything else;
@@ -239,12 +236,10 @@ with `Surrender > 0` units gives up while both stand; its values become the winn
 
 «Отступить» (`Game::retreat_battle(&battle)`, at any moment `Game::retreat_open` allows it, i.e. `can_retreat`) rewinds the
 battle. `Game::battle_undo`, taken by `start_battle`, holds the squad and the armies as the battle began; the retreat puts
-them back, so nobody died, no HP, cell or troop changed, and the write-back of the fight is undone with it. For a garrison
-fight it also keeps the garrison's troops (`BattleUndo::garrison`, the location's garrison as the battle began), restored
-the same way: the building is as it was before the fight. It skips all of
+them back, so nobody died, no HP, cell or troop changed, and the write-back of the fight is undone with it. It skips all of
 the end of a battle: no `resolve_battle`, no XP, no loot, no events. The chronicle records one lost battle with no losses
 on either side (`chronicle_battle_retreat`: battles lost in «Итоги»), the only trace. The foe is cleared, the army stays on
-the map with `ignore_until` 120 minutes ahead (as an army that withdrew; a garrison has none to set), the hero's route ends, and he goes back to
+the map with `ignore_until` 120 minutes ahead (as an army that withdrew), the hero's route ends, and he goes back to
 `back_to` when no army or building holds that cell (else he stays). Open: the 120 minutes and the chronicle entry's place
 (`docs/OPEN_QUESTIONS.md`).
 

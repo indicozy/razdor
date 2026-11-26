@@ -318,18 +318,14 @@ the 8 neighbours.
 Checked for the cell he is about to enter, before he moves (§2.2):
 
 1. **An AI army stands there** (occupant code of an army, not the ship): it is engaged,
-   **friendly or not**, unless the cell belongs to a town, market, tavern, church, smithy,
-   shipyard or altar (types 1, 6, 5, 7–10), or the army's own attitude to the player (+0x16af)
-   is > 0 and the cell is a building other than a bridge. A dungeon entrance (type 11) does not
-   shelter it. The shelter list is the guide's (p. 30, the owner's decision 2026-11-26), which
-   wins over the exe's list at 0x4ad94c (types 1, 5, 7–11: the market, 6, out and the entrance,
-   11, in). On open ground every army is engaged.
+   **friendly or not**, unless the cell belongs to a town, tavern, church, smithy, shipyard,
+   altar or dungeon (types 1, 5, 7–11), or the army's own attitude to the player (+0x16af)
+   is > 0 and the cell is a building other than a bridge. On open ground every army is engaged.
 2. Else, **a building cell** of a village, castle, fort, ruins or bridge (types 2–4, 12–14):
    the last on-map army **standing in** that building guards it (army +0x3788, the building
    under its cell, cleared when it leaves; not its home building: a castle's own army away
    on patrol does not guard it); the guard is engaged when its own attitude to the player
-   (+0x16af, read by 0x4ad94c itself; 0x4ccc8a is the cursor's read of the same byte) is ≤ 0, or always on
-   a bridge (types 13, 14). A guard above 0 on a non-bridge building stops nothing and stops the capture too.
+   (+0x16af, 0x4ccc8a) is ≤ 0, or always on a bridge.
 3. No guard: a castle, fort or ruins whose attitude (+0x152) is ≤ 0 (ruins always) with a
    garrison record: an empty garrison means the building is **captured** (owner = player,
    the hero's faction and attitudes copied); otherwise the garrison is engaged. An unguarded
@@ -366,10 +362,6 @@ battle. Razdor: `Army::own_attitude` (friendly tests) and `Army::attitude` (rela
 friendly tests read the own byte: the minimap's ally colour (0x49e3c9), the hostile tooltip
 frame (0x4ca9f0), the building guard (0x4ccc8a), the friendly question mark and the curse
 refusal (magic-items.md §3.5). **code**
-A contact's scan (0x4abfbc, run from the hero's step at 0x4ad94c and from an army's arrival at
-0x4ade3c) takes the hero's noon when no event fires in it, the noon is due and no spell is being
-read: the noon report is then the scan's event and no battle opens; the army stays where it is
-(traced under Wine 2026-11-26, Проклятое озеро, army 17; events.md, the noon). **code, traced**
 A hostile army in contact attacks the hero when its cached battle score
 against him is > 0; a target standing in a building is attacked only when the building is a
 bridge or the target's own (otherwise both armies' scores against each other are tripled, cap
@@ -673,9 +665,6 @@ Razdor's code read for this table: `src/rules/map.rs`, `fog.rs`, `game.rs`, `wor
 | Stationary guards' clock | skipped (no bank) | skipped | Matches |
 | Pacing | 150 ms per step / wait tick, game time added per step | same; game time also interpolated inside the step | none for rules |
 | Contact on the hero's step | the cell he steps onto: an army (any on open ground; a friend is fought like a foe when no event fires, as the original, unless the advanced setting "let pass" is on, then met; with the advanced setting "armies on bridges: let pass" an army on a bridge that is not ill-disposed, not a stationary guard and not the army clicked is walked through, cell and guard rules alike), a guard, a garrison (`Game::step_contact`); AI armies that stepped next to him after his step | the cell he steps onto holds an army (any army on open ground); a building's guard is an army standing in it (+0x3788); AI adjacency after AI steps | Matches (until 2026-10-04 Razdor's guard was the army whose home it is, wherever it stood) |
-| Army standing in a building on the hero's step | engaged unless the building is a town, market, tavern, church, smithy, shipyard or altar (the guide p. 30, the owner's decision 2026-11-26) or the army's own attitude (`Army::own_attitude`, +0x16af) is above 0 on a non-bridge; a dungeon entrance is fought (`Game::step_contact`) | the exe's list at 0x4ad94c: town, tavern, church, smithy, shipyard, altar, dungeon (types 1, 5, 7–11), own attitude > 0 on a non-bridge | Matches the guide, differs from the exe's list on two kinds: the market (sheltered here, fought in the exe) and the entrance (fought here, sheltered in the exe) |
-| Building guard on the hero's step | the last army standing in a village, castle, fort, ruins or bridge is engaged when its own attitude (`Army::own_attitude`) is 0 or less, or on a bridge (`Game::step_contact`, citing 0x4ad94c) | +0x16af, the same | Matches (fixed 2026-11-26; the combined relation was read until then) |
-| Garrison at attitude exactly 0 on the step | `Location::defended` (castle, fort, camp at 0 or less, ruins always; no owner test), used by the step, the building window's tabs and the click on the building he stands in | 0x4adb63: signed ≤ 0, no owner test | Matches (`Location::hostile` stays `< 0` for the battle's defence and the other callers) |
 | Village crossed on the way | an unguarded village (or an empty castle, fort or ruins) stepped on is his, with no window; the walk goes on | captured when crossed, no window, the walk goes on | Matches (Razdor showed a capture window that stopped the walk until 2026-10-03) |
 | Building under an event's window on the way | the walk an event's window cuts short ends on his cell; the clicked building he stands in opens after the windows (`Game::stop_for_reading`) | 0x4aed41 → 0x4ae5d8, pending 0x4aed64 | Matches (until 2026-10-04 Razdor left him on the map) |
 | Building entered when crossed | entered on its second footprint cell or where the walk ends; the window only at the end (`Game::move_to_cell`) | entered when 2+ footprint cells are crossed (events may fire), window only at the end | Matches |
@@ -705,7 +694,6 @@ Razdor's code read for this table: `src/rules/map.rs`, `fog.rs`, `game.rs`, `wor
 | Minimap size | 400×400 frame by default; the player can drag its left and bottom edges or their corner to any size (kept in the settings; a double click on an edge restores the square), a player's request 2026-10-08 | 200 px under 100 cells wide, else 400 | small |
 | Minimap click | centres the view | clicked cell ~15 cells from the view corner | small |
 | Hero class change by event | sight, speed and cast divisor keep the starting class; a Community speed event sets his speed (`Game::start_class`, `speed_set`) | sight, speed and cast divisor keep the starting class (Community: an event may set the hero's speed directly) | Matches |
-| Ship summoned by an event (leader 0xFE marker) | The marker is never on the map: its activation puts the one ship record on the marker's post with no water test (`activate`, `src/rules/script.rs`; `ship_marker` on `Army`); a second summon moves it; deactivation removes it (`Ship_Remove`: `ship_removed`). Old cell not cleared, hero aboard keeps sailing (unknown in the exe) | 0x4969b8 → Ship_Place 0x496ec4 (no terrain test, one record, marker stays off the map); 0x496900 → Ship_Remove 0x49704c; the blocking effect of a stale N+2 cell is unknown | Differs: one ship record moves instead of several ships (the guide pp. 205-206 calls it a bug; the narrowest guard; OPEN_QUESTIONS G9) |
 
 ## Unknowns
 

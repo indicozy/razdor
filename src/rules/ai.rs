@@ -524,23 +524,19 @@ fn has_garrison(kind: LocationKind) -> bool {
     matches!(kind, LocationKind::Town | LocationKind::Castle | LocationKind::Fort | LocationKind::Ruins)
 }
 
-/// Army `a`'s route from `from` to `to`. A scenario army (`managed`) walks through every
-/// building, as its plans do: an arrival in a hostile one is an assault (ai.md §9.1). The
-/// demo's gangs (`Game::move_armies`) have no arrival rules, so they keep round the buildings
-/// [`bars_army`] names (Razdor's choice, kept for them).
+/// Army `a`'s route from `from` to `to` around the buildings it may not walk through
+/// ([`bars_army`]); the event that sends an army somewhere uses it.
 pub fn army_path(world: &World, a: &Army, from: Tile, to: Tile, max_nodes: usize) -> Vec<Tile> {
     let (start, end) = (world.location_covering(from), world.location_covering(to));
-    let keep_off = !managed(a);
     world.map.path_where(from, to, max_nodes, &|t| match world.location_covering(t) {
-        Some(l) if keep_off && Some(l) != start && Some(l) != end => !bars_army(a, &world.locations[l]),
+        Some(l) if Some(l) != start && Some(l) != end => !bars_army(a, &world.locations[l]),
         _ => true,
     })
 }
 
-/// Army `a` keeps off building `l` on an unmanaged army's route ([`army_path`]): castles and
-/// forts that are not its own or a friend's, ruins not its own and not cleared, and any
-/// other building it would assault. Not used by the AI's plans, which close only the
-/// buildings with a negative score (ai.md §7.3).
+/// Army `a` may not walk through building `l`, on its own plans (Razdor keeps AI armies to
+/// the hero's roads) and on an event's errand: castles and forts that are not its own or a
+/// friend's, ruins not its own and not cleared, and any other building it would assault.
 pub fn bars_army(a: &Army, l: &Location) -> bool {
     let own = l.owner == Owner::Army(a.id);
     let friend = own || l.attitude_to(a.faction) > 0;
@@ -1253,15 +1249,6 @@ impl Game {
             Party::Hero => self.aboard(),
             Party::Army(j) => self.world.armies[j].sails(),
         }
-    }
-
-    /// An army standing on a bridge does not attack a party afloat (a ship army, or the hero
-    /// aboard). The guide, p. 208 (the owner's decision 2026-11-26); the exe's contact
-    /// (0x4a548c) has no medium test found. A ship still attacks the bridge army: the bridge
-    /// is open to it (see `ai_arrive_rules`).
-    fn bridge_bars_ship(&self, here: Tile, p: Party) -> bool {
-        let on_bridge = self.world.location_covering(here).is_some_and(|l| self.world.locations[l].kind.is_bridge());
-        on_bridge && self.afloat(p)
     }
 
     /// The building `p` stands in (the hero: the one he entered).
@@ -2226,10 +2213,14 @@ impl Game {
                 seeds.push((cell, v as u32));
             }
         }
-        // The buildings with a negative score are closed (0x4a2d88, ai.md §7.3); any other
-        // building is walked through, and an arrival in a hostile one is an assault (§9.1).
+        // Razdor keeps AI armies to the hero's roads (its choice since 0.2.0, kept over the
+        // original's planner): the buildings an army may not walk through ([`bars_army`])
+        // are closed as the forbidden ones, except the one it stands in and the ones it
+        // seeks (a positive score: a seed).
+        let standing = self.world.location_covering(here);
         for (l, b) in self.world.locations.iter().enumerate() {
-            if self.stored_building(i, l) < 0 {
+            let score = self.stored_building(i, l);
+            if score < 0 || (score == 0 && Some(l) != standing && bars_army(a, b)) {
                 let (x0, y0) = (b.anchor.0 - b.size.0 + 1, b.anchor.1 - b.size.1 + 1);
                 fill_rect(&mut mult, w, (x0, y0), b.size);
             }
@@ -2394,8 +2385,7 @@ impl Game {
     /// 2. contacts, the hero first: a friendly party's talk counter grows by relation + 1; a
     ///    hostile neighbour (|dx| ≤ 1, |dy| ≤ 1) in no building, on a bridge or in its own
     ///    building is attacked when the cached score is positive and it is not ignored (the
-    ///    hero: [`Contact::Attack`]); an army on a bridge attacks no party afloat (guide p. 208,
-    ///    [`Self::bridge_bars_ship`]); one inside someone else's building triples both scores;
+    ///    hero: [`Contact::Attack`]); one inside someone else's building triples both scores;
     ///    a friendly neighbour is greeted (the hero only after his step);
     /// 3. in a building: assault and capture, village gold, shopping, healing, resurrection,
     ///    hiring, garrison buying and reshuffle; the building's stored score is zeroed.
@@ -2479,7 +2469,7 @@ impl Game {
                     }
                 };
                 if open {
-                    if self.cached(i, key) > 0 && !self.ignored(p) && !self.bridge_bars_ship(here, p) {
+                    if self.cached(i, key) > 0 && !self.ignored(p) {
                         match p {
                             Party::Hero => result = Some(Contact::Attack),
                             Party::Army(j) => {

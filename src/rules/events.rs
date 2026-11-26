@@ -26,8 +26,6 @@ pub const OWNER_NOT_PLAYER: u8 = 6;
 /// Picture codes of byte 82.
 pub const PICTURE_DEFEAT: u8 = 200;
 pub const PICTURE_VICTORY: u8 = 201;
-/// Picture 202: the leader of the army of the last contact (0x68dc90; [`EventEngine::last_met`]).
-pub const PICTURE_LEADER: u8 = 202;
 
 /// At most this many events fire in one [`EventEngine::tick`] (or answer, or hall entry);
 /// more means a script loop. The original has no such guard (a Razdor safety net).
@@ -444,12 +442,10 @@ pub trait EventWorld {
     fn replace_unit(&mut self, holder: Holder, unit: u8, with: u8);
     /// Opcode 8: the army's speed correction (the editor's −3..5).
     fn set_army_speed(&mut self, holder: Holder, correction: i8);
-    /// Opcode 9: the army's or building's faction byte becomes group 1 player, 2 ally,
-    /// 3 neighbour, 4 enemy. Nothing else changes (the owner, the attitudes).
+    /// Opcode 9: the army or building joins group 1 player, 2 ally, 3 neighbour, 4 enemy.
     fn set_faction(&mut self, holder: Holder, group: u8);
-    /// Opcode 10: byte `index` (0–3) of its attitudes becomes `value` (−3..3): index 0 is the
-    /// attitude to the player, 1–3 the rest of the row.
-    fn set_relation(&mut self, holder: Holder, index: u8, value: i8);
+    /// Opcode 10: its relation (−3..3) towards group 0 player, 1 ally, 2 neighbour, 3 enemy.
+    fn set_relation(&mut self, holder: Holder, group: u8, value: i8);
     /// Opcode 11: slot k of the unit(s) holds spell k of `spells` for good, or nothing for
     /// a 0.
     fn set_spells(&mut self, holder: Holder, unit: Option<u8>, spells: &[u8]);
@@ -546,10 +542,6 @@ pub struct EventEngine {
     /// the run that followed the meeting ends or a "no meeting" result clears it.
     #[serde(default)]
     meeting: Option<ArmyId>,
-    /// The army of the last contact (0x68dc90): set at every meeting, not cleared by the idle
-    /// reset (which clears only `meeting`). Picture 202 shows its leader.
-    #[serde(default)]
-    last_met: Option<ArmyId>,
     ended: Option<EventOutcome>,
     #[serde(skip)]
     extensions: Vec<(EventId, Extension)>,
@@ -579,19 +571,6 @@ pub struct EventEngine {
     /// the battle. Set in [`EventEngine::finish`], taken by [`EventEngine::run`].
     #[serde(skip)]
     battle_queued: bool,
-    /// An event finished in this step queued a lantern, a shown army or a spell: the scan ends
-    /// there (0x4abfbc), and the chain timer (0x4af658, 250 ms later) runs its chained event
-    /// (0 for none, then a fresh scan). Set in [`EventEngine::finish`], taken by `run`.
-    #[serde(skip)]
-    animation: Option<EventId>,
-    /// A delay queued by an event finished in this step (its wait timer 0x4ae280; no chain
-    /// timer, so the chain is dropped and the scan waits). Taken by `run` and `resume`.
-    #[serde(skip)]
-    delay_queued: bool,
-    /// Set by [`EventEngine::finish`] when it opened the chained event at once: a chain tail
-    /// never runs a scan (0x4ab1ec → 0x4abf44 only). Read by `resume`.
-    #[serde(skip)]
-    chain_done: bool,
     /// The unit type of each named character (1-based), for opcode 12.
     #[serde(skip)]
     named_units: Vec<u8>,
@@ -780,7 +759,6 @@ impl EventEngine {
             last_place: None,
             fresh_visit: false,
             meeting: None,
-            last_met: None,
             ended: None,
             extensions,
             edits: Vec::new(),
@@ -789,9 +767,6 @@ impl EventEngine {
             tutorial_done: false,
             window: None,
             battle_queued: false,
-            animation: None,
-            delay_queued: false,
-            chain_done: false,
             named_units: Vec::new(),
             next_map: String::new(),
             carry_over: [0; 7],
@@ -1182,13 +1157,7 @@ impl EventEngine {
     /// meeting in force (the original's current meeting, 0x68dc7c).
     pub fn meet(&mut self, w: &mut dyn EventWorld, army: ArmyId) -> Vec<EventOutcome> {
         self.meeting = Some(army);
-        self.last_met = Some(army);
         self.tick(w)
-    }
-
-    /// The army of the last contact (0x68dc90), whose leader picture 202 shows.
-    pub fn last_met(&self) -> Option<ArmyId> {
-        self.last_met
     }
 
     /// The army being met, while the run after the meeting goes on.
@@ -1200,7 +1169,6 @@ impl EventEngine {
     pub fn answer(&mut self, w: &mut dyn EventWorld, yes: bool) -> Vec<EventOutcome> {
         let mut out = Vec::new();
         let Some(id) = self.pending.take() else { return out };
-        self.chain_done = false;
         if !yes {
             // No: the answer, the guard and the count, nothing else (no flag, result, chain
             // or quest). It counts as happened and uses up a once-event.
@@ -1234,7 +1202,7 @@ impl EventEngine {
                 }
             }
         }
-        self.resume(w, &mut out);
+        self.run(w, &mut out);
         out
     }
 
@@ -1246,11 +1214,10 @@ impl EventEngine {
         let Some(id) = self.window.take() else {
             return out;
         };
-        self.chain_done = false;
         if self.ended.is_none() {
             self.finish(id, w, &mut out, 0);
         }
-        self.resume(w, &mut out);
+        self.run(w, &mut out);
         out
     }
 
@@ -1290,9 +1257,8 @@ impl EventEngine {
             if e.conditions.confirm_question != 0 && e.question.is_empty() && e.message.is_empty() {
                 self.set_event_field(id, 76, 0);
             }
-            self.chain_done = false;
             self.open(id, w, &mut out, 0);
-            self.resume(w, &mut out);
+            self.run(w, &mut out);
         }
         out
     }
@@ -1309,9 +1275,8 @@ impl EventEngine {
             if e.conditions.confirm_question != 0 && e.question.is_empty() && e.message.is_empty() {
                 self.set_event_field(id, 76, 0);
             }
-            self.chain_done = false;
             self.open(id, w, &mut out, 0);
-            self.resume(w, &mut out);
+            self.run(w, &mut out);
         }
         out
     }
@@ -1319,20 +1284,6 @@ impl EventEngine {
     // ---------------------------------------------------------------------------------------
     // The scan
     // ---------------------------------------------------------------------------------------
-
-    /// After an event was finished outside the scan (a window's OK, a Yes, a hall entry, the
-    /// cheat): the scan goes on, except after a delay (the wait timer runs the next scan) and
-    /// after a chain that ran at once (a chain tail never scans, 0x4ab1ec → 0x4abf44).
-    fn resume(&mut self, w: &mut dyn EventWorld, out: &mut Vec<EventOutcome>) {
-        let chained = std::mem::take(&mut self.chain_done);
-        if std::mem::take(&mut self.delay_queued) {
-            return;
-        }
-        if chained && self.animation.is_none() {
-            return;
-        }
-        self.run(w, out);
-    }
 
     fn run(&mut self, w: &mut dyn EventWorld, out: &mut Vec<EventOutcome>) {
         // A battle queued by an event opened just before this run ends the scan (see
@@ -1342,27 +1293,12 @@ impl EventEngine {
         }
         let mut fired = 0;
         while self.pending.is_none() && self.ended.is_none() && self.window.is_none() {
+            let Some(id) = self.first_eligible(w) else { break };
             if fired == LOOP_GUARD {
                 out.push(EventOutcome::LoopGuard);
                 break;
             }
             fired += 1;
-            // The chain timer's callback (0x4af658), 250 ms after the lantern, shown army or
-            // spell that queued it. A chained event is opened as it is; after it no scan runs
-            // and the idle reset does not either. Chain 0 leaves the callback to a fresh scan.
-            if let Some(chain) = self.animation.take() {
-                if self.event(chain).is_some() {
-                    self.open(chain, w, out, 1);
-                    if std::mem::take(&mut self.battle_queued) || std::mem::take(&mut self.delay_queued) {
-                        return;
-                    }
-                    if self.animation.is_none() {
-                        return;
-                    }
-                    continue;
-                }
-            }
-            let Some(id) = self.first_eligible(w) else { break };
             // A passing event with neither a question nor a message never asks (0x4a7a40).
             let e = self.ev(id);
             if e.conditions.confirm_question != 0 && e.question.is_empty() && e.message.is_empty() {
@@ -1374,14 +1310,8 @@ impl EventEngine {
             if std::mem::take(&mut self.battle_queued) {
                 return;
             }
-            // A non-silent event that started a delay ends the scan (0x4abfbc returns 1): the
-            // wait timer picks the rest up. Lanterns, a shown army or a spell end it too: the
-            // callback runs at the top of the loop.
-            if std::mem::take(&mut self.delay_queued) {
-                return;
-            }
         }
-        if self.pending.is_none() && self.window.is_none() && self.ended.is_none() {
+        if self.pending.is_none() && self.window.is_none() {
             // The scan goes idle (0x4ac369): a last fired in the future is set back to now,
             // so the guard only holds within one scan; the meeting is over (0x4ac3a0).
             let now = w.now();
@@ -1751,24 +1681,15 @@ impl EventEngine {
         if q.delay != 0 {
             w.delay_player(q.delay as u64 * 60);
         }
-        // Lanterns, a shown army or a spell start the chain timer (0x4af658): the scan ends
-        // here, and the callback runs the chain 250 ms later (see `run`). It is the only chain
-        // a spell or a lantern gets, so the chain waits for it, not for this call.
-        if q.shown || q.spell != 0 {
-            self.animation = Some(r.chained_event);
-            return;
-        }
-        // A delay starts no chain timer: the chain behind it is dropped, and the scan waits for
-        // the wait timer (0x4ae280; a battle does not count).
-        if q.delay != 0 {
-            self.delay_queued = true;
+        // A chain behind a delay is dropped: the delay path starts no chain timer (a battle
+        // does not count; lanterns, a shown army or a spell start one).
+        if q.delay != 0 && !q.shown && q.spell == 0 {
             return;
         }
         let next = r.chained_event;
         if depth < CHAIN_DEPTH && self.event(next).is_some() {
             // A chained event is opened as it is: its done flag, window, guard, once flag,
             // class, place and conditions are not checked (0x4ab1ec, 0x4af658).
-            self.chain_done = true;
             self.open(next, w, out, depth + 1);
         } else if self.event(next).is_some() {
             // The depth cap (the original has none): the chain stops here, and says so.
@@ -1830,8 +1751,7 @@ impl EventEngine {
             }
             10 => {
                 if let (Some(h), Some(group)) = (holder, unit.filter(|u| *u <= 3)) {
-                    // The original stores the low byte of the value, unclamped (0xc27862).
-                    w.set_relation(h, group, m as i8);
+                    w.set_relation(h, group, m.clamp(-3, 3) as i8);
                 }
             }
             11 => {
@@ -2991,97 +2911,6 @@ mod tests {
         assert_eq!(w.log, vec![Fx::Gold(50), Fx::Gold(7)]);
     }
 
-    /// 0x4abfbc, 0x4af658: a lantern, a shown army or a spell ends the scan; the chain timer
-    /// (250 ms later) runs the chained event as it is, and no scan follows a chain. Without a
-    /// chain the callback is the next scan, which runs in the same call.
-    #[test]
-    fn lantern_chain_is_not_followed_by_a_scan() {
-        let mut lit = global();
-        lit.results.light_lanterns[0] = 5;
-        lit.results.chained_event = 2;
-        let mut chained = global();
-        (chained.subordinate, chained.results.gold) = (1, 1);
-        let mut later = global();
-        later.results.gold = 2;
-        let mut g = engine(vec![lit, chained, later.clone()]);
-        let mut w = MockWorld::new();
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![1, 2], "the chained event runs at the callback");
-        assert_eq!(w.log, vec![Fx::Lantern(5), Fx::Gold(1)]);
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![3], "the event after the chain waits for the next scan");
-
-        let mut lit = global();
-        lit.results.light_lanterns[0] = 5;
-        let mut g = engine(vec![lit, later]);
-        let mut w = MockWorld::new();
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![1, 2], "no chain: the callback scan runs at once");
-        assert_eq!(w.log, vec![Fx::Lantern(5), Fx::Gold(2)]);
-    }
-
-    /// A chain that follows a window's OK runs at once and the scan does not go on after it
-    /// (0x4ab1ec's chain tail); the next tick runs the scan.
-    #[test]
-    fn silent_chain_after_a_window_is_not_followed_by_a_scan() {
-        let mut shown = with_message(global());
-        shown.results.chained_event = 2;
-        let mut chained = global();
-        (chained.subordinate, chained.results.gold) = (1, 1);
-        let mut later = global();
-        later.results.gold = 2;
-        let mut g = engine(vec![shown, chained, later]);
-        let mut w = MockWorld::new();
-        assert_eq!(fired(&g.tick(&mut w)), vec![1]);
-        assert_eq!(fired(&g.window_closed(&mut w)), vec![2]);
-        assert_eq!(w.log, vec![Fx::Gold(1)]);
-        assert_eq!(fired(&g.tick(&mut w)), vec![3], "the next tick runs the scan");
-    }
-
-    /// G7 (0x4abfbc, 0x4ac369): the idle reset (last fired back to now) runs only at the end of a
-    /// top-level scan that returns 0. A chain tail, here a window's OK, sets no reset: the chained
-    /// event keeps last fired = now + 1 until the next scan, which resets it and lets it fire again.
-    #[test]
-    fn chain_tail_does_not_reset_the_guard() {
-        let mut shown = with_message(global());
-        shown.results.chained_event = 2;
-        let repeat = many(global());
-        let mut g = engine(vec![shown, repeat]);
-        let mut w = MockWorld::new();
-        w.now = 10;
-        assert_eq!(fired(&g.tick(&mut w)), vec![1]);
-        assert_eq!(fired(&g.window_closed(&mut w)), vec![2]);
-        assert_eq!(g.last_fired(2), Some(11), "no idle reset after the chain tail");
-        assert!(tick_at(&mut g, &mut w, 10).is_empty(), "the guard holds within the minute");
-        assert_eq!(g.last_fired(2), Some(10), "the next scan's idle reset");
-        assert_eq!(tick_at(&mut g, &mut w, 10), vec![2], "the event may fire again");
-    }
-
-    /// Picture 202's army (0x68dc90): the army of the last contact, kept through the idle reset
-    /// (which clears only the met army, 0x68dc7c).
-    #[test]
-    fn last_met_is_kept_through_the_idle_reset() {
-        let mut g = engine(vec![global()]);
-        let mut w = MockWorld::new();
-        assert_eq!(g.last_met(), None);
-        g.meet(&mut w, 4);
-        assert_eq!(g.last_met(), Some(4));
-        g.tick(&mut w);
-        assert_eq!(g.meeting(), None, "the idle reset ends the meeting");
-        assert_eq!(g.last_met(), Some(4), "the last contact stays");
-        g.meet(&mut w, 6);
-        assert_eq!(g.last_met(), Some(6));
-    }
-
-    /// A delay ends the scan (0x4ae280): the event after it waits for the next scan, and its
-    /// chain is dropped.
-    #[test]
-    fn delay_ends_the_scan_and_drops_its_chain() {
-        let mut waits = global();
-        (waits.results.delay_hours, waits.results.chained_event) = (1, 3);
-        let mut g = engine(vec![waits, global(), global()]);
-        let mut w = MockWorld::new();
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![1]);
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![2, 3]);
-    }
-
     /// FINDINGS §22 (РК1's church): a shown window stops the scan (0x4ac3b4); the events after
     /// it, a textless one too, run only when it is closed (OK → 0x4ab1ec → a new scan), each
     /// window in turn. The chain of a shown event waits for its window as well.
@@ -3258,13 +3087,8 @@ mod tests {
         (fight.results.start_battle_with, fight.results.chained_event) = (6, 1);
         let mut g = engine(vec![sub.clone(), delayed, fight]);
         let mut w = MockWorld::new();
-        // The spell's chain timer runs the chain (2 → 1) and no scan follows it: the battle
-        // event waits for the next scan (0x4af658 → 0x4abf44 only).
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![2, 1]);
-        assert_eq!(w.log, vec![Fx::Spell(4), Fx::Delay(120), Fx::Gold(1)]);
-        w.log.clear();
-        assert_eq!(tick_at(&mut g, &mut w, 0), vec![3, 1]);
-        assert_eq!(w.log, vec![Fx::Battle(6), Fx::Gold(1)]);
+        assert_eq!(tick_at(&mut g, &mut w, 0), vec![2, 1, 3, 1]);
+        assert_eq!(w.log, vec![Fx::Spell(4), Fx::Delay(120), Fx::Gold(1), Fx::Battle(6), Fx::Gold(1)]);
 
         let mut win = global();
         let r = &mut win.results;

@@ -232,13 +232,11 @@ pub enum Foe {
     Army(usize),
 }
 
-/// What a battle may change before it is settled: the squad and the armies as the battle began, and
-/// the garrison of the building fought (its location and its troops; a battle writes their HP back).
+/// What a battle may change before it is settled: the squad and the armies as the battle began.
 #[derive(Debug)]
 pub(crate) struct BattleUndo {
     squad: Vec<Unit>,
     armies: Vec<Army>,
-    garrison: Option<(usize, Vec<Troop>)>,
 }
 
 /// The whole game state. It is saved with serde (`rules::save`), except the content and the
@@ -2049,10 +2047,7 @@ impl Game {
         }
         it.append(&mut p.events);
         let later = self.ai_move_end(p.job);
-        // A walk's or a wait's tail takes the army's contact next (`walk_tail`, `wait_tail`): the
-        // noon waits for that contact's scan (`meet_as`), as the original's contact scan takes it.
-        let consumes_contact = matches!(p.kind, StepKind::Walk | StepKind::Wait);
-        frame_probe::time(Stage::Armies, || self.slice_tail(p.minutes, (p.now, p.hero_tile), &p.hero, p.ticks, later, consumes_contact, it));
+        frame_probe::time(Stage::Armies, || self.slice_tail(p.minutes, (p.now, p.hero_tile), &p.hero, p.ticks, later, it));
         let stepping = matches!(p.kind, StepKind::Walk | StepKind::FlyOver);
         if stepping {
             self.step_from = None;
@@ -2141,8 +2136,7 @@ impl Game {
                 self.goal = None;
                 self.talk_to = None;
                 self.foe = Some(Foe::Garrison(l));
-                // He has not moved yet: the cell he stands on is the one «Отступить» goes back to.
-                self.back_to = Some(from);
+                self.back_to = None;
                 it.push(Event::Arrived(l));
                 return Some(false);
             }
@@ -2373,15 +2367,14 @@ impl Game {
     /// What stops or changes the hero's step onto `next` (world.md §4.2, 0x4ad94c), in this
     /// order:
     /// 1. An army stands there: it is engaged, friendly or not, unless the cell belongs to a
-    ///    town, market, tavern, church, smithy, shipyard or altar (a dungeon entrance does not
-    ///    shelter it), or the army's own attitude (+0x16af) is above 0 and the cell is a building
-    ///    other than a bridge.
+    ///    town, tavern, church, smithy, shipyard, altar or dungeon, or the army is well
+    ///    disposed to him (attitude above 0) and the cell is a building other than a bridge.
     /// 2. A cell of a village, castle, fort, ruins or bridge: the last army on the map
     ///    standing in it (+0x3788, the building it stands in, not its home) guards it, and is
-    ///    engaged when its own attitude (+0x16af) is 0 or less, or on a bridge.
-    /// 3. Unguarded: a castle, fort or camp at attitude 0 or less, or ruins, with troops left
-    ///    fights him ([`Location::defended`]); with none it is taken. A village is taken whatever
-    ///    its owner, also when the route only crosses it.
+    ///    engaged when ill-disposed to him (0 or less) or on a bridge.
+    /// 3. Unguarded: a castle or fort whose attitude is 0 or less, or ruins, with an empty
+    ///    garrison is taken (else the garrison is engaged); a village is taken whatever its
+    ///    owner, also when the route only crosses it.
     fn step_contact(&self, next: Tile) -> Option<StepContact> {
         use LocationKind as K;
         let w = &self.world;
@@ -2389,13 +2382,8 @@ impl Game {
         let building = w.location_covering(next);
         let kind = building.map(|l| w.locations[l].kind);
         if let Some(i) = w.armies.iter().position(|a| a.tile(map) == next) {
-            // The guide p. 30 (the owner's decision 2026-11-26) over the exe's list at 0x4ad94c
-            // (market 6 out, entrance 11 in): a market, a church and a town shelter the army
-            // standing in them, a dungeon entrance does not. Tavern, smithy, shipyard and altar
-            // as the exe has them.
-            let sheltered = matches!(kind, Some(K::Town | K::Market | K::Tavern | K::Church | K::Smithy | K::Shipyard | K::Altar));
-            // 0x4ad94c reads the army's own attitude (+0x16af), not the combined relation.
-            let welcome = w.armies[i].own_attitude() > 0 && kind.is_some_and(|k| !k.is_bridge());
+            let sheltered = matches!(kind, Some(K::Town | K::Tavern | K::Church | K::Smithy | K::Shipyard | K::Altar | K::Entrance));
+            let welcome = w.armies[i].attitude > 0 && kind.is_some_and(|k| !k.is_bridge());
             if !sheltered && !welcome {
                 return Some(StepContact::Army(i));
             }
@@ -2406,20 +2394,20 @@ impl Game {
             return None;
         }
         if let Some(g) = w.armies.iter().rposition(|a| a.mind.standing == Some(l)) {
-            // 0x4ad94c reads the guard's own attitude (+0x16af), not the combined relation.
-            if w.armies[g].own_attitude() <= 0 || loc.kind.is_bridge() {
+            if w.armies[g].attitude <= 0 || loc.kind.is_bridge() {
                 return Some(StepContact::Army(g));
             }
             return None;
         }
-        // 0x4adb63: the garrison fights when `defended` (attitude 0 or less, ruins always, troops
-        // left); with no troops left a castle, fort or ruins is taken.
-        if loc.defended() {
-            return Some(StepContact::Garrison(l));
-        }
         match loc.kind {
             K::Village => Some(StepContact::Captured(l)),
-            K::Castle | K::Fort | K::Ruins if loc.attitude <= 0 || loc.kind == K::Ruins => Some(StepContact::Captured(l)),
+            K::Castle | K::Fort | K::Ruins | K::Camp if loc.attitude <= 0 || loc.kind == K::Ruins => {
+                if loc.cleared || loc.garrison.is_empty() {
+                    (loc.kind != K::Camp).then_some(StepContact::Captured(l))
+                } else {
+                    Some(StepContact::Garrison(l))
+                }
+            }
             _ => None,
         }
     }
@@ -2503,16 +2491,6 @@ impl Game {
     /// next to him (|dx| ≤ 1 and |dy| ≤ 1) and he is not in a building other than a bridge or
     /// his own.
     pub(crate) fn ai_contact(&mut self) -> Option<Event> {
-        let e = self.contact_army()?;
-        if let Event::Encounter(i) = e {
-            self.foe = Some(Foe::Army(i));
-        }
-        Some(e)
-    }
-
-    /// The contact an army's arrival makes with the hero, read without changing anything
-    /// ([`Game::ai_contact`]); `None` when none is due.
-    fn contact_army(&self) -> Option<Event> {
         if self.foe.is_some() {
             return None;
         }
@@ -2535,6 +2513,7 @@ impl Game {
             !ai::managed(a) && !peace && !sheltered && a.arrived && (t.0 - here.0).abs() <= 1 && (t.1 - here.1).abs() <= 1 && a.hostile()
         };
         let i = self.world.armies.iter().rposition(|a| (contact(a, ai::Contact::Attack) || gang(a)) && now >= a.ignore_until)?;
+        self.foe = Some(Foe::Army(i));
         Some(Event::Encounter(i))
     }
 
@@ -2681,8 +2660,7 @@ impl Game {
     /// 12:00 comes in that scan when no event fired and no spell is being read, 0x4abfbc, else at a
     /// later scan. His first noon is the day after the start, even after a morning start
     /// (0x4b4388); the AI's armies keep theirs).
-    #[allow(clippy::too_many_arguments)]
-    fn slice_tail(&mut self, minutes: f32, at: (f64, Tile), hero: &HeroCells, ticks: Vec<Tick>, later: Vec<f64>, consumes_contact: bool, events: &mut Vec<Event>) {
+    fn slice_tail(&mut self, minutes: f32, at: (f64, Tile), hero: &HeroCells, ticks: Vec<Tick>, later: Vec<f64>, events: &mut Vec<Event>) {
         // The clock and the hero's tile when the armies moved.
         let (now, hero_tile) = at;
         events.append(&mut self.ai_events);
@@ -2743,37 +2721,18 @@ impl Game {
         let script = frame_probe::time(Stage::Script, || self.run_script());
         let fired = script.iter().any(fires);
         events.extend(script);
-        // A contact the walk or wait is about to meet takes the noon in its scan (`meet_as`).
-        let deferred = consumes_contact && self.contact_army().is_some();
-        if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none() && !deferred) {
-            self.pay_noon_report(day, events);
+        if let Some(day) = self.noon_due.filter(|_| !fired && self.reading.is_none()) {
+            self.noon_due = None;
+            // The next noon is the day after now (0x4a41d8): a noon paid late, after
+            // midnight, skips that day's own noon (the original's behaviour).
+            self.noon_from = Some(self.clock.day_index() + 1);
+            if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
+                events.push(Event::NewDay(report));
+                // The original autosaves as the noon report opens, named by the date; a noon
+                // with no report (no wages, no income) writes none (0x4abfbc).
+                self.autosave_due = Some(super::save::date_name(&self.clock));
+            }
         }
-    }
-
-    /// Pays the noon of `day` (0x4abfbc): the wages, the Ranger's heal and the report
-    /// ([`Game::new_day`]). The next noon is the day after now (0x4a41d8): a noon paid late,
-    /// after midnight, skips that day's own noon (the original's behaviour).
-    pub(crate) fn pay_noon_report(&mut self, day: u64, events: &mut Vec<Event>) {
-        self.noon_due = None;
-        self.noon_from = Some(self.clock.day_index() + 1);
-        if let Some(report) = frame_probe::time(Stage::Day, || self.new_day(day)) {
-            events.push(Event::NewDay(report));
-            // The original autosaves as the noon report opens, named by the date; a noon
-            // with no report (no wages, no income) writes none (0x4abfbc).
-            self.autosave_due = Some(super::save::date_name(&self.clock));
-        }
-    }
-
-    /// The noon a contact's scan takes, if one is due (`meet_as`): a noon the time held back
-    /// (`noon_due`), or the hero's next noon (`noon_from`, 12:00) already passed: the original
-    /// tests now against his next noon (hero +0x170c). Its day.
-    pub(crate) fn due_noon(&self) -> Option<u64> {
-        if let Some(day) = self.noon_due {
-            return Some(day);
-        }
-        let day = self.noon_from.unwrap_or(self.start_day + 1);
-        let noon = (day * super::clock::MINUTES_PER_DAY + super::clock::MINUTES_PER_DAY / 2) as f64;
-        (self.clock.total_minutes() >= noon).then_some(day)
     }
 
     /// Price to hire unit type `kind`: its `Cost` (in mana for elementals).
@@ -2876,11 +2835,7 @@ impl Game {
         // as the screen does on a press: an action never sees a half-played step.
         self.finish_pause();
         // The undo of «Отступить» (`retreat_battle`): the squad and the armies as the battle begins.
-        let garrison = match self.foe {
-            Some(Foe::Garrison(l)) => Some((l, self.world.locations[l].garrison.clone())),
-            _ => None,
-        };
-        self.battle_undo = Some(BattleUndo { squad: self.squad.clone(), armies: self.world.armies.clone(), garrison });
+        self.battle_undo = Some(BattleUndo { squad: self.squad.clone(), armies: self.world.armies.clone() });
         // The cells the army stands in now, before `Battle::begin`'s start fix moves its back
         // row forward (4d2141); `settle_battle` returns the units to them when `keep_formation`.
         self.formation_before_battle = Some(self.squad.iter().map(|u| u.slot).collect());
@@ -3016,27 +2971,19 @@ impl Game {
     }
 
     /// Whether the player may «Отступить» from the pending battle (Razdor's deviation, the owner's
-    /// decision of 2026-11-13, backlog 1607, extended by the owner's decision of 2026-11-26, backlog
-    /// 1706; the screen offers it only before the battle's first action). Offered when the hero
-    /// stepped into the fight (`back_to` is set; a battle a scenario's events start has none), for
-    /// an army (in the open, or standing in its own building) and for a garrison (a building he
-    /// attacks). Not when the fight is a defence of his own building (`hero_building_defence`).
+    /// decision of 2026-11-13, backlog 1607; the screen offers it only before the battle's first
+    /// action). Offered for an army that stepped onto him, or caught him, in the open. Not for a
+    /// garrison (a siege, or his own building's defence), not for a fight in a building (his, or the
+    /// army's own), and not for a battle the scenario's events start (`back_to` is `None` there).
     pub fn can_retreat(&self) -> bool {
-        let Some(foe) = self.foe else { return false };
-        if self.back_to.is_none() || self.hero_building_defence() != 0 {
-            return false;
-        }
-        match foe {
-            Foe::Army(i) => i < self.world.armies.len(),
-            Foe::Garrison(l) => l < self.world.locations.len(),
-        }
+        let Some(Foe::Army(i)) = self.foe else { return false };
+        self.back_to.is_some() && i < self.world.armies.len() && self.hero_building_defence() == 0 && self.army_home_defence(i) == 0
     }
 
     /// «Отступить» (Razdor's, see [`Game::can_retreat`]), at any moment of the battle the game allows it
     /// ([`Game::retreat_open`], the owner's rule of 2026-11-17). Everything rewinds to before the fight: the
-    /// squad and the armies are put back as the battle began (`battle_undo`), and so is the garrison of a
-    /// building fought, so nobody died, no experience, no loot and no change to either army or building.
-    /// A garrison has no army to leave: only the army foe's `ignore_until` is set. The battle's only trace is a lost battle with no losses on
+    /// squad and the armies are put back as the battle began (`battle_undo`), so nobody died, no experience,
+    /// no loot and no change to either army. The battle's only trace is a lost battle with no losses on
     /// either side in the chronicle (battles lost). The hero goes back to the cell he came from when no army
     /// or building holds it now, else he stays where he is. The army he left stays on the map and does not
     /// come at him for 120 minutes (the same as an army that withdrew, `resolve_battle`), and his route ends
@@ -3047,22 +2994,17 @@ impl Game {
         if !self.retreat_open(battle) {
             return false;
         }
-        let (Some(foe), Some(back)) = (self.foe, self.back_to.take()) else { return false };
+        let (Some(Foe::Army(i)), Some(back)) = (self.foe, self.back_to.take()) else { return false };
         let start = self.chronicle_battle_start();
         self.chronicle_battle_retreat(start);
         if let Some(undo) = self.battle_undo.take() {
             self.squad = undo.squad;
             self.world.armies = undo.armies;
-            if let Some((l, garrison)) = undo.garrison {
-                self.world.locations[l].garrison = garrison;
-            }
         }
         self.foe = None;
         self.battle_troops.clear();
         self.formation_before_battle = None;
-        if let Foe::Army(i) = foe {
-            self.world.armies[i].ignore_until = self.clock.total_minutes() + 120.0;
-        }
+        self.world.armies[i].ignore_until = self.clock.total_minutes() + 120.0;
         self.path.clear();
         self.goal = None;
         self.talk_to = None;
@@ -4169,78 +4111,14 @@ mod tests {
         assert_eq!(g.tile(), here, "an army holds that cell now");
     }
 
-    /// The hero walked into the garrison of a hostile fort and stands at its gate (backlog 1706).
-    fn walked_into_fort() -> Game {
-        let mut s = strip();
-        let mut fort = building(BuildingType::Fort, 16, 3, (2, 2));
-        fort.faction = 4;
-        fort.relations = [-2, 0, 0, 0];
-        fort.gold_per_day = 40;
-        fort.mana_per_day = 5;
-        fort.garrison[0] = troop(4, 0, 2);
-        fort.garrison_extra_defence = 12;
-        s.buildings = vec![fort];
-        let mut g = start(&s);
-        g.fog = Fog::disabled(24, 6);
-        assert!(g.set_destination((15, 2)));
-        let events = walk_until_stopped(&mut g);
-        assert_eq!(events.last(), Some(&Event::Arrived(0)));
-        g
-    }
-
     #[test]
-    fn a_garrison_fight_offers_the_retreat_and_puts_the_building_back() {
-        let mut g = walked_into_fort();
-        assert_eq!(g.back_to, Some(g.tile()), "the cell he stands on is the one he goes back to");
-        assert!(g.can_retreat(), "a building he attacks: the retreat is offered");
-        let squad: Vec<(i32, Slot)> = g.squad.iter().map(|u| (u.hp, u.slot)).collect();
-        let garrison = format!("{:?}", g.world.locations[0].garrison);
-        let (gold, here) = (g.gold, g.tile());
-        let mut b = g.start_battle();
-        b.begin();
-        // The fight wrote a garrison troop's HP back, as a battle round does.
-        let k = b.fighters.iter().position(|f| f.team == Team::Enemy).unwrap();
-        b.fighters[k].hp -= 1;
-        g.battle_write_back(&b);
-        assert_ne!(format!("{:?}", g.world.locations[0].garrison), garrison, "the fight changed the garrison");
-        assert!(g.retreat_battle(&b));
-        assert_eq!(format!("{:?}", g.world.locations[0].garrison), garrison, "the garrison is as before the fight");
-        assert_eq!(g.squad.iter().map(|u| (u.hp, u.slot)).collect::<Vec<_>>(), squad, "the squad is as before the fight");
-        assert_eq!((g.gold, g.tile(), g.foe.is_none()), (gold, here, true), "no loot, he stays at the gate, the battle is over");
-    }
-
-    #[test]
-    fn an_army_in_its_own_building_offers_the_retreat() {
-        let (mut g, _from) = caught_by_army();
-        let camp = g.world.index_of("Bandit camp");
-        g.world.locations[camp].garrison_defence = 12;
-        g.world.armies[0].pos = g.world.map.center(g.world.locations[camp].tile);
-        assert_eq!(g.army_home_defence(0), 12, "the army stands in its own hostile building");
-        assert!(g.can_retreat(), "an army in its building: the retreat is offered too");
-        let b = g.start_battle();
-        assert!(g.retreat_battle(&b), "and it goes through");
-        assert!(g.foe.is_none());
-    }
-
-    #[test]
-    fn a_defence_of_his_own_building_has_no_retreat() {
-        let (mut g, _from) = caught_by_army();
-        let camp = g.world.index_of("Bandit camp");
-        g.world.give_to_player(camp);
-        g.world.locations[camp].garrison_defence = 12;
-        g.location = Some(camp);
-        assert!(!g.can_retreat(), "his own building's defence is a siege he holds: no retreat");
-        g.foe = Some(Foe::Garrison(camp));
-        assert!(!g.can_retreat(), "a garrison's defence of his building: no retreat");
-    }
-
-    #[test]
-    fn a_scripted_battle_has_no_retreat() {
+    fn a_garrison_or_a_scripted_battle_has_no_retreat() {
         let (mut g, _) = caught_by_army();
+        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
+        assert!(!g.can_retreat(), "a garrison's battle is a siege or a defence");
+        g.foe = Some(Foe::Army(0));
         g.back_to = None;
         assert!(!g.can_retreat(), "the scenario's battle is forced");
-        g.foe = Some(Foe::Garrison(g.world.index_of("Bandit camp")));
-        assert!(!g.can_retreat(), "the scenario's battle is forced, a building's too");
     }
 
     #[test]
@@ -5139,82 +5017,6 @@ mod tests {
         assert!(!g.won(), "no camps: not won by clearing them");
     }
 
-    /// A contact with the noon due gives the noon report, not the battle: the hero's step onto
-    /// the army (0x4ad94c) and the army's arrival next to him (0x4ade3c) both run the scan
-    /// (0x4abfbc), which takes the noon. Traced under Wine 2026-11-26 (Проклятое озеро, army 17).
-    #[test]
-    fn contact_at_noon_gives_the_report_not_the_battle() {
-        let mut s = strip();
-        s.armies = vec![army(1, 12, 2, -2, &[troop(4, 0, 2)])];
-        let mut g = start(&s);
-        g.fog = Fog::disabled(24, 6);
-        // A stationary guard (it never steps or arrives, so the hero's step is the contact).
-        (g.world.armies[0].patrols, g.world.armies[0].patrol_radius) = (true, 0);
-        g.first_noon_today();
-        let day = g.clock.day_index();
-        // Past 12:00 of the day, its noon not yet paid (no tick has come for it): due at the
-        // contact. A held noon would be paid by the step's own time before the army.
-        g.clock.set_total_minutes((day * crate::rules::clock::MINUTES_PER_DAY + 12 * 60 + 5) as f64);
-        let gold = g.gold;
-        // The hero's step onto it: the report, no battle, the army where it stood, him too.
-        let at = g.world.armies[0].tile(&g.world.map);
-        assert!(g.set_destination(at));
-        let events = walk_until_stopped(&mut g);
-        let report = events.iter().find_map(|e| match e {
-            Event::NewDay(r) => Some(r.clone()),
-            _ => None,
-        });
-        assert!(report.as_ref().is_some_and(|r| r.day == day && r.gold == gold), "{events:?}");
-        let r = report.unwrap();
-        assert!(r.wages > 0, "the wages are paid: {r:?}");
-        assert!(g.gold < gold, "the wages come out: {gold} -> {}", g.gold);
-        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
-        assert_eq!(g.foe, None);
-        assert_eq!((g.noon_due, g.noon_from), (None, Some(day + 1)), "the next noon is the next day's");
-        assert_ne!(g.tile(), at, "he does not step onto the army's cell");
-        assert_eq!(g.world.armies.len(), 1);
-        assert!(g.world.map.distance(g.tile(), g.world.armies[0].tile(&g.world.map)) <= 1, "the army stays next to him");
-    }
-
-    #[test]
-    fn contact_at_noon_gives_the_report_not_the_battle_when_the_army_arrives() {
-        // The army's arrival (0x4ade3c): an attack meets the scan with the noon due.
-        let mut s = strip();
-        s.armies = vec![army(1, 12, 2, -2, &[troop(4, 0, 2)])];
-        let mut g = start(&s);
-        g.fog = Fog::disabled(24, 6);
-        g.first_noon_today();
-        let day = g.clock.day_index();
-        g.noon_due = Some(day);
-        let h = g.tile();
-        g.world.armies[0].pos = g.world.map.center((h.0 + 1, h.1));
-        let mut events = Vec::new();
-        let fired = g.meet(Event::Encounter(0), &mut events);
-        assert!(fired, "{events:?}");
-        assert!(events.iter().any(|e| matches!(e, Event::NewDay(r) if r.day == day)), "{events:?}");
-        assert!(!events.iter().any(|e| matches!(e, Event::Encounter(_))), "{events:?}");
-        assert_eq!((g.foe, g.noon_due), (None, None));
-        assert_eq!(g.world.armies.len(), 1);
-    }
-
-    #[test]
-    fn a_contact_with_the_noon_not_due_still_gives_the_battle() {
-        let mut s = strip();
-        s.armies = vec![army(1, 12, 2, -2, &[troop(4, 0, 2)])];
-        let mut g = start(&s);
-        g.fog = Fog::disabled(24, 6);
-        g.first_noon_today();
-        let day = g.clock.day_index();
-        // The next noon is tomorrow's: nothing is due.
-        g.noon_from = Some(day + 1);
-        let at = g.world.armies[0].tile(&g.world.map);
-        assert!(g.set_destination(at));
-        let events = walk_until_stopped(&mut g);
-        assert_eq!(events.last(), Some(&Event::Encounter(0)), "{events:?}");
-        assert_eq!(g.foe, Some(Foe::Army(0)));
-        assert!(!events.iter().any(|e| matches!(e, Event::NewDay(_))), "{events:?}");
-    }
-
     #[test]
     fn hostile_armies_attack_on_contact_and_leave_loot() {
         let mut s = strip();
@@ -5584,88 +5386,6 @@ mod tests {
         assert!(g.set_destination((5, 2)), "the army clicked");
         let events = walk_until_stopped(&mut g);
         assert_eq!((events.last(), g.tile()), (Some(&Event::Encounter(0)), (4, 2)));
-    }
-
-    #[test]
-    fn the_hero_steps_onto_an_army_in_a_building_by_its_own_attitude_and_the_building_kind() {
-        // 0x4ad94c (world.md §4.2): an army in a building is engaged unless the building is a
-        // town, market, tavern, church, smithy, shipyard or altar (the guide p. 30, the owner's
-        // decision 2026-11-26, over the exe's list: the market is sheltered, the dungeon
-        // entrance is not), or the army's own attitude (+0x16af) is above 0 and the building is
-        // no bridge. The player's row gives faction 3 −1, so an army of faction 3 with own +1 is
-        // hostile by the relation (0x4a0868) but well disposed by its own row.
-        let contact = |kind: BuildingType, own: i8| {
-            let mut s = strip();
-            s.header.relations[0] = [3, 2, -1, -2];
-            s.buildings = vec![building(kind, 5, 2, (1, 1))];
-            s.armies = vec![army(1, 5, 2, own, &[troop(4, 0, 1)])];
-            let g = start(&s);
-            assert!(g.world.armies[0].hostile(), "{kind:?}, own {own}: hostile by relation");
-            assert_eq!(g.world.armies[0].own_attitude(), own);
-            g.step_contact((5, 2))
-        };
-        assert_eq!(contact(BuildingType::Obelisk, 1), None, "well disposed by its own row: let pass");
-        assert_eq!(contact(BuildingType::Obelisk, -1), Some(StepContact::Army(0)), "ill-disposed: engaged");
-        assert_eq!(contact(BuildingType::StoneBridge, 1), Some(StepContact::Army(0)), "a bridge is no building for this rule");
-        for kind in [BuildingType::Town, BuildingType::Market, BuildingType::Church, BuildingType::Tavern, BuildingType::Smithy, BuildingType::Shipyard, BuildingType::Altar] {
-            assert_eq!(contact(kind, -1), None, "{kind:?} shelters a hostile army");
-        }
-        assert_eq!(contact(BuildingType::DungeonEntrance, -1), Some(StepContact::Army(0)), "a dungeon entrance does not shelter it");
-    }
-
-    #[test]
-    fn a_building_guard_is_engaged_by_its_own_attitude() {
-        // 0x4ad94c (world.md §4.2 rule 2): the last army standing in a village guards it, and
-        // is engaged when its own attitude (+0x16af) is 0 or less, or on a bridge. The combined
-        // relation (0x4a0868) does not count. A guard that is not engaged also stops the capture.
-        // The player's row gives faction 3 the value `row`, so the combined relation is the
-        // mean of it and the guard's own attitude (or the lower of the two when one is below 0).
-        let guard = |kind: BuildingType, own: i8, row: i8| {
-            let mut s = strip();
-            s.header.relations[0] = [3, 2, row, -2];
-            s.buildings = vec![building(kind, 5, 2, (2, 1))];
-            s.armies = vec![army(1, 6, 2, own, &[troop(4, 0, 1)])];
-            let mut g = start(&s);
-            g.world.armies[0].mind.standing = Some(0);
-            g.world.armies[0].mind.scripted = true;
-            g
-        };
-        let g = guard(BuildingType::Village, 1, -1);
-        assert_eq!((g.world.armies[0].own_attitude(), g.world.armies[0].attitude), (1, -1));
-        assert_eq!(g.step_contact((5, 2)), None, "well disposed by its own row: no fight, no capture");
-        let g = guard(BuildingType::Village, 0, 2);
-        assert_eq!(g.world.armies[0].attitude, 1, "the relation is above 0");
-        assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "own attitude 0: engaged");
-        let g = guard(BuildingType::StoneBridge, 3, 2);
-        assert_eq!(g.step_contact((5, 2)), Some(StepContact::Army(0)), "a bridge guard is always engaged");
-    }
-
-    #[test]
-    fn a_castle_at_attitude_0_fights_the_hero_and_one_above_0_does_not() {
-        // 0x4adb63 (world.md §4.2 rule 3): a castle, fort or camp at attitude 0 or less with
-        // troops in it fights him; at 1 it does not; ruins fight at any attitude. With no troops
-        // left the castle is taken. The exe has no owner test on this path, so the player's own
-        // castle at attitude −1 with troops fights him too.
-        let contact = |kind: BuildingType, attitude: i8, troops: bool, owned: bool| {
-            let mut s = strip();
-            let mut b = building(kind, 5, 2, (1, 1));
-            b.relations = [attitude, 0, 0, 0];
-            if troops {
-                b.garrison[0] = troop(4, 0, 2);
-            }
-            s.buildings = vec![b];
-            let mut g = start(&s);
-            if owned {
-                g.world.locations[0].owner = crate::rules::world::Owner::Player;
-            }
-            g.step_contact((5, 2))
-        };
-        assert_eq!(contact(BuildingType::Castle, 0, true, false), Some(StepContact::Garrison(0)), "0 is hostile");
-        assert_eq!(contact(BuildingType::Castle, 1, true, false), None, "1 is friendly: walked through");
-        assert_eq!(contact(BuildingType::Castle, -1, true, true), Some(StepContact::Garrison(0)), "the player's own, no test");
-        assert_eq!(contact(BuildingType::Castle, 0, false, false), Some(StepContact::Captured(0)), "empty: taken");
-        assert_eq!(contact(BuildingType::Fort, 0, true, false), Some(StepContact::Garrison(0)));
-        assert_eq!(contact(BuildingType::Ruins, 3, true, false), Some(StepContact::Garrison(0)), "ruins always");
     }
 
     #[test]
