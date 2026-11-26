@@ -214,13 +214,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   "several ships" a bug, so this is the narrowest guard. Open: what the exe's stale N+2 cell blocks
   (the old cell keeps its code; MoveToCell treats it as the parked ship, world.md §8); what the hero aboard
   does when a marker is summoned (Razdor keeps `aboard` and the tile). Settled by two summons in game.
-- **Game draw order: buildings draw above trees, rocks and mountains in one cell** (2026-11-05, the
-  Hristos editor-guide analysis, docs/reference/editor-guide.md, gap G12, unverified).
-  `src/ui/world_view.rs:1640-1655` (`LAYER_BUILDING` 2 above the object layers 0 and 1, from
-  `object_layer`) and `:1682-1686`. The guide's p.240 screenshot shows stones over a town. The cell
-  pass follows 0x4c8864 by row and layer, as the comment says. Settled by 0x4c8864 and 0x4c9459 (the
-  layer of stones and trees against buildings), or by footage of a town with stones in its cell. Do
-  not change the order before then.
 - **The editor's draw order does not follow the editor's layers** (2026-11-05, the Hristos
   editor-guide analysis, docs/reference/editor-guide.md, gap E7). `src/ui/editor/canvas.rs:249-300`
   sorts terrain objects, buildings and armies by y only (the sort at `:278`). The original editor
@@ -909,6 +902,13 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   `--keep`, profile the per-frame additions if the cost persists, run db-zoomout repeatedly to catch the panic.
 
 ## Settled
+- **Game draw order of buildings, rocks and trees (G12)** (settled 2026-11-26, the parity round). The exe (0x4c8864)
+  draws per cell in row order: massif of class 5 and up, plants, the building once at its first (visible) footprint
+  cell, then figures. Razdor's flat view does the same (`first_footprint_cell`): a stone on a later footprint cell
+  covers the building, as on the guide's p. 240; checked off-screen on Другой берег (village at (74,127), stone at
+  (70,127)). Not copied: the exe keys a building to its first *visible* cell, so its order shifts while scrolling at
+  the top or left edge. 2.5D: the depth sort would differ only for a stone on a middle footprint row, north of the
+  foot; no shipped map has one (scan of every install map), so it is left as is.
 
 - **A contact at noon gives the noon report, not the battle (guide 9.5, p. 259; traced under Wine 2026-11-26,
   Проклятое озеро, army 17).** With the next noon set to the contact minute, both the army's arrival (0x4ade3c)
