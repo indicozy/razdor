@@ -75,7 +75,7 @@ mobile support; there is no roadmap and nothing else is started unless the owner
     stays green;
   - any UI change (the owner's decision, 2026-11-03), a broken-UI fix included: a new or changed
     layout, look, window, button or text placement on any screen or platform needs the owner's
-    approval before it is pushed to `main`. Show the off-screen screenshots of every changed
+    approval before it reaches `main`. Show the off-screen screenshots of every changed
     screen (desktop and the phones it touches) and wait for the owner's yes; a player's or a
     reviewer's agreement in Discord is not enough. The approval is for the screens shown: a
     later change to the look needs a new one;
@@ -124,7 +124,10 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   Developer text stays English: code, comments, commit messages, CLAUDE.md, skills,
   `docs/flows/`, `docs/reference/`.
 - Changelog lines are short plain player Russian: what changed for the player, no internals.
-- Git is plain trunk: commit straight to `main`, no feature branches or PRs.
+- Git (the owner's decision, 2026-11-26, "we're getting stable"): nothing is committed straight
+  to `main`. Each round of work (a fix, a feature, a parity round) goes on its own branch off
+  `main` (named for the round, e.g. `parity-2026-11-26`), pushed to GitHub. The owner decides
+  when a branch is merged into `main`. No PRs unless the owner asks. Never force push `main`.
 - `dt-original` and `dt-feat` are frozen (the owner's decision for `dt-original`, 2026-10-28):
   nothing is cherry-picked or pushed to them. `dt-editor` (map editor parity) is paused,
   untouched unless asked.
@@ -137,17 +140,17 @@ mobile support; there is no roadmap and nothing else is started unless the owner
   backlog checks and the retrospective that every fixed report stays fixed.
 - Backlog statuses follow the usual development flow, one dated line per change in the report
   and the current one in INDEX: open `new` → `triaged` (kind and verdict set) → `needs-info`
-  (what was asked) or `in-progress` → `fixed` (on `main`: commit, test) → `released X.Y.Z` →
+  (what was asked) or `in-progress` → `fixed` (on its pushed branch: commit, test; it reaches `main` when the owner merges it) → `released X.Y.Z` →
   `verified` (the reporter confirmed, or the retrospective's test passed after a release);
   closed `as-original`, `declined` (the owner's no), `duplicate of <id>`, `cannot-reproduce`,
   `wontfix`; a fixed one that breaks again is `reopened` (or `regressed → <new id>`). Move the
   status the moment the work moves. Layout in the `discord-reports` skill.
 - Keep RE notes in our own words; never paste decompiled code into `docs/reference/`.
 - Parallel agents each work in their own git worktree (Agent `isolation: "worktree"`), never in
-  the shared tree; each lands its commits on `main` itself (`git fetch`, `git rebase
-  origin/main`, tests, `git push origin HEAD:main`) and the main session pulls.
+  the shared tree; each lands its commits on the round's branch itself (`git fetch`, `git rebase
+  origin/<branch>`, tests, then the push to `HEAD:<branch>`), never on `main`.
 - When a task is done, clean up after it at once, without asking (also when the owner is
-  away): remove its worktrees and their branches (once the commits are on `main`), stop the
+  away): remove its worktrees and their branches (once the commits are on the round's pushed branch), stop the
   processes it started (Xvfb, Wine, servers), and delete its scratch files, target dirs and
   temporary probes; leave nothing untracked in the repo. Only what the task created; anything
   else, or anything with uncommitted work, is listed for the owner.
@@ -190,8 +193,8 @@ mobile support; there is no roadmap and nothing else is started unless the owner
 ## When I say…
 
 - "note it": add to `docs/PLAYTEST_NOTES.md` only; don't fix yet.
-- Releases are weekly (the owner's decision, 2026-10-28): a fix is done once it is on `main`
-  with status `fixed` and its line in `changelog/unreleased.md` (the next release's candidate);
+- Releases are weekly (the owner's decision, 2026-10-28): a fix is done once it is on its pushed
+  branch with status `fixed` and its line in `changelog/unreleased.md` (the next release's candidate);
   never cut or offer a release after a fix. The owner releases the week's pile when they say so.
 - Mirrors (the owner's decision, 2026-11-24): GitHub is the main host and the owner's server
   `razdor.indicozy.dev` (`/hub/`, filled by `razdor-mirror` pulling from GitHub, see

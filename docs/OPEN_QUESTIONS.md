@@ -8,6 +8,35 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Open
 
+- **Open-questions round of 2026-11-26: verdicts and the fixes still to code** (decompile reading plus
+  live traces of the original under Wine on Проклятое озеро). Differences, not yet coded:
+  1. Removing units by type or name can take the hero (0x4961d0 searches down to unit 1; 0x496310
+     shifts the rest, so the earliest joined unit leads). Razdor never removes the hero
+     (`events.rs` search from 1, `script.rs` `remove_unit` returns on 0). Fix: search from 0, keep a
+     guard against an empty squad as Razdor's. Untraced: whether the original's army window then crashes.
+  2. The barracks' hire cells: 0x4bd3a4 shows as many cells as filled slots, cell k bound to slot k, so
+     each gap hides a trailing offer. Razdor packs the offers. A UI change: needs the owner's screenshots.
+  3. The knight cut: 0x49855c reads the first unit's type alive or dead; Razdor builds the enemy side from
+     living units, so a dead knight leader drops the cut.
+  4. The hero's figure byte (army 0 +0x169d, 0x75bfdd) is 0-based on the same FIGURES table as armies
+     (0x4ad4cc, 0x4ad5ac, 0x4ad314); Razdor's hero figure is 1-based, so opcode 17 on the hero draws the
+     wrong sheet. Fix needs a save version bump.
+  5. A lantern or army show with a spell or a delay: the chain callback 0x4af658 pops itself (0x48c3e4) and
+     reads the NEXT queue entry's argument, so it opens event (spell−1) or (2×delay hours) unchecked; the
+     spell's own callback then runs the real chain, a delay drops it; spell−1 equal to the firing event
+     crashes (0x4a8b22). No known map combines them. Owner's call: code the queue (Razdor guard for the
+     crash) or document only.
+  6. "Move army to hero" leaves a drawn ghost on the old cell in the original (0x4980d8 clears +8, not +9).
+     Visual only: keep Razdor's clean behaviour as a deviation unless the owner wants it.
+  Settled by the round (move to Settled with the next edit of these entries): a text-only event of
+  duration 0 fires once a day (0x4a7b80, traced); pictures 203 and up are past the unit table (204 and 205
+  crash the original, Razdor shows nothing, no map uses 202–255); the camera limit is `(W+2)×32 − 1056`
+  (traced: 2208 on a 100-wide map; `interface.md §8` is wrong, `world.md` right); unit codes 255/254 in the
+  file are 0xFE/0xFD after the callers' minus one; the speed bonus is the archmage's (0x4b4824); event-moved
+  units' wage kind and named units' pay match (wage code 0x4a1857, not 0x496310 as the spec says); the
+  revival on activation and one-tick activate/deactivate match Razdor's order; the per-player drift after
+  hour 6 is the shared random generator, modelled; the wide front row stays as Razdor applies it.
+
 - **Wide front row: when it applies** (2026-11-23, the gameplay settings). The original applies the «Широкий первый ряд»
   option only after a restart; Razdor applies the setting from the next battle (`App::follow_row_setting`). Kept as it is; the
   row's «?» does not say so. To settle: the owner's call on whether Razdor should wait for a restart as well.
