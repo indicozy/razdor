@@ -242,10 +242,9 @@ battle. `Game::battle_undo`, taken by `start_battle`, holds the squad and the ar
 them back, so nobody died, no HP, cell or troop changed, and the write-back of the fight is undone with it. For a garrison
 fight it also keeps the garrison's troops (`BattleUndo::garrison`, the location's garrison as the battle began), restored
 the same way: the building is as it was before the fight. It skips all of
-the end of a battle: no `resolve_battle`, no XP, no loot, no events. The chronicle records one lost battle with no losses
-on either side (`chronicle_battle_retreat`: battles lost in «Итоги»), the only trace. The foe is cleared, the army stays on
+the end of a battle: no `resolve_battle`, no XP, no loot, no events. The retreat leaves no chronicle entry: the battle is not in «Итоги» at all (no battle won or lost). The foe is cleared, the army stays on
 the map with `ignore_until` 120 minutes ahead (as an army that withdrew; a garrison has none to set), the hero's route ends, and he goes back to
-`back_to` when no army or building holds that cell (else he stays). Open: the 120 minutes and the chronicle entry's place
+`back_to` when no army or building holds that cell (else he stays). Open: the 120 minutes
 (`docs/OPEN_QUESTIONS.md`).
 
 `Game::resolve_battle` → `settle_battle` (`src/rules/game.rs`):

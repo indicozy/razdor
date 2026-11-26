@@ -3036,8 +3036,8 @@ impl Game {
     /// ([`Game::retreat_open`], the owner's rule of 2026-11-17). Everything rewinds to before the fight: the
     /// squad and the armies are put back as the battle began (`battle_undo`), and so is the garrison of a
     /// building fought, so nobody died, no experience, no loot and no change to either army or building.
-    /// A garrison has no army to leave: only the army foe's `ignore_until` is set. The battle's only trace is a lost battle with no losses on
-    /// either side in the chronicle (battles lost). The hero goes back to the cell he came from when no army
+    /// A garrison has no army to leave: only the army foe's `ignore_until` is set. A retreat leaves no trace in the
+    /// chronicle: the battle is not in «Итоги». The hero goes back to the cell he came from when no army
     /// or building holds it now, else he stays where he is. The army he left stays on the map and does not
     /// come at him for 120 minutes (the same as an army that withdrew, `resolve_battle`), and his route ends
     /// here, so the same contact does not come again in this step. Returns false, and changes nothing, when
@@ -3048,8 +3048,6 @@ impl Game {
             return false;
         }
         let (Some(foe), Some(back)) = (self.foe, self.back_to.take()) else { return false };
-        let start = self.chronicle_battle_start();
-        self.chronicle_battle_retreat(start);
         if let Some(undo) = self.battle_undo.take() {
             self.squad = undo.squad;
             self.world.armies = undo.armies;
@@ -6697,7 +6695,7 @@ mod tests {
     }
 
     #[test]
-    fn a_retreat_after_some_turns_rewinds_both_armies_and_counts_one_lost_battle() {
+    fn a_retreat_after_some_turns_rewinds_both_armies_and_leaves_no_chronicle_entry() {
         use crate::rules::chronicle::EntryKind;
         let (mut g, _from) = caught_by_army();
         let squad_before = g.squad.clone();
@@ -6712,13 +6710,14 @@ mod tests {
             g.battle_write_back(&b);
         }
         assert!(g.squad != squad_before || format!("{:?}", g.world.armies) != format!("{:?}", armies_before), "the battle changed something");
+        let battles_before = g.chronicle.entries().filter(|e| matches!(e.kind, EntryKind::Battle { .. })).count();
         assert!(g.retreat_battle(&b), "the retreat is offered at any moment the game allows it");
         assert_eq!(g.squad, squad_before, "the squad is as the battle began");
         let mut want = armies_before;
         want[0].ignore_until = g.world.armies[0].ignore_until;
         assert_eq!(format!("{:?}", g.world.armies), format!("{:?}", want), "the armies are as the battle began (the army left stays off for a while)");
         assert!(g.foe.is_none());
-        let fled = g.chronicle.entries().filter(|e| matches!(e.kind, EntryKind::Battle { won: false, own_losses: 0, foe_losses: 0, .. })).count();
-        assert_eq!(fled, 1, "a retreat is one lost battle with no losses on either side");
+        let battles_after = g.chronicle.entries().filter(|e| matches!(e.kind, EntryKind::Battle { .. })).count();
+        assert_eq!(battles_after, battles_before, "a retreat leaves no battle in the chronicle");
     }
 }
