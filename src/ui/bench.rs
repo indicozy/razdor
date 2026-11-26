@@ -744,6 +744,7 @@ fn setup(app: &mut App, run: &mut Run) {
     }
     app.map_view.open_around_hero(&game);
     app.map_view.reset();
+    app.map_view.forget_map();
     app.game = Some(game);
     app.dialogs.clear();
     app.message = None;
