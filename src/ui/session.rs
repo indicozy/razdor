@@ -116,6 +116,14 @@ fn forget_latest() {
     *lock(&WRITTEN) = None;
 }
 
+/// Whether the game may be kept in the slot. Razdor's own rule (the session slot is Razdor's
+/// feature, not the original's): a lost game, where the hero's army has fallen (`Game::army_fallen`,
+/// the hero's defeat), is never written, so the slot keeps the last living state. The marker
+/// stays as it was: the slot holds a living state.
+fn keepable(game: &Game) -> bool {
+    !game.army_fallen()
+}
+
 /// A cheap summary of the game: its clock, the hero's place and purse, the army's state. No
 /// allocation. A change that moves none of these (an item moved, an army's hit points) is seen
 /// by the full serialisation every [`EVERY`] seconds instead.
@@ -197,6 +205,9 @@ impl Keeper {
 
     /// Writes the session slot now (the battle start does, with the foe taken off: `saves::battle`).
     pub fn save_now(&mut self, game: &Game) {
+        if !keepable(game) {
+            return;
+        }
         let Ok((meta, json)) = save::session_json(game) else { return };
         let Some(dir) = save::games_dir() else { return };
         let now = crate::ui::clock::now();
@@ -219,6 +230,9 @@ impl Keeper {
 
     /// Takes the newest state of the game when its key changed, or every [`EVERY`] seconds.
     fn look(&mut self, game: &Game, now: f64) {
+        if !keepable(game) {
+            return;
+        }
         let key = key_of(game);
         if self.key == Some(key) && now - self.last_full < EVERY {
             return;
@@ -310,7 +324,7 @@ mod tests {
 
     use std::sync::Mutex;
 
-    use super::{flush_now, forget_latest, hash_of, lock, Snapshot, LATEST, WRITTEN};
+    use super::{flush_now, forget_latest, hash_of, keepable, lock, Keeper, Snapshot, LATEST, WRITTEN};
 
     /// The tests share the process's newest state: one at a time.
     static SERIAL: Mutex<()> = Mutex::new(());
@@ -363,5 +377,36 @@ mod tests {
         flush_now();
         assert!(!save::session_path(&dir).exists() && !save::session_marker(&dir).exists(), "nothing is written");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A game where the hero's army has fallen (every unit dead) is lost.
+    fn lost_game() -> Game {
+        let mut game = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        for u in game.squad.iter_mut() {
+            u.hp = 0;
+        }
+        game
+    }
+
+    /// A lost game is never kept in the slot; a living one is.
+    #[test]
+    fn a_lost_game_is_not_kept_and_a_living_one_is() {
+        let living = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        assert!(keepable(&living), "a living game is kept");
+        assert!(!keepable(&lost_game()), "a lost game is not");
+    }
+
+    /// The look of a lost game does not replace the newest state: the slot keeps the last living one.
+    #[test]
+    fn a_lost_game_does_not_replace_the_newest_state() {
+        let _serial = lock(&SERIAL);
+        let living = Game::new(Arc::new(Content::builtin()), HeroClass::Knight);
+        let (meta, json) = save::session_json(&living).unwrap();
+        let kept = Snapshot::new(std::env::temp_dir(), meta, json);
+        let kept_hash = kept.hash;
+        *lock(&LATEST) = Some(kept);
+        Keeper::default().look(&lost_game(), 100.0);
+        assert_eq!(lock(&LATEST).as_ref().map(|s| s.hash), Some(kept_hash), "the living state stays");
+        forget_latest();
     }
 }
