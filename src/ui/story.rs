@@ -21,9 +21,17 @@ use super::dialog::{Dialog, Picture, Resource};
 pub const QUEST_ADDED: &str = n_("Quest added to the journal");
 pub const QUEST_COMPLETED: &str = n_("Quest completed");
 
-/// An event's title as shown: without its flag script, escapes filled in.
+/// An event's title as shown: without its flag script, escapes filled in. An event with no
+/// title shows the install's `[Event] Title` in Russian (the exe's «Произошло событие!»,
+/// 0x4a8ae8, 0x4833f0), Razdor's own «Событие» without it; English keeps its own text.
 pub fn event_title(game: &Game, id: EventId) -> String {
-    game.event_title(id)
+    let install = (razdor::i18n::lang() == razdor::i18n::Lang::Ru).then(|| super::chrome::ui_text("Event", "Title")).flatten();
+    game.event_title_or(id, &untitled_window(install, &tr("Event")))
+}
+
+/// The title of an untitled event's window: the install's text when it has one, else ours.
+fn untitled_window(install: Option<String>, ours: &str) -> String {
+    install.filter(|t| !t.trim().is_empty()).unwrap_or_else(|| ours.to_string())
 }
 
 /// An event's own picture, decoded as the original draws it (ARGB4444, 0x4d1693;
@@ -333,6 +341,15 @@ pub(super) fn journal_lines(rows: &[razdor::rules::journal::Row]) -> Vec<Line> {
 mod tests {
     use super::*;
     use razdor::rules::journal::Row;
+
+    /// The guide's picture screens (p. 132-135) and the exe's title rule: an untitled window
+    /// takes the install's `[Event] Title`, and only without one Razdor's own text.
+    #[test]
+    fn an_untitled_event_window_takes_the_installs_title_first() {
+        assert_eq!(untitled_window(Some("Произошло событие!".to_string()), "Событие"), "Произошло событие!");
+        assert_eq!(untitled_window(None, "Событие"), "Событие");
+        assert_eq!(untitled_window(Some("  ".to_string()), "Событие"), "Событие", "an empty install text is no text");
+    }
 
     /// The caption is the leader's name as the tooltip writes it: spaces collapsed, the ends
     /// trimmed; no name, no caption.

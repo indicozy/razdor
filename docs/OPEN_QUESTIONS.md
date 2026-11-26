@@ -156,14 +156,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 - **Guide screen readings to check on the original page image** (2026-11-05, the editor-guide screenshot pass; grouped). Each is a transcription point, not a rule: (a) 6.5 (p.146): the gold result shows "750" with no visible minus, and the text says the offer takes 750; the sign of the stored value is unclear. (b) 6.12 (p.162): the check of event 5 is captioned "Флаг", not "Проверить флаг" (the editor's condition caption, `docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt`, LabelTestFlag at Left 5; "Флаг" is the result column's label at Left 496); the "-JOFF" sign is unclear. (c) 6.14 (p.167): the "box unclear" for the named-character check row. (d) 6.16.1 and 7.3 (p.199): the counter check reads "RANDC^^" (a glyph between RAND and ^^ that may be an artefact). Its meaning does not change: `RAND^^` never matches (`events.md §5`). (e) 6.6 (p.148): the start date is read as 02.11.1222 at low resolution. Settled by a look at the original page image at a higher resolution, or by the editor.
 
 - **A trailing `=` in a result flag: the editor's side is open** (2026-11-05, the editor-guide screenshot pass, docs/reference/editor-guide.md, chapter 7, 7.3). The guide's `+DRAW=` (p.199) is written by the editor as `name%+DRAW=` (dtm-format §9 copies the flag field). The game's side is settled (see Settled): the action is `+DRAW` and the test is empty, which passes. What is open is whether the editor drops the trailing `=` when the field is typed, as the guide says. The validator rejects `=` in names (`src/editor/events.rs:190`). Settled by typing `+DRAW=` in the editor and reading the saved title.
-- **Picture window title: an untitled event's fallback text** (2026-11-05, gap G13; the title rule settled
-  2026-11-26). The exe takes the event's own title (cut at `%` and `#`) for every window, and only an empty one
-  falls back to the install's `[Event] Title`, "Произошло событие!" (0x4a8ae8, 0x4833f0). The guide's four
-  picture screens show untitled test events, so there is no fixed title for picture events: not a difference.
-  Still open, a text difference: Razdor's fallback is the catalog key `Event` = "Событие" (`src/rules/journal.rs:163`,
-  `data/lang/ru/game.txt:285`), not the exe's "Произошло событие!". Fix with a catalog key for the event fallback
-  only (the journal's own fallback stays), with the English text from the install's ini.
-
 - **Group colour range: dtm says 0-5, the editor offers 14 colours** (2026-11-05, the editor-guide screenshot
   pass, docs/reference/editor-guide.md, chapter 5, 5.1-5.2). `dtm-format.md §9` (byte 0) says 0-5. The event
   form's group combo (`docs/notes/mapedit/out/forms/TINFOEVENTS.dfm.txt`, ComboBoxGrupp) has 14 items, the
@@ -208,11 +200,6 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
   them. The p. 132 screen's scroll bar and the stock pictures' wrong colours (the exe loads them as UGS, not LIT:
   0x48d09c; plausible cause, unknown) are not traced. Whether a shipped map or mod uses 202 is not scanned: a
   one-off scan of every event record's picture byte (+0x52) settles it.
-- **An event's own picture and a non-zero picture byte: which one shows** (2026-11-26, the picture-202 pass).
-  The exe uses the event's own picture only when byte 82 is 0 (0x4a8ae8). Razdor (`src/ui/story.rs`) still lets
-  a custom picture win in every case. The change was not made: the community smoke test does not check for an
-  event that has both, and no scan of the shipped maps was done. Settle by a scan of the community maps' event
-  records for both, then change the order (a visible change for such a map: the owner's yes).
 - **A lantern or show plus a spell at contact: is an ally met at noon fought?** (guide 9.5, p. 259; 2026-11-26,
   the parity round, item 7). The guide says the player's army can stand next to an allied army when the 12:00
   report comes, and the player can then fight the ally. decomp-read (0x4ad94c, 0x4abfbc): a contact's scan returns
@@ -944,6 +931,11 @@ from reports and recent work. `docs/PLAYTEST_NOTES.md` keeps the player-facing s
 
 ## Settled
 
+- **Picture window title: an untitled event's fallback text** (settled 2026-11-26, the parity round's fix batch 2).
+  The exe takes the event's own title (cut at `%` and `#`) for every window, and only an empty one falls back to the
+  install's `[Event] Title`, "Произошло событие!" (0x4a8ae8, 0x4833f0). Razdor now uses that install text in Russian
+  for an untitled event's window (`src/ui/story.rs` `event_title`); the journal keeps its own "Событие" fallback, and
+  English keeps "Event".
 - **Event scan: the idle-reset placement** (2026-11-05, the Hristos editor-guide analysis, gap G7; settled
   2026-11-26, decomp-read of 0x4abfbc). The exe's idle reset (last fired → now, the met army cleared) runs only at
   the end of a top-level scan call that returns 0. A chain tail never runs a scan and never resets (0x4ab1ec →

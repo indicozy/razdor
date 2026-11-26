@@ -158,9 +158,14 @@ impl Game {
     /// An event's title as shown: before its flag script and its editor's note (`#`),
     /// escapes filled in; "Event" when it has none.
     pub fn event_title(&self, id: EventId) -> String {
+        self.event_title_or(id, &tr("Event"))
+    }
+
+    /// As [`Game::event_title`], with the text `fallback` for an event that has no title.
+    pub fn event_title_or(&self, id: EventId, fallback: &str) -> String {
         let raw = self.script().and_then(|s| s.event(id)).map_or("", |e| e.display_title().trim());
         if raw.is_empty() {
-            tr("Event").to_string()
+            fallback.to_string()
         } else {
             self.fill_text(raw)
         }
