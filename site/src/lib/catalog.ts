@@ -36,20 +36,28 @@ export interface CatalogCounts {
   authors: number;
 }
 
-const INDEX_URL = "https://github.com/indicozy/razdor-community/releases/latest/download/index.json";
-const ASSETS = "https://github.com/indicozy/razdor-community/releases/latest/download/";
+// GitHub first, then the owner's mirror (the same order as the app: docs/specs/own-mirror-2026-11-24.md). GitHub's
+// release downloads sometimes answer 403 to build machines.
+const INDEX_URLS = [
+  "https://github.com/indicozy/razdor-community/releases/latest/download/index.json",
+  "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/latest/download/index.json",
+];
+// The catalog's pictures come from the owner's mirror: it serves the same release files, it is the site's own host,
+// and GitHub's release downloads sometimes refuse plain image requests (403).
+const ASSETS = "https://razdor.indicozy.dev/hub/indicozy/razdor-community/releases/latest/download/";
 
 let pending: Promise<Catalog | null> | null = null;
 
-/** The catalog, or null when it cannot be fetched or does not parse (3 tries). Fetched once per build. */
+/** The catalog, or null when it cannot be fetched or does not parse (4 tries, GitHub and the mirror in turn). Fetched once per build. */
 export function catalog(): Promise<Catalog | null> {
   if (!pending) {
     pending = (async () => {
-      // 3 tries, 2 s apart; then the fallback text
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // 4 tries, 2 s apart, GitHub and the mirror in turn; then the fallback text
+      for (let attempt = 0; attempt < 4; attempt++) {
         if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000));
         try {
-          const res = await fetch(INDEX_URL, { signal: AbortSignal.timeout(20000) });
+          const url = INDEX_URLS[attempt % INDEX_URLS.length];
+          const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
           if (!res.ok) continue;
           const data = (await res.json()) as Partial<Catalog>;
           if (!data || !Array.isArray(data.entries)) continue;

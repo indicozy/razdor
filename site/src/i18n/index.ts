@@ -25,5 +25,5 @@ export function href(lang: Lang, rel: string): string {
 export function hubLine(lang: Lang, c: CatalogCounts | null): string | null {
   if (!c) return null;
   if (lang === "en") return `The Hub has ${c.maps} maps and ${c.mods} mods from ${c.authors} authors.`;
-  return `В хабе ${c.maps} ${ruPlural(c.maps, ["карта", "карты", "карт"])} и ${c.mods} ${ruPlural(c.mods, ["мод", "мода", "модов"])} от ${c.authors} ${ruPlural(c.authors, ["автор", "автора", "авторов"])}.`;
+  return `В хабе ${c.maps} ${ruPlural(c.maps, ["карта", "карты", "карт"])} и ${c.mods} ${ruPlural(c.mods, ["мод", "мода", "модов"])} от ${c.authors} ${ruPlural(c.authors, ["автора", "авторов", "авторов"])}.`;
 }
