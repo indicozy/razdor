@@ -144,12 +144,39 @@ by the smoke test (milestone 4).
   and `INTV` as "Unknown subrecord" (esmtool), but `addJournalEntry(10)` and `(100)` find their entries
   when DATA holds the index there (checked in the game). The first try (index in DATA bytes 0..4)
   gave "unknown journal index".
-- Not played in v1 (logged as `RAZDOR_NOTE`): counter flags (`^`), artifacts, spells, patrol, show army,
-  lanterns (Q7), move army to hero, new hero class, battle, delay. The hall list (quests and rumours
-  of an ordinary building, spec 3.11) is not built: the building's own local events fire on the step.
-- Deviations: the windows do not pause the world (no UI mode); no frame (the Template has no menu
-  textures, so the windows use a plain backdrop instead, see M6 below); `Герой` stands in for the hero's name; the
-  strength and artifact conditions pass; a unit's `named` test reads the party's names only.
+- Not played (logged as `RAZDOR_NOTE`): counter flags (`^`), `cast_spell`, lanterns (Q7), delay. The hall
+  list (quests and rumours of an ordinary building, spec 3.11) is not built: the building's own local
+  events fire on the step. Patrol, show army, move to hero, battle, artifacts, spells and class change
+  are played since the follow-up below.
+- Deviations: no frame (the Template has no menu textures, so the windows use a plain backdrop instead,
+  see M6 below); `Герой` stands in for the hero's name; the army-strength condition passes (not tracked);
+  a unit's `named` test reads the party's names only.
+
+## Pause and tracked results (M5 follow-up)
+
+- An event window pauses the world (`world.pause('razdor_window')` in `env.show`, `unpause` in
+  `env.close`): the clock, the scans, the armies and the meetings wait while it is open. Test drivers
+  answer their windows on real time (`onFrame` and `core.getRealTime`), because simulation timers stop
+  with the world.
+- Results played and kept in the saved event state (`s.radius`, `s.hostile`, `s.artifacts`, `s.spells`,
+  `s.class_unit`), each logged:
+  - `patrol_army` + `patrol_delta`: the radius becomes `max(0, radius + delta)` (`RAZDOR_PATROL <id> radius=N`).
+    The leader's destinations use it; an army without patrol on (`patrols`) still does not move.
+  - `show_army`: the army is activated if it is off the map, then logged (`RAZDOR_SHOW_ARMY`). This is an
+    approximation: DT only scrolls the view there.
+  - `move_to_hero`: a spawned army's bodies go to the first open tile next to the hero (`RAZDOR_MOVE_TO_HERO`).
+    A ship and an army off the map are not moved. DT picks the cheapest of the 8 cells; this takes the first.
+  - `start_battle_with`: the army is hostile from now on (saved; a reload and a respawn keep it), activated
+    if needed, moved next to the hero, and its fire is held at 0 by a waiting meet event (`RAZDOR_BATTLE`).
+    The battle is not fought: it is played at once, not queued.
+  - `artifacts_add` / `artifacts_remove` (the hero's pack, `RAZDOR_HERO artifact+|- <id>`), `spells_learned`
+    (`RAZDOR_HERO spell+ <id>`, once each), `new_hero_class` (`RAZDOR_HERO class unit=<id>`; only the unit id is
+    kept, the archetype tests still use the start class: open).
+  - The artifacts condition reads the pack; codes 2-5 (the AI armies' worn items) and code 0 fail, since the
+    worn items are not tracked. The hero's start artifacts and spells are not in the plugin's data (empty).
+  - Not tracked yet: the army-strength condition (the unit costs are not written into `map_data.lua`).
+- The M5 synthetic scenario has events 17-26 for these results; `tools/openmw-smoke/m5/EXPECTED.txt` lists the
+  order and the log lines they must leave (`run.sh --expect`).
 
 ## Milestone 4 counts on the RK1 sample (game-derived; not committed)
 

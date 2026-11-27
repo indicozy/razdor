@@ -1,6 +1,9 @@
 # A DT map as an OpenMW world: design spec (2026-11-27)
 
-Status: M6 is done (2026-11-28): `tools/openmw-smoke/play.sh` runs the whole pipeline in one command, the
+Status: M5 follow-up (2026-11-28): an event window pauses the world; patrol, show army, move to hero, battle
+start, artifacts, spells and class change are played and logged (crate README, "Pause and tracked results");
+`run.sh --expect` checks the M5 event order and the tracked log lines. Not yet: the army-strength condition.
+`play.sh --probe` passes probe points through. Earlier: M6 is done (2026-11-28): `tools/openmw-smoke/play.sh` runs the whole pipeline in one command, the
 event windows have a dark backdrop, and the docs are in `docs/flows/testing-and-tools.md`. M1 to M5 are
 built in `crates/openmw-world`. The units exporter is done (2026-11-28): `razdor-units-json` writes the
 install's unit cards, and `razdor-openmw --units` gives the armies real stats and names (§3.8, "units
@@ -753,6 +756,6 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
 - The M5 synthetic run passes with `tools/openmw-smoke/m5` (test-only): the events fire in
   `m5/EXPECTED.txt` order and victory is logged. The RK1 sample starts with its first event's message
   (the knight's «Начало») and fires event 20 after it when the windows are answered.
-- Open: the hall list (§3.11, "Hall") is not built; the windows are not modal (the world runs during a
-  window); no frame or background for the windows (the Template has no menu textures). Q6 (no door
+- Open: the hall list (§3.11, "Hall") is not built; no frame or background for the windows (the Template has
+  no menu textures). The world pauses during a window (M5 follow-up, crate README). Q6 (no door
   window) and Q7 (no lanterns) are applied as written.

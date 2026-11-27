@@ -29,8 +29,12 @@ Everything goes into the folder: `map.json`, `out/` (the plugin, textures, meshe
 
 ```
 tools/openmw-smoke/run.sh <converter out dir> [--name <run name>] [--cell cx,cy] [--seconds N]
-                          [--shot <png>] [--probe x,y]... [--camera x,y,z,pitch,yaw]
+                          [--shot <png>] [--probe x,y]... [--camera x,y,z,pitch,yaw] [--expect <file>]
 ```
+
+- `--expect <file>` (m5/EXPECTED.txt): the log's `RAZDOR_EVENT` ids must equal its `events` line in order,
+  the last `RAZDOR_VICTORY` id its `victory` line, and every `contains <text>` line must be in the log.
+- `play.sh` passes `--probe` on to `run.sh` (up to four); facing is not passed (`run.sh` has no option for it).
 
 - `<converter out dir>` holds `razdor_map.omwaddon` and `textures/`. Game-derived: keep it outside git.
 - Everything a run writes goes to `/mnt/ai_models/razdor-scratch/openmw/smoke-run/<name>/`
@@ -86,4 +90,8 @@ converter plugin (`patch`). It needs no game files.
   order is `m5/EXPECTED.txt`: `RAZDOR_EVENT` lines in that order and `RAZDOR_VICTORY 14`.
 - `m5/scripts/razdor_m5/auto.lua` (`m5/m5_auto.omwscripts`) answers every window (Yes, OK, Quit) for runs
   with nobody at the screen.
-- Run the synthetic scenario with the converter's `--time-scale 600` (one DT hour is 6 s), `--seconds 40`.
+- One command: `m5/run_m5.sh [--name N]` (make the map, convert with `--time-scale 600`, run with the driver
+  and `--expect m5/EXPECTED.txt`). PASS is the picture and the smoke line, the event order (`events` line),
+  the victory (`victory` line) and each `contains` line of EXPECTED.txt, which must appear in the log.
+- Event windows pause the world, so the driver's answers and the smoke script's delays run on real time
+  (`--seconds` is real seconds in every run).
