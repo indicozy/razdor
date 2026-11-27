@@ -13,6 +13,7 @@ pub mod heightmap;
 pub mod input;
 pub mod lua;
 pub mod passable;
+pub mod spells;
 pub mod tes3;
 pub mod textures;
 pub mod units;

@@ -10,9 +10,19 @@ use crate::grid::Grid;
 use crate::heightmap::HeightField;
 use crate::input::Map;
 use crate::placement;
+use crate::spells::{self, CASTER_MAGICKA};
 use crate::tes3::{self, Record};
 use crate::units::{Unit, Units};
 use std::collections::BTreeMap;
+
+/// The unit card and level a body was made from (its CREA id is `rz_u<unit>_l<level>` or
+/// `rz_army_<id>`). The spell and combat data are read from it (spec M8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Body {
+    pub unit: i64,
+    /// The 0-based map level (the CREA level is one more).
+    pub level: i64,
+}
 
 /// The placeholder body mesh, `meshes/razdor/figure.dae` (spec §3.8, `mesh::figure`).
 pub const FIGURE_MODEL: &str = "razdor/figure.dae";
@@ -99,7 +109,8 @@ pub fn real_stats(u: &Unit, raw: i64) -> Stats {
         fatigue: 100,
         combat: cap(blow.max(shot)),
         magic: cap(power),
-        magicka: power,
+        // A body with spells has at least CASTER_MAGICKA (spec M8).
+        magicka: if spells::unit_spells(u, raw).is_empty() { power } else { power.max(CASTER_MAGICKA) },
         attack: [pair(blow), pair(shot), pair(power)],
     }
 }
@@ -123,9 +134,10 @@ pub fn leader_id(army: i64) -> String {
     format!("rz_army_{army}")
 }
 
-/// One CREA record: NPDT (96 B), FLAG, AIDT (12 B). Fight, flee and alarm are 0 in M4: the attitude
-/// of an army is not settled (spec §3.8, open point), so every body is passive.
-pub fn crea(id: &str, name: &str, model: &str, s: &Stats) -> Record {
+/// One CREA record: NPDT (96 B), FLAG, AIDT (12 B), then one NPCS (32 B) per spell (M8, `spells`).
+/// Fight, flee and alarm are 0 in M4: the attitude of an army is not settled (spec §3.8, open
+/// point), so every body is passive.
+pub fn crea(id: &str, name: &str, model: &str, s: &Stats, spell_ids: &[String]) -> Record {
     let mut npdt = Vec::with_capacity(96);
     let mut put = |v: i64| npdt.extend_from_slice(&(v as i32).to_le_bytes());
     put(0); // type: creature
@@ -148,13 +160,17 @@ pub fn crea(id: &str, name: &str, model: &str, s: &Stats) -> Record {
     let mut aidt = vec![0u8; 12];
     aidt[0..2].copy_from_slice(&0i16.to_le_bytes()); // hello
     // bytes 2..5 fight, flee, alarm (0), 5..8 unknown (0), 8..12 services (0)
-    Record::new(b"CREA")
+    let mut rec = Record::new(b"CREA")
         .sub(b"NAME", tes3::zstring(id))
         .sub(b"MODL", tes3::zstring(model))
         .sub(b"FNAM", tes3::zstring(name))
         .sub(b"NPDT", npdt)
         .sub(b"FLAG", FLAG_WALKS.to_le_bytes().to_vec())
-        .sub(b"AIDT", aidt)
+        .sub(b"AIDT", aidt);
+    for spell in spell_ids {
+        rec = rec.sub(b"NPCS", spells::npcs(spell));
+    }
+    rec
 }
 
 /// One army as Lua reads it (spec §3.8, §3.9): its tile, where its bodies start, and its units.
@@ -191,6 +207,8 @@ pub struct ArmyPlan {
     pub records: Vec<Record>,
     /// Ship rafts: the water tile centres (z = 0) where an army has a ship.
     pub rafts: Vec<[i64; 3]>,
+    /// The unit card and level of every CREA id (leaders and unit cards), for the spell and combat data.
+    pub bodies: BTreeMap<String, Body>,
 }
 
 /// Whether the tile `(x, y)` (DT's coordinates) is open on foot and outside every building box.
@@ -259,8 +277,8 @@ pub fn plan_armies(
     let unit_record = |records: &mut BTreeMap<String, Record>, unit: i64, level: i64| -> String {
         let id = unit_id(unit, level);
         records.entry(id.clone()).or_insert_with(|| match units.and_then(|us| us.get(unit)) {
-            Some(u) => crea(&id, &unit_name(u), model, &real_stats(u, level)),
-            None => crea(&id, &format!("Unit {unit}"), model, &stats(body_level(level))),
+            Some(u) => crea(&id, &unit_name(u), model, &real_stats(u, level), &spells::spell_ids(u, level)),
+            None => crea(&id, &format!("Unit {unit}"), model, &stats(body_level(level)), &[]),
         });
         id
     };
@@ -304,10 +322,17 @@ pub fn plan_armies(
                 (name, stats(body_level(a.leader_level)))
             }
         };
-        records.insert(leader.clone(), crea(&leader, &leader_name, model, &leader_stats));
+        // A leader with a unit card casts its unit's spells (spec M8).
+        let leader_spells = match (units, leader_unit) {
+            (Some(_), Some(u)) => spells::spell_ids(u, a.leader_level),
+            _ => Vec::new(),
+        };
+        records.insert(leader.clone(), crea(&leader, &leader_name, model, &leader_stats, &leader_spells));
+        plan.bodies.insert(leader.clone(), Body { unit: a.leader_unit, level: a.leader_level });
         let mut units = vec![(leader, 1, true)];
         for t in &a.troops {
             let id = unit_record(&mut records, t.unit, t.level);
+            plan.bodies.entry(id.clone()).or_insert(Body { unit: t.unit, level: t.level });
             if t.count > 0 {
                 units.push((id, t.count, false));
             }
@@ -425,7 +450,7 @@ mod tests {
     #[test]
     fn a_crea_record_holds_the_placeholder_stats_in_the_landracer_layout() {
         let s = stats(body_level(1)); // CREA level 2
-        let r = crea("rz_u4_l1", "Unit 4", FIGURE_MODEL, &s);
+        let r = crea("rz_u4_l1", "Unit 4", FIGURE_MODEL, &s, &[]);
         let npdt = r.get(b"NPDT").unwrap();
         let field = |i: usize| i32::from_le_bytes(npdt[i * 4..i * 4 + 4].try_into().unwrap());
         assert_eq!(npdt.len(), 96);
@@ -499,10 +524,11 @@ mod tests {
     /// (a mage), with the knight's melee attack `blow`. No game data.
     fn units_text(blow: i64) -> String {
         let unit = |id: i64, name: &str, hp: i64, blow: i64, shot: i64, power: i64, school: Option<&str>| {
+            let direction = if school.is_some() { Some("to_enemy") } else { None };
             serde_json::json!({
                 "id": id, "name": name, "cost": 1, "hit_points": hp,
                 "attack": {"blow": blow, "shot": shot}, "defence": {"blow": 10, "shot": 4},
-                "magic_power": power, "magic": school, "magic_direction": null,
+                "magic_power": power, "magic": school, "magic_direction": direction,
                 "protection": {"life": 20, "death": 20, "elemental": 20}, "initiative": 10,
                 "actions": 1, "regeneration": 0, "vampirism": 0, "ranged": shot > 0, "flying": false,
                 "nature": "normal", "bonus": null, "evasion": null, "min_magic_power": null,
@@ -540,9 +566,11 @@ mod tests {
         let s = real_stats(knight, 2);
         assert_eq!((s.level, s.health, s.attack[0].1), (3, 90, 44));
         assert_eq!(s.attributes[2], 20);
-        // A mage: its magic power is the third pair, its intelligence and its magicka.
+        // A mage: its magic power is the third pair, its intelligence and its magic skill. It casts
+        // (a strike), so its magicka is at least 500 (spec M8).
         let mage = real_stats(units.get(19).unwrap(), 0);
-        assert_eq!((mage.attack[2], mage.attributes[1], mage.magicka, mage.magic), ((10, 20), 20, 20, 20));
+        assert_eq!((mage.attack[2], mage.attributes[1], mage.magicka, mage.magic), ((10, 20), 20, 500, 20));
+        assert_eq!(real_stats(units.get(4).unwrap(), 0).magicka, 0, "no spells, no magicka");
         // Values are capped at 100.
         let big = Units::from_json(&units_text(200)).unwrap();
         let s = real_stats(big.get(13).unwrap(), 0);
@@ -574,5 +602,36 @@ mod tests {
         // Without units the M4 names and formula stay.
         let plain = plan_armies(&map, &grid, &heights, &codes, &passable, &[], FIGURE_MODEL, None);
         assert!(plain.records.iter().any(|r| r.get(b"FNAM").unwrap() == &b"Unit 4\0"[..]));
+    }
+
+    #[test]
+    fn a_caster_crea_lists_its_spells_as_npcs_and_a_melee_unit_does_not() {
+        let codes = vec![5u8; 16];
+        // Army 1 is led by the mage (unit 19, leader level 0); its troops are a militiaman (unit 4).
+        let armies = serde_json::json!([army(1, 2, 2, serde_json::json!({ "leader_unit": 19 }))]);
+        let map = map_with(4, 4, &codes, armies, serde_json::json!([]));
+        let grid = Grid::new(4, 4, 1024).unwrap();
+        let heights = crate::heightmap::HeightField::from_fn(crate::heightmap::bounds(&grid), |_, _| 0);
+        let passable = crate::passable::build(&map, &grid, &codes);
+        let units = synthetic_units();
+        let plan = plan_armies(&map, &grid, &heights, &codes, &passable, &[], FIGURE_MODEL, Some(&units));
+        let find = |id: &str| plan.records.iter().find(|r| r.get(b"NAME").unwrap() == format!("{id}\0").as_bytes()).unwrap();
+        let leader = find("rz_army_1");
+        let npcs: Vec<&[u8]> = leader.subs.iter().filter(|s| &s.name == b"NPCS").map(|s| s.data.as_slice()).collect();
+        assert_eq!(npcs.len(), 1, "the mage's strike");
+        assert_eq!(npcs[0].len(), 32);
+        assert_eq!(&npcs[0][..16], &b"rz_strike_u19_l0"[..]);
+        assert!(npcs[0][16..].iter().all(|&b| b == 0), "zero-padded");
+        // The NPCS come after AIDT, as the CREA layout has them.
+        let names: Vec<&[u8; 4]> = leader.subs.iter().map(|s| &s.name).collect();
+        assert_eq!(names.last(), Some(&b"NPCS"));
+        let militia = find("rz_u4_l0");
+        assert!(militia.subs.iter().all(|s| &s.name != b"NPCS"), "no spells, no NPCS");
+        // Without units, no NPCS at all.
+        let plain = plan_armies(&map, &grid, &heights, &codes, &passable, &[], FIGURE_MODEL, None);
+        assert!(plain.records.iter().all(|r| r.subs.iter().all(|s| &s.name != b"NPCS")));
+        // The bodies map every CREA id to its unit card and level.
+        assert_eq!(plan.bodies.get("rz_army_1"), Some(&Body { unit: 19, level: 0 }));
+        assert_eq!(plan.bodies.get("rz_u4_l0"), Some(&Body { unit: 4, level: 0 }));
     }
 }

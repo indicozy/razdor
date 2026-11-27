@@ -10,8 +10,10 @@ use crate::lua;
 use crate::mesh;
 use crate::passable;
 use crate::placement::{self, MeshFile, Placed, Plan};
+use crate::spells;
 use crate::tes3::{self, Record, Tes3Error};
 use crate::textures;
+use crate::units::WorldSpell;
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -166,8 +168,13 @@ fn runtime(
         guard: opts.guard,
         fragment: &fragment,
     };
+    // The spells (spec M8): the SPEL records, and the combat table with the world spells' menu flags.
+    let spell_records = spells::records(opts.units.as_ref(), &armies.bodies, opts.time_scale);
+    let world: &[WorldSpell] = opts.units.as_ref().map(|us| us.spells()).unwrap_or(&[]);
+    let combat = lua::combat_data(&armies.bodies, opts.units.as_ref(), world);
     let mut scripts = vec![
         (lua::MAP_DATA_PATH.to_string(), lua::map_data(&data).into_bytes()),
+        (lua::COMBAT_PATH.to_string(), combat.into_bytes()),
         (format!("{}.omwscripts", opts.name), lua::omwscripts().into_bytes()),
     ];
     for (path, text) in lua::RUNTIME {
@@ -175,6 +182,7 @@ fn runtime(
     }
     let mut records: Vec<Record> = armies.records.into_iter().collect();
     records.extend(crate::events::journal_records(map));
+    records.extend(spell_records);
     Ok(Extras { records, scripts })
 }
 
