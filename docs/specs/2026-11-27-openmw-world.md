@@ -1,6 +1,7 @@
 # A DT map as an OpenMW world: design spec (2026-11-27)
 
-Status: design only, nothing is built. Owner decisions already made: the converter lives in this
+Status: M1 and M2 are built in `crates/openmw-world`. The owner's answers of 2026-11-27 are
+in the last column of the §7 table and are applied in the sections they name. Owner decisions already made: the converter lives in this
 repo as its own workspace crate, it reads the JSON v1 of `razdor-dtm-json` (not `.DTm`), the target
 is OpenMW 0.51 on the public-domain OpenMW Game Template, and the player needs no Morrowind.
 
@@ -131,7 +132,7 @@ file **[V]** (`lua_api/openmw/types.lua`).
 |---|---|
 | LAND and CELL records, LTEX | the player's start (teleport), gold, party |
 | STAT, ACTI, LIGH, MISC, CREA base records | every army instance (spawn, patrol, activation, respawn) |
-| references of scenery, buildings, doors, bridges | lanterns lit by events |
+| references of scenery, buildings, doors, bridges | |
 | DIAL/INFO journal records of the quests | the event engine, flags, the DT clock |
 | | the passability guard (§3.5), messages, questions, victory and defeat |
 
@@ -218,8 +219,8 @@ What follows from that:
 - It may use the `the_hub` and `land_racer` *files* when their folders are on the data path
   (`--template-assets`), and falls back to its own generated textures and meshes when not.
 - The docs also ask to copy the Template's `resources/mygui` files (skins and a font) over
-  OpenMW's. We do not touch `/usr/share`: if they are needed, M6 makes a copy of the resources
-  folder in scratch and points `resources=` at it (Q9).
+  OpenMW's. Owner (Q9, 2026-11-27): OpenMW and its resources are not modified in any way. M6 only
+  investigates whether Cyrillic renders with the stock resources and reports the result.
 
 ### 2.4 Launching a standalone game
 
@@ -338,7 +339,9 @@ DT has no elevation, so heights are made up from the surface and the massifs. Wa
 3. **Vertices.** Each vertex takes the bilinear blend of the four nearest tile centres. Then two
    passes of a 3×3 box blur over the vertex grid.
 4. **Flat footprints.** Every vertex inside a building footprint is set to the footprint's mean
-   height (at least +48). A bridge tile keeps its water bed; the land tiles next to a bridge are
+   height (at least +48). The flat area is the footprint plus a one-tile apron (M2). Buildings are
+   Morrowind-scale and may extend past their footprint (Q1), so the flat ground grows to fit them;
+   M3 tunes the apron. A bridge tile keeps its water bed; the land tiles next to a bridge are
    raised to the deck height +64 along the shared edge so that a walker steps onto the deck.
 5. **Hills** (class 1–4): a smooth bump over the massif square, peak `160·f`, zero at its edge.
    The slope stays under 30°, so hills are walkable, as in DT.
@@ -374,8 +377,8 @@ The gap is closed in two layers.
 
 The guard is also what turns "the player moved" into DT's "a step ended": a change of tile is
 the trigger of the event scan (§3.11). AI armies are not guarded in v1; they keep to their patrol
-box. Ships are out of v1: water stays closed, and a map that needs a ship cannot be finished
-(open question Q4).
+box. Ships are not modelled (Q4): water stays closed on foot, and a map that needs a ship cannot be
+finished.
 
 ### 3.6 Ground textures and scenery
 
@@ -403,17 +406,19 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
 
 ### 3.7 Buildings, roads, bridges, water
 
-- **Building** → one generated box mesh per distinct `(kind, size_x, size_y)`, inset 128 units
-  from the footprint edge so a walker can go round it, with a height by kind (castle and fort
-  1200, town and palace 900, church 800, village, tavern, market, smithy, shipyard 420, altar
-  and obelisk 300, ruins 200, dungeon entrance 260) and a colour by kind. One STAT reference at
-  the footprint centre.
-- **Door** → one ACTI per building (`rz_b<index>_door`, `FNAM` = the building's name), a slab on
-  the middle of the south face. Activating it is "entering" (§3.11). Obelisks and altars get the
-  activator on the body itself. Interiors are not built (Q6).
-- **Garrison** → guards at the door, spawned by Lua like armies (§3.8), hostile when the
-  building's faction is hostile to the player. The building counts as taken when they are dead
-  or there are none, and the player activates the door.
+- **Building** → Morrowind-scale buildings, not boxes stretched to the DT footprint (Q1). A town
+  is a cluster of houses, a castle a proper castle, a palace, church, tavern and so on a building
+  of its kind. Each is centred on the DT footprint and may extend past it; the flattened ground
+  (§3.3) grows to fit. Meshes are generated per `(kind, size_x, size_y)`, with the kind's height
+  (castle and fort 1200, town and palace 900, church 800, village, tavern, market, smithy,
+  shipyard 420, altar and obelisk 300, ruins 200, dungeon entrance 260) and a colour by kind. One
+  STAT reference per building. Scale and layout are tuned in M3.
+- **Door** → none (Q6: no door window). Stepping into a building's footprint is entering it: it
+  fires the building's events (§3.11). Obelisks and altars keep their own activator on the body.
+  Interiors are not built (Q6).
+- **Garrison** → guards on the building's footprint, spawned by Lua like armies (§3.8), hostile
+  when the building's faction is hostile to the player. The building counts as taken when they
+  are dead or there are none, and the player steps into it.
 - **Roads** are surface code 4: the road texture and +64 base height. No mesh.
 - **Bridge** (kinds 13, 14) → a deck STAT, a slab `(T + 256)` square and 32 thick with its top
   at +64, centred on the tile. The 128-unit overhang makes decks of a diagonal chain overlap at
@@ -428,8 +433,9 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
   Instances are made by Lua (`world.createObject`, then `:teleport('', position)`), never placed
   offline: 13 of the sample's 15 armies start inactive, activation and respawn need the same
   code anyway, and Lua can then track each instance without searching cells.
-- An army is its leader plus one body per squad (at most 7 actors). Bodies stand in a ring of
-  radius 160 around the leader.
+- An army is one OpenMW actor per DT unit card (Q5): a squad of count N is N actors, each its own
+  actor, and the army's actors are shown and move together as a squad. The leader is the first
+  actor. The actors of one army stand in a ring around the leader (radius 160 units) at spawn.
 - **Placeholder stats** (the JSON has unit ids, not stats): per body `level = 1 + unit level`,
   `health = (30 + 20·level)·sqrt(count)`, attack `4 + 3·level` to `8 + 6·level`, combat skill
   `40 + 10·level` capped at 100. `--units <file.json>` may later give real per-unit numbers and
@@ -448,12 +454,12 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
   meet events name a hostile army, so hostility must wait: while an eligible event names an army
   in `meet_army` (events.md §9, the "meeting event waiting" mark), that army's bodies are held
   at fight 0. The mark is recomputed after every scan; when it drops, the fight setting returns.
-- **Ship armies** (`ship` ≠ 0, or an army whose tile is water): not spawned in v1. The converter
-  lists them in `manifest.json` and the log. In Lua such an army counts as inactive and never
-  as defeated or beaten, so an event that waits for its defeat cannot fire (part of Q4). The
-  sample has one (active, hostile, on the shallows).
-- **Blocked tiles**: an army, a garrison body or the hero's start on a tile that is closed on
-  foot (the sample has an inactive army on impassable swamp) or inside a building's box is
+- **Ship armies** (`ship` ≠ 0, or an army whose tile is water): spawned and not skipped (Q4).
+  Ships are not modelled yet, so the army's actors float on the water surface (height 0) and
+  stay on their water tile; they are not moved to land. The army follows the same rules as any
+  other. The sample has one (active, hostile, on the shallows).
+- **Blocked tiles** (not ship armies, Q4): an army, a garrison body or the hero's start on a tile
+  that is closed on foot (the sample has an inactive army on impassable swamp) or inside a building's box is
   spawned on the nearest open tile outside any box, searched in rings; ties go to the lower
   direction number of world.md §1. Its home stays the original tile for events.
 
@@ -479,9 +485,9 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
 - A point is invisible. If it has events, standing on its tile offers them to the scan. A point
   on a footprint tile (the sample has two) cannot be stood on, the box is solid: its events are
   offered when the player enters that building, and its beacon stands on the box's roof.
-- A point with `radius > 0` that is active at start, or is lit by an event, gets a beacon: a
-  LIGH instance (radius `min(radius·T/4, 2048)`) on a small pillar STAT, spawned by Lua, and a
-  one-line message when an event lights it. `--debug-markers` also shows every point as a pillar.
+- No lanterns (Q7): a point with a radius gets no beacon and no LIGH, and `light_lanterns` does
+  nothing. Points are kept for their events; only the lantern beacons are dropped. This reading of
+  Q7 is an assumption until the owner says otherwise. `--debug-markers` still draws points.
 
 ### 3.11 Events in Lua
 
@@ -496,7 +502,7 @@ days are as generous as in DT or more (Q2).
 
 **When the scan runs** (TES3 has no trigger volumes; all triggers are Lua):
 1. the player's tile changes (the guard's poll, §3.5);
-2. the player activates a building's door, or stands on an obelisk's or bridge's tile;
+2. the player steps into a building's footprint (Q6), or stands on an obelisk's or bridge's tile;
 3. an army is met;
 4. every 30 DT minutes;
 5. a message or question window closes.
@@ -525,7 +531,7 @@ title, question and message) and index 100 (flagged finished). Taking the quest 
 `addJournalEntry(10)`; `completes_quest` calls `addJournalEntry(100)`. DT removes a completed
 entry; here it moves to the finished list.
 
-**Hall.** Activating a door runs the scan with that building entered. If nothing fires, a list
+**Hall.** Stepping into a building runs the scan with that building entered (Q6: no door window). If nothing fires, a list
 window offers the building's eligible quests and rumours (title only); picking one opens its
 question or its message, as the original's hall does.
 
@@ -581,8 +587,8 @@ map is not loaded (Q8). The player's death is OpenMW's own death screen.
 - **Keeping in step with the exporter.** A test in the root crate (a dev-dependency on
   `razdor-openmw`) exports a synthetic `Scenario` with `dtm_json::scenario_to_string` and parses
   it with `input`. A layout change that the converter cannot read fails there.
-- **CI.** `cargo test -p razdor-openmw` and `cargo clippy -p razdor-openmw --all-targets -- -D
-  warnings` are added to `.github/workflows/ci.yml`. CI has no OpenMW: tests that call `esmtool`
+- **CI.** The workspace's own test and clippy steps cover the crate; it has no crate-only step
+  (`cargo test --release --workspace`, `cargo clippy --workspace --all-targets`). CI has no OpenMW: tests that call `esmtool`
   or `openmw` skip when the program is missing.
 
 ## 5. Testing
@@ -614,7 +620,8 @@ standalone config of §2.4 in the scratch folder, starts `Xvfb :<free display>` 
 `xwd -root` on that display (OpenMW has no script call for a screenshot **[R]**), waits for the
 exit, then stops Xvfb. Pass: the line's tile is the hero's start tile, the picture is not one
 flat colour, and the log has no `Error` line naming our files. OpenMW's CI runs under Xvfb
-**[R]**; llvmpipe on this machine is **[U]** until M4 runs it.
+**[R]**; llvmpipe on this machine is **[U]** until M4 runs it. If it is too slow, the RTX 4060 is used
+headless (EGL), as Q10 allows.
 
 **Machine rules** for every agent brief: heavy work runs as `CARGO_BUILD_JOBS=12
 $(ai-resources prefix) cargo …` with `CARGO_TARGET_DIR=/mnt/ai_models/razdor-scratch/openmw/target`;
@@ -625,14 +632,15 @@ done-file and are waited for with a bounded poll; scratch is removed when the ta
 
 ## 6. Milestones
 
-Each is one agent task on branch `openmw-2026-11-27`, with its tests and clippy clean.
+Each is one agent task on branch `openmw-2026-11-27`, with its tests and clippy clean. Each
+checkpoint is committed on its own (Q11: no pinned Template commit).
 
 | | work | accepted when |
 |---|---|---|
 | **M1** | The crate, `input`, `grid`, `tes3` writer and reader for TES3, LTEX, CELL, LAND. Flat land at +96, one texture per surface (generated TGAs), no margin. Also: clone the Template to scratch (it uses git LFS), dump `template.omwgame` and list its record types in the crate's README. | The unit tests of `input`, `grid`, `textures`, `tes3` pass. For a synthetic 16×16 map: `esmtool dump -C` exits 0 and shows 4 LAND, 4 CELL and 18 LTEX. A second synthetic map with one raised vertex and one odd texel proves the row and column orientation in `esmtool`'s output. |
 | **M2** | `heightmap`, `passable`, the margin ring, normals, WNAM. | The `heightmap` and `passable` tests pass. The sample export converts in under 5 s and `esmtool dump -C` reads its 81 LAND records. Two runs are byte-identical. |
-| **M3** | `mesh`, `placement`: scenery, building boxes, doors, bridge decks, STAT, ACTI, LIGH records. | Reference counts in `esmtool dump -C` equal the map's: one per tree, dead tree, thicket, stone massif, mountain massif, one body and one door per building, one deck per bridge. Every reference lies inside its cell. A unit test walks a diagonal chain of three bridge tiles and finds overlapping decks and a land edge at deck height at both ends. Every `.dae` parses as XML. |
-| **M4** | `actors`, `lua` data, `global.lua` with the clock, the start teleport, the party, army spawn, patrol, defeat and respawn; `player.lua` with the guard. | Unit tests for the stat formula and `map_data.lua`. Under the smoke harness: the player stands on the start tile; the log reports the active armies spawned, none of the inactive ones, and each ship army as skipped; no body stands inside a building box or on a closed tile; a scripted teleport onto a water tile is undone by the guard within a second. |
+| **M3** | `mesh`, `placement`: scenery, building boxes, doors, bridge decks, STAT, ACTI, LIGH records. | Reference counts in `esmtool dump -C` equal the map's: one per tree, dead tree, thicket, stone massif, mountain massif, one building per building (no door, Q6), one deck per bridge. Every reference lies inside its cell. A unit test walks a diagonal chain of three bridge tiles and finds overlapping decks and a land edge at deck height at both ends. Every `.dae` parses as XML. |
+| **M4** | `actors`, `lua` data, `global.lua` with the clock, the start teleport, the party, army spawn, patrol, defeat and respawn; `player.lua` with the guard. | Unit tests for the stat formula and `map_data.lua`. Under the smoke harness: the player stands on the start tile; the log reports the active armies spawned, none of the inactive ones, and each ship army spawned on the water surface; no body stands inside a building box or on a closed tile; a scripted teleport onto a water tile is undone by the guard within a second. |
 | **M5** | The event engine for the v1 column of §3.11, windows, journal records, the hall list, victory and defeat. | A Lua test file run by the smoke harness drives a synthetic map through: a global event with a message, a yes/no question each way, a flag set and tested, a relative event after a delay, a chain, an army activated and then defeated, a quest taken and completed (the journal has both stages), the victory event. The log has one `RAZDOR_EVENT <id>` line per firing, in the expected order. |
 | **M6** | `tools/openmw-smoke/run.sh`, the standalone config, `docs/flows/testing-and-tools.md` section, the settled **[U]** items written back into this spec. | The smoke test passes on the sample map from a clean scratch folder with one command, and leaves a screenshot showing land, water and at least one building. No process is left running. |
 
@@ -641,16 +649,16 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
 
 ## 7. Open questions for the owner
 
-| | question | recommended default |
-|---|---|---|
-| Q1 | Tile size: 512, 1024 or 2048 units? | 1024 (§3.1); the option stays. |
-| Q2 | The clock: real time at a fixed scale, or DT's rule that time passes only while the hero moves? | Real time, scale 120. The step rule would freeze the armies whenever the player stands still. |
-| Q3 | Unit stats: a formula from level and count, or a table exported from the install's ini data? | The formula in v1. A `razdor-units-json` exporter later (its output is game data, never committed). |
-| Q4 | Blocked ground: let the player swim and climb, or hold him to DT's passability? | Hold him (the guard), because maps gate their quests with rivers and thickets. Ships come after v1. |
-| Q5 | Battles: OpenMW's real-time fight with one body per squad, or something closer to DT's tactical battle? | Real time with bodies in v1; it is a placeholder for the look, not for the rules. |
-| Q6 | Building interiors: a window on the door, or real interior cells? | A window in v1 (events, quests, rumours). Hiring, markets and healing are not ported yet. |
-| Q7 | Fog of war: none, or a Lua overlay on the map? | None in v1; lanterns become beacons. |
-| Q8 | Campaign: load the next map after a victory? | No in v1: one map per run, the end window names the next map. |
-| Q9 | Russian text: do the fonts in use draw Cyrillic, and are the Template's `mygui` files needed? | Unknown until M6. If needed, the harness overlays them on a scratch copy of the resources folder and adds a free Cyrillic font there; nothing under `/usr/share` changes and the converter ships no font. |
-| Q10 | May the smoke test use the RTX 4060 (headless EGL) when llvmpipe is too slow? | Start with llvmpipe on CPUs 8–19; ask before using a GPU. |
-| Q11 | The Template is cloned from GitLab at test time. Pin a commit? | Yes: the harness pins one commit id and keeps the clone in scratch. |
+| | question | recommended default | owner's answer (2026-11-27) |
+|---|---|---|---|
+| Q1 | Tile size: 512, 1024 or 2048 units? | 1024 (§3.1); the option stays. Tile 1024 stays, and the grid and map size stay as DT's. Towns, castles and other buildings are Morrowind-scale (a town is a cluster of houses, a castle a proper castle), centred on the DT footprint; they may extend past it and the flat ground grows to fit (§3.3, §3.7, M3). |
+| Q2 | The clock: real time at a fixed scale, or DT's rule that time passes only while the hero moves? | Real time, scale 120. The step rule would freeze the armies whenever the player stands still. Real time, game time scale 120 (§3.11). |
+| Q3 | Unit stats: a formula from level and count, or a table exported from the install's ini data? | The formula in v1. A `razdor-units-json` exporter later (its output is game data, never committed). The formula for the prototype; a units exporter later. |
+| Q4 | Blocked ground: let the player swim and climb, or hold him to DT's passability? | Hold him (the guard), because maps gate their quests with rivers and thickets. Ships come after v1. Ships come later. Armies with a ship float on the water surface for now, not skipped (§3.5, §3.8, M4). |
+| Q5 | Battles: OpenMW's real-time fight with one body per squad, or something closer to DT's tactical battle? | Real time with bodies in v1; it is a placeholder for the look, not for the rules. Real-time fights. Every DT unit card in an army is its own OpenMW actor (a troop of count N is N actors), shown and moving together as a squad (§3.8). |
+| Q6 | Building interiors: a window on the door, or real interior cells? | A window in v1 (events, quests, rumours). Hiring, markets and healing are not ported yet. No door window. Stepping into a building's footprint fires its events (§3.7, §3.11). |
+| Q7 | Fog of war: none, or a Lua overlay on the map? | None in v1; lanterns become beacons. No fog of war and no lanterns. Lantern beacons are not converted (§3.10); points stay for their events (an assumed reading). |
+| Q8 | Campaign: load the next map after a victory? | No in v1: one map per run, the end window names the next map. One map per run. |
+| Q9 | Russian text: do the fonts in use draw Cyrillic, and are the Template's `mygui` files needed? | Unknown until M6. If needed, the harness overlays them on a scratch copy of the resources folder and adds a free Cyrillic font there; nothing under `/usr/share` changes and the converter ships no font. OpenMW and its resources are not modified. Only investigate whether Cyrillic renders (§2.3, M6). |
+| Q10 | May the smoke test use the RTX 4060 (headless EGL) when llvmpipe is too slow? | Start with llvmpipe on CPUs 8–19; ask before using a GPU. The smoke test may use the RTX 4060 (headless EGL) when llvmpipe is too slow (§5). |
+| Q11 | The Template is cloned from GitLab at test time. Pin a commit? | Yes: the harness pins one commit id and keeps the clone in scratch. No pinned Template commit. Commit at every checkpoint and milestone (§6). |
