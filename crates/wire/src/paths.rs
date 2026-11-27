@@ -25,6 +25,8 @@ pub const MARKS: &str = "/v1/marks";
 pub const SETTINGS: &str = "/v1/settings";
 pub const HUB: &str = "/v1/hub";
 pub const BENCH: &str = "/v1/bench";
+/// The site's counter: aggregate play stats of the last 7 days, no key.
+pub const PUBLIC_STATS: &str = "/v1/public/stats";
 
 /// Health of the service (no body, no key).
 pub const HEALTH: &str = "/healthz";

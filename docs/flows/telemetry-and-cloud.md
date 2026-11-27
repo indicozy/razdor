@@ -37,6 +37,7 @@ strips `/api`, so the routes are `/v1/...` on the service) and listens on 127.0.
 | `GET /v1/settings`, `PUT /v1/settings` | synced settings, merged per key | account key |
 | `GET /v1/hub`, `PUT /v1/hub` | installed Hub items | account key |
 | `GET /v1/bench`, `POST /v1/bench` | performance test reports (last 50) | account key |
+| `GET /v1/public/stats` | the site's counter: top maps of the last 7 days, the hardest maps (≥ 20 starts), top games; aggregates only, computed at most once an hour, CORS open | none |
 | `GET /healthz` | `ok` | none |
 | `GET /admin`, `POST /admin/login`, `POST /admin/unban` | the dashboard (password, cookie session): overview cards with week-over-week changes, health badges, charts with release marks (`?days=7\|30\|90`), sortable maps and FPS tables, crash groups with a "new" tag and crashes per 100 players; works on phones and in dark mode | password |
 | `GET /admin/api/summary.json` | the dashboard's numbers as JSON (`?days=` as above) | admin token or session |
@@ -79,6 +80,7 @@ framework before it is read.
 - Crash reports: 1 year (zstd file and row). Crash saves: 90 days (the file goes, the report stays).
 - Battles and verdicts: forever. Link codes: removed when expired.
 - The job runs daily (`server/src/retention.rs`); the clock is injected in the tests.
+- Public stats (`server/src/public_stats.rs`) are aggregates only, with no install id and no player counts. A map or a game shows only when at least 5 distinct installs played it in the window.
 - The server keeps no IP address. The address is used in memory for the rate limits and hashed (with a
   salt in `ip_salt` in the data folder) for the IP bans.
 

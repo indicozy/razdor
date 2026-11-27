@@ -18,6 +18,7 @@ pub mod files;
 pub mod geo;
 pub mod http;
 pub mod mirror;
+pub mod public_stats;
 pub mod retention;
 pub mod schema;
 pub mod state;
@@ -100,6 +101,7 @@ pub fn router(state: AppState) -> Router {
             paths::BENCH,
             get(cloud::get_bench).post(cloud::post_bench).layer(DefaultBodyLimit::max(limits::MAX_BENCH_BODY)),
         )
+        .route(paths::PUBLIC_STATS, get(public_stats::get_public_stats))
         .route("/admin", get(admin::page_get))
         .route("/admin/crash", get(crash_view::page_get))
         .route("/admin/login", post(admin::login).layer(small))

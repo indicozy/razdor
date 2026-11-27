@@ -37,6 +37,8 @@ pub struct Inner {
     pub body_gate: Arc<Semaphore>,
     /// One argon2 check at a time: a password check costs tens of megabytes and a CPU's worth of time.
     pub hash_gate: Arc<Semaphore>,
+    /// The public play stats (`public_stats`), kept for an hour.
+    pub public_stats: tokio::sync::Mutex<Option<crate::public_stats::PublicStats>>,
 }
 
 #[derive(Clone)]
@@ -87,6 +89,7 @@ impl AppState {
             geo,
             body_gate,
             hash_gate: Arc::new(Semaphore::new(1)),
+            public_stats: tokio::sync::Mutex::new(None),
         })))
     }
 
