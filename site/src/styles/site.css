@@ -10,7 +10,11 @@ body {
   color: var(--cream);
   font: 17px/1.55 var(--font-body);
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
+/* The page body grows, so the footer sits at the bottom of a short page */
+.page { flex: 1 0 auto; width: 100%; }
 h1, h2, h3 { font-family: var(--font-head); font-weight: 400; color: var(--gold); margin: 0 0 12px; text-wrap: balance; letter-spacing: .01em; }
 h1 { font-size: 56px; line-height: 1.05; max-width: 820px; }
 h2 { font-size: 36px; line-height: 1.15; }
@@ -108,9 +112,10 @@ img { max-width: 100%; }
 
 /* ---- Content column ---- */
 .content { position: relative; z-index: 2; max-width: var(--col-max); margin: 0 auto; padding: 0 16px; }
-.sec { padding: 72px 0 40px; }
-.sec.first { padding-top: 56px; min-height: 760px; }
-.sec-wide { padding: 56px 0 40px; }
+.sec { padding-top: 72px; padding-bottom: 40px; }
+.sec.first { padding-top: 56px; }
+.landing .sec.first { min-height: 760px; }
+.sec-wide { padding-top: 56px; padding-bottom: 40px; }
 .shota { width: 100%; max-width: 760px; aspect-ratio: 760 / 340; margin: 26px 0 0; }
 .shots { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin: 28px 0 10px; }
 .shots .pic { aspect-ratio: 16 / 9; }
@@ -215,7 +220,7 @@ img { max-width: 100%; }
 .road[data-at="5"] { --n: 5; }
 
 @media (min-width: 1300px) {
-  .content { padding-right: 200px; }
+  .landing .content { padding-right: 200px; }
   .shota { max-width: 760px; }
 }
 @media (max-width: 1299px) {
@@ -244,8 +249,9 @@ img { max-width: 100%; }
   .menu { display: block; }
   .lang-link { min-height: 44px; }
   .content { padding: 0 16px; }
-  .sec { padding: 48px 0 24px; }
-  .sec.first { padding-top: 40px; min-height: 0; }
+  .sec { padding-top: 48px; padding-bottom: 24px; }
+  .sec.first { padding-top: 40px; }
+  .landing .sec.first { min-height: 0; }
   .row { flex-direction: column; align-items: stretch; }
   .row .btn { width: 100%; }
   .shots, .hub-list, .steps, .two-col { grid-template-columns: 1fr; }
@@ -270,16 +276,17 @@ img { max-width: 100%; }
 
 /* ---- Other pages: download, features, community, changes, faq ---- */
 code { font-family: var(--font-body, "PT Sans", sans-serif); font-size: 15px; background: rgba(0, 0, 0, .28); padding: 1px 5px; overflow-wrap: anywhere; word-break: break-word; color: var(--cream); }
-.dl-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin: 24px 0 40px; }
-.dl-card { display: flex; flex-direction: column; gap: 10px; }
-.dl-card p { margin: 0; }
-.dl-card .row { margin-top: auto; }
-.dl-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 16px; }
-.dl-facts dt { color: var(--muted); }
-.dl-facts dd { margin: 0; min-width: 0; }
-.sha { font-size: 14px; }
-.detect { margin-bottom: 8px; }
-.detect .row { margin-top: 12px; }
+.dl-rows { display: flex; flex-direction: column; margin: 28px 0 40px; }
+.dl-row { display: flex; flex-direction: column; gap: 6px; padding: 26px 0; border-top: 2px dashed rgba(240, 201, 106, .8); }
+.dl-row:last-child { border-bottom: 2px dashed rgba(240, 201, 106, .8); }
+.dl-row p { margin: 0; }
+.dl-name { margin: 0 0 4px; font-size: 24px; }
+.dl-row .row { margin: 12px 0 0; }
+.dl-file { font-size: 16px; overflow-wrap: anywhere; }
+.dl-sha { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; color: var(--muted); background: none; padding: 0; overflow-wrap: anywhere; word-break: normal; }
+/* The visitor's system: first and larger */
+.dl-row.is-main { order: -1; padding: 32px 0 30px; }
+.dl-row.is-main .dl-name { font-size: 32px; }
 .dl-section { margin: 40px 0 0; }
 .dl-section ul, .dl-section ol { padding-left: 22px; }
 .dl-steps li, .feature-lines li, .release-lines li, .news-list li { margin-bottom: 6px; }
@@ -316,7 +323,7 @@ code { font-family: var(--font-body, "PT Sans", sans-serif); font-size: 15px; ba
 .sha-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; background: rgba(0, 0, 0, .28); padding: 10px; margin: 8px 0 0; }
 .sha-pre code { background: none; padding: 0; font-size: 13px; }
 @media (max-width: 1019px) {
-  .dl-cards, .cat-list { grid-template-columns: 1fr; }
+  .cat-list { grid-template-columns: 1fr; }
   .feature.two-col { grid-template-columns: 1fr; gap: 20px; }
 }
 @media (max-width: 899px) {
@@ -327,7 +334,5 @@ code { font-family: var(--font-body, "PT Sans", sans-serif); font-size: 15px; ba
 @media (max-width: 759px) {
   .cat-item { grid-template-columns: 1fr; }
   .cat-pic, .cat-nopic { width: 100%; height: auto; aspect-ratio: 16 / 10; }
-  .dl-facts { grid-template-columns: 1fr; gap: 2px; }
-  .dl-facts dt { margin-top: 8px; }
   .faq-item summary { font-size: 20px; }
 }

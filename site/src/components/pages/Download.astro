@@ -1,8 +1,8 @@
 ---
 import { latest, shaOf } from "../../lib/changelog";
 import { strings, href, type Lang } from "../../i18n";
-import { fill } from "../../lib/i18n";
 import { RELEASES, MIRROR } from "../../lib/format";
+import { assetSizes, formatSize } from "../../lib/release";
 
 interface Props {
   lang: Lang;
@@ -13,58 +13,41 @@ const D = S.download;
 const rel = latest();
 const v = rel?.version ?? "";
 const wiki = (p: string) => href(lang, "wiki/" + p);
+// The file sizes of the latest release (null when the GitHub API could not be read: no size then).
+const sizes = await assetSizes();
 
-// One card per system. The file name is the release asset's exact name.
-const cards = [
+// One row per system. The file name is the release asset's exact name.
+const rows = [
   { key: "windows", file: "Razdor.exe", info: D.windows },
   { key: "windows7", file: `razdor-${v}-windows7.zip`, info: D.windows7 },
   { key: "linux", file: "razdor", info: D.linux },
   { key: "macos", file: "razdor-macos", info: D.macos },
   { key: "android", file: "razdor.apk", info: D.android },
   { key: "ios", file: "razdor.ipa", info: D.ios },
-].map((c) => ({
-  ...c,
-  sha: rel ? shaOf(rel, c.file) : null,
-  source: RELEASES + c.file,
-  mirror: MIRROR + c.file,
-}));
-const platformNames: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux", android: "Android", ios: "iOS" };
-// The detected-platform card: the script fills it from the visitor's browser (JS only).
-const detect = Object.fromEntries(
-  ["windows", "macos", "linux", "android", "ios"].map((k) => {
-    const c = cards.find((x) => x.key === k)!;
-    return [k, { name: platformNames[k], url: c.source }];
-  }),
-);
-const labelTemplate = S.download.detectLink;
+].map((c) => {
+  const bytes = sizes?.get(c.file);
+  return {
+    ...c,
+    sha: rel ? shaOf(rel, c.file) : null,
+    size: bytes ? formatSize(bytes, lang) : "",
+    source: RELEASES + c.file,
+    mirror: MIRROR + c.file,
+  };
+});
 ---
 <section class="sec first content" aria-labelledby="dl-title">
   <h1 id="dl-title">{D.h1}</h1>
   <p class="lead">{D.intro}</p>
 
-  <section class="panel detect" aria-labelledby="detect-title">
-    <div class="titlebar" id="detect-title">{D.detectTitle}</div>
-    <p class="small" id="detect-text">{rel ? `Razdor ${v}` : ""}</p>
-    <div class="row">
-      <a class="btn" id="detect-link" href="#cards">{S.common.download}</a>
-    </div>
-  </section>
-
-  <div class="dl-cards" id="cards">
-    {cards.map((c) => (
-      <article class="panel dl-card" id={c.key}>
-        <div class="titlebar">{c.info.title}</div>
-        <p>{c.info.note}</p>
-        <dl class="dl-facts">
-          <dt>{D.cardFile}</dt>
-          <dd><code>{c.file}</code></dd>
-          <dt>{D.cardVersion}</dt>
-          <dd>{v}</dd>
-          <dt>{D.cardSha}</dt>
-          <dd><code class="sha">{c.sha ?? D.shaMissing}</code></dd>
-        </dl>
+  <div class="dl-rows" id="cards">
+    {rows.map((c) => (
+      <article class="dl-row" id={c.key} data-key={c.key}>
+        <h3 class="dl-name">{c.info.title}</h3>
+        <p class="small muted">{c.info.note}</p>
+        <p class="dl-file">{[c.file, c.file.includes(v) ? "" : v, c.size].filter(Boolean).join(", ")}</p>
+        <code class="dl-sha">{c.sha ? `SHA-256 ${c.sha}` : D.shaMissing}</code>
         <div class="row">
-          <a class="btn sm" href={c.source}>{D.cardSource}</a>
+          <a class="btn" href={c.source}>{S.common.download}</a>
           <a class="link" href={c.mirror}>{D.cardMirror}</a>
         </div>
       </article>
@@ -79,7 +62,7 @@ const labelTemplate = S.download.detectLink;
     <h3>{D.noGameTitle}</h3>
     <p>{D.noGameText}</p>
     <p class="small">{D.iosGame}</p>
-    <p><a class="link" href={wiki("start/install-razdor/")}>{D.installWiki} →</a></p>
+    <p><a class="link" href={wiki("start/install-razdor/")}>{D.installWiki}</a></p>
   </section>
 
   <section class="dl-section" aria-labelledby="logs-title">
@@ -100,12 +83,12 @@ const labelTemplate = S.download.detectLink;
   <section class="dl-section" aria-labelledby="older-title">
     <h2 id="older-title">{D.olderTitle}</h2>
     <p>{D.olderText}</p>
-    <a class="link" href="https://github.com/indicozy/razdor/releases">{D.olderLink} →</a>
+    <a class="link" href="https://github.com/indicozy/razdor/releases">{D.olderLink}</a>
   </section>
 </section>
 
-<script define:vars={{ detect, labelTemplate }}>
-  // Fills the detected-platform card from the visitor's browser. Without JS it keeps the list below.
+<script>
+  // Moves the visitor's system to the top and makes its row larger. Without JS the list stays in its order.
   const ua = navigator.userAgent;
   let key = null;
   if (/iPhone|iPad|iPod/.test(ua)) key = "ios";
@@ -113,14 +96,6 @@ const labelTemplate = S.download.detectLink;
   else if (/Macintosh/.test(ua)) key = "macos";
   else if (/Windows/.test(ua)) key = "windows";
   else if (/Linux|X11/.test(ua)) key = "linux";
-  if (key) {
-    const d = detect[key];
-    const link = document.getElementById("detect-link");
-    const text = document.getElementById("detect-text");
-    if (link && d) {
-      link.textContent = labelTemplate.replace("{platform}", d.name);
-      link.href = d.url;
-    }
-    if (text && d) text.textContent = d.name + ": " + d.url.split("/").pop();
-  }
+  const row = key ? document.querySelector(`.dl-row[data-key="${key}"]`) : null;
+  if (row) row.classList.add("is-main");
 </script>

@@ -3,6 +3,7 @@ import { latest } from "../lib/changelog";
 import { catalog, counts } from "../lib/catalog";
 import { strings, href, hubLine, type Lang } from "../i18n";
 import Battle from "./Battle.astro";
+import { assetSizes, formatSize } from "../lib/release";
 
 interface Props {
   lang: Lang;
@@ -21,6 +22,10 @@ const dateText = rel
 // Russian lines only: the release notes are in Russian, so the English page links to them instead.
 const news = lang === "ru" && rel ? [...rel.fixed, ...rel.changed, ...rel.added].slice(0, 3) : [];
 // The Hub counts come from the community catalog at build time; without it the generic line stays.
+// The size line shows the Windows file: the default system of the page.
+const sizes = await assetSizes();
+const exeSize = sizes?.get("Razdor.exe");
+const sizeText = exeSize ? formatSize(exeSize, lang) : "";
 const cat = await catalog();
 const hub = hubLine(lang, cat ? counts(cat) : null) ?? L.hubFallback;
 const art = (name: string) => `background-image:url('${B}art/${name}')`;
@@ -31,16 +36,15 @@ const routeD = [
   "M60 30 C170 80, 240 -4, 370 40 S 590 90, 700 46 S 800 20, 880 56",
 ];
 ---
-<main id="main">
+<div class="landing">
   <section class="sec first content" data-stop="0" aria-labelledby="hero-title">
     <h1 id="hero-title">{L.heroTitle}</h1>
     <p class="lead">{L.lead}</p>
     <div class="row">
       <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
-      <a class="btn ghost" href="#trailer" id="trailer">{L.trailer}</a>
+      <a class="btn ghost" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a>
     </div>
-    <!-- TODO(release data): the size (38 МБ) comes from the release data; it is fixed here for now. -->
-    <p class="small muted">{version} · {L.meta}</p>
+    <p class="small muted">{[version, sizeText, L.meta].filter(Boolean).join(", ")}</p>
     <p class="small muted">{L.autoGame}</p>
     <div class="pic fog crt shota" role="img" aria-label={L.heroAlt} style={art("a-big.webp")}></div>
   </section>
@@ -58,7 +62,7 @@ const routeD = [
       <div class="pic crt fog" role="img" aria-label={L.battleAlt} style={art("b-battle.webp")}></div>
       <div class="pic crt fog" role="img" aria-label={L.battleAlt2} style={art("b-battle-alt.webp")}></div>
     </div>
-    <div class="linkrow"><a class="link" href={href(lang, "features/")}>{L.campaignLink} →</a></div>
+    <div class="linkrow"><a class="link" href={href(lang, "features/")}>{L.campaignLink}</a></div>
   </section>
 
   <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[1]} /></svg></div>
@@ -70,8 +74,8 @@ const routeD = [
     </div>
     <p>{L.devicesText}</p>
     <div class="row" style="align-items:flex-end">
-      <div class="pic crt fog" role="img" aria-label={L.pcAlt} style="width:min(480px, 100%); aspect-ratio:16/10"></div>
-      <div class="pic crt fog" role="img" aria-label={L.phoneAlt} style="width:150px; aspect-ratio:1/2"></div>
+      <div class="pic crt fog" role="img" aria-label={L.pcAlt} style={`width:min(480px, 100%); aspect-ratio:16/10; ${art("shot-game.webp")}`}></div>
+      <div class="pic crt fog" role="img" aria-label={L.phoneAlt} style={`width:150px; aspect-ratio:1/2; ${art("shot-devices.webp")}`}></div>
     </div>
   </section>
 
@@ -98,7 +102,7 @@ const routeD = [
       <article class="panel"><div class="titlebar">Новогодний мод</div><p class="small">{L.hubKindMod}, {L.hubAuthor}: …</p></article>
     </div>
     <!-- TODO(hub cards): the hub cards come from the razdor-community catalog; these are placeholders. -->
-    <div class="linkrow"><a class="link" href={href(lang, "community/")}>{L.hubAll} →</a></div>
+    <div class="linkrow"><a class="link" href={href(lang, "community/")}>{L.hubAll}</a></div>
   </section>
 
   <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[3]} /></svg></div>
@@ -117,7 +121,7 @@ const routeD = [
       <article class="panel"><div class="titlebar">3</div><span class="step-digit">3</span><p>{L.step3}</p></article>
     </div>
     <div class="row"><a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a></div>
-    <div class="linkrow"><a class="link" href={href(lang, "download/") + "#install"}>{S.common.detailedInstall} →</a></div>
+    <div class="linkrow"><a class="link" href={href(lang, "download/") + "#install"}>{S.common.detailedInstall}</a></div>
   </section>
 
   <div class="sec-wide content two-col">
@@ -134,21 +138,20 @@ const routeD = [
           {news.map((line) => <li>{line}</li>)}
         </ul>
       )}
-      <a class="link" href={href(lang, "changes/")}>{L.allChanges} →</a>
+      <a class="link" href={href(lang, "changes/")}>{L.allChanges}</a>
     </section>
   </div>
 
   <section class="sec-wide content" id="trailer" aria-labelledby="thorny-title">
     <div class="two-col" style="align-items:center">
-      <div class="pic" role="img" aria-label={L.thornyAlt} style={`width:min(460px,100%); aspect-ratio:460/215; ${art("thorny-capsule.webp")}`}></div>
+      <div class="pic" role="img" aria-label={L.thornyAlt} style={`width:min(462px,100%); aspect-ratio:462/174; ${art("thorny-capsule.webp")}`}></div>
       <div>
         <h3 id="thorny-title">{L.thornyTitle}</h3>
         <p>{L.thornyText}</p>
-        <!-- TODO(links): the Steam page link is not set yet. -->
-        <a class="btn ghost sm" href="#">{L.steam}</a>
+        <a class="btn ghost sm" href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{L.steam}</a>
       </div>
     </div>
   </section>
-</main>
+</div>
 
 

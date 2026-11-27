@@ -57,7 +57,9 @@ const version = latest()?.version ?? "";
   <body>
     <a class="skip" href="#main">{S.common.skip}</a>
     <Header lang={lang} path={path} />
-    <slot />
+    <main id="main" class="page">
+      <slot />
+    </main>
     <Footer lang={lang} />
     <script define:vars={{ labels, releases }}>
       // Download buttons: the label and link follow the visitor's platform (JS only; without it the

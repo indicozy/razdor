@@ -9,8 +9,8 @@ const S = strings(lang);
 const L = S.landing;
 const B = import.meta.env.BASE_URL;
 const art = (name: string) => `background-image:url('${B}art/${name}')`;
-// Portraits of the battle: 2 rows of 6 for each side; the enemy side has one empty row.
-const enemyCards = ["00", "03", "04", "05", "06", "07"];
+// Portraits of the battle: 2 rows of 6 for each side. The enemy side fills all 12 cards.
+const enemyCards = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
 const yourCards = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
 // The script reads these strings; set:html keeps the JSON quotes intact.
 const config = JSON.stringify({ base: B, s: S.battle });
@@ -30,7 +30,6 @@ const config = JSON.stringify({ base: B, s: S.battle });
           <span class="veil" aria-hidden="true"></span>
         </div>
       ))}
-      {enemyCards.map(() => <div class="card empty"></div>)}
     </div>
   </div>
   <div class="parch" role="status" aria-live="polite" data-battle-status>{L.battleStatus}</div>
@@ -60,9 +59,10 @@ const config = JSON.stringify({ base: B, s: S.battle });
   .battle .card.foe.in .hp { display: block; }
   .battle .veil { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(8, 4, 2, .74); color: #e9d9b5; font: 700 12px/1 var(--font-body); text-transform: uppercase; letter-spacing: .04em; }
   .battle .veil.on { display: flex; }
-  .battle .hit { position: absolute; left: 50%; top: 50%; width: 128px; height: 64px; margin: -32px 0 0 -64px; pointer-events: none; mix-blend-mode: screen;
-    background-repeat: no-repeat; background-position: 0 0; background-size: 3200px 64px; animation: battle-hit 600ms steps(25) forwards; }
-  @keyframes battle-hit { from { background-position: 0 0; } to { background-position: -3200px 0; } }
+  /* The hit: 50 frames of 110 px in one row (art/kuski.webp, 5500 px wide) */
+  .battle .hit { position: absolute; left: 50%; top: 50%; width: 110px; height: 110px; margin: -55px 0 0 -55px; pointer-events: none; mix-blend-mode: screen;
+    background-repeat: no-repeat; background-position: 0 0; background-size: 5500px 110px; animation: battle-hit 600ms steps(50) forwards; }
+  @keyframes battle-hit { from { background-position: 0 0; } to { background-position: -5500px 0; } }
   @media (prefers-reduced-motion: reduce) {
     .battle .hit { display: none; }
     .battle .hp i { transition: none; }

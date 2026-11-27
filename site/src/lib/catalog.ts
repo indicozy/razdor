@@ -41,19 +41,24 @@ const ASSETS = "https://github.com/indicozy/razdor-community/releases/latest/dow
 
 let pending: Promise<Catalog | null> | null = null;
 
-/** The catalog, or null when it cannot be fetched or does not parse. Fetched once per build. */
+/** The catalog, or null when it cannot be fetched or does not parse (3 tries). Fetched once per build. */
 export function catalog(): Promise<Catalog | null> {
   if (!pending) {
     pending = (async () => {
-      try {
-        const res = await fetch(INDEX_URL, { signal: AbortSignal.timeout(20000) });
-        if (!res.ok) return null;
-        const data = (await res.json()) as Partial<Catalog>;
-        if (!data || !Array.isArray(data.entries)) return null;
-        return { format: data.format ?? 0, entries: data.entries };
-      } catch {
-        return null;
+      // 3 tries, 2 s apart; then the fallback text
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 2000));
+        try {
+          const res = await fetch(INDEX_URL, { signal: AbortSignal.timeout(20000) });
+          if (!res.ok) continue;
+          const data = (await res.json()) as Partial<Catalog>;
+          if (!data || !Array.isArray(data.entries)) continue;
+          return { format: data.format ?? 0, entries: data.entries };
+        } catch {
+          // network or parse failure: try again
+        }
       }
+      return null;
     })();
   }
   return pending;

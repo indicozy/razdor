@@ -42,7 +42,7 @@ const mods: CatalogEntry[] = cat ? cat.entries.filter((e) => e.kind === "mod") :
         <ul class="cat-list">{mods.map((e) => <CatalogItem lang={lang} entry={e} />)}</ul>
       </>
     )}
-    {!cat && <p><a class="link" href="https://discord.gg/wmMksmWFDM">{C.discordBtn} →</a></p>}
+    {!cat && <p><a class="link" href="https://discord.gg/wmMksmWFDM">{C.discordBtn}</a></p>}
   </section>
 
   <section class="dl-section" aria-labelledby="add-title">
@@ -53,6 +53,6 @@ const mods: CatalogEntry[] = cat ? cat.entries.filter((e) => e.kind === "mod") :
   <section class="dl-section" aria-labelledby="help-title">
     <h2 id="help-title">{C.helpTitle}</h2>
     <p>{C.helpText}</p>
-    <p><a class="link" href="https://github.com/indicozy/razdor/blob/main/CONTRIBUTING.md">{C.helpLink} →</a></p>
+    <p><a class="link" href="https://github.com/indicozy/razdor/blob/main/CONTRIBUTING.md">{C.helpLink}</a></p>
   </section>
 </section>

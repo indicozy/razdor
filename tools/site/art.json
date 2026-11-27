@@ -196,6 +196,12 @@
    "file": "ads/thorny-times/capsule.png"
   },
   {
+   "name": "kuski.webp",
+   "sprite": "Battle/--KUSKI.ugs",
+   "frames": "all",
+   "layout": "row"
+  },
+  {
    "name": "hero-knight-walk-s.webp",
    "sprite": "Graphics/Units/Hero-Knight.ugs",
    "frames": "40-47",

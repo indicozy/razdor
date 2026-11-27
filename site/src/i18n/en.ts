@@ -41,7 +41,7 @@ export const en: typeof ru = {
     heroTitle: "Discord Times. On any device.",
     lead: "The 2004 role-playing game with the same rules, on Windows, Linux, macOS, Android and iOS. With community maps and mods.",
     trailer: "▶ Trailer",
-    meta: "38 MB · other systems: Linux · macOS · Android · iOS",
+    meta: "other systems: Linux, macOS, Android, iOS",
     autoGame: "Razdor downloads the game for you",
     heroAlt: "World map in Razdor",
     campaignTitle: "The whole campaign of the original",

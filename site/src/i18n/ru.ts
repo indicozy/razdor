@@ -39,7 +39,7 @@ export const ru = {
     heroTitle: "Времена раздора. На любом устройстве.",
     lead: "Ролевая игра 2004 года с теми же правилами, на Windows, Linux, macOS, Android и iOS. С картами и модами сообщества.",
     trailer: "▶ Трейлер",
-    meta: "38 МБ · другие системы: Linux · macOS · Android · iOS",
+    meta: "другие системы: Linux, macOS, Android, iOS",
     autoGame: "Игру Razdor скачает сам",
     heroAlt: "Карта мира Razdor",
     campaignTitle: "Вся кампания оригинала",

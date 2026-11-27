@@ -22,8 +22,8 @@ const desc = text(e.description);
   )}
   <div class="cat-body">
     <div class="titlebar">{title}</div>
-    <p class="small"><span class="cat-kind">{kind}</span> · {C.author}: {e.author}</p>
+    <p class="small"><span class="cat-kind">{kind}</span>, {C.author}: {e.author}</p>
     {desc && <p class="cat-desc">{desc}</p>}
-    {e.source_url && <a class="link small" href={e.source_url}>{C.source} →</a>}
+    {e.source_url && <a class="link small" href={e.source_url}>{C.source}</a>}
   </div>
 </li>
