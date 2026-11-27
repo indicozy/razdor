@@ -7,8 +7,16 @@ format version 1 (`src/dt/dtm_json.rs` in this repo). The design is in
 Milestone 2 writes the land of the whole map and of its one-cell margin ring (9×9 cells for the
 50×50 sample, 81 LAND records). The heights come from the surfaces, the hills, the mountains, the
 flattened building footprints, the bridge decks and a seeded noise (spec §3.3, §3.4). The normals
-and WNAM follow from the heights. Each surface has one generated ground texture. There are no
-objects, no references and no scripts yet (M3 and M4).
+and WNAM follow from the heights. Each surface has one generated ground texture.
+
+Milestone 3 adds the scenery and the buildings: one STAT per mesh, one CELL reference per tree,
+dead tree, thicket, stone, mountain rock, building and bridge deck, and the Collada meshes they use
+(`meshes/razdor/*.dae`, generated, no texture files). Trees and dead trees are jittered in their
+tile with one of two shapes each; a stone sits on its massif's centre; a mountain gets one rock at
+its foot. A building is one reference whose mesh holds all its parts: a castle is a curtain wall
+with a gate, four corner towers and a keep; a town or village is 5 to 9 or 3 to 5 houses on a fixed
+slot grid, so they never overlap. A bridge is one deck slab at the deck height. There are still no
+scripts, no ACTI or LIGH records and no doors (M4 and later, spec §3.10, Q6, Q7).
 
 ## Usage
 
@@ -16,7 +24,8 @@ objects, no references and no scripts yet (M3 and M4).
 razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>]
 ```
 
-- Writes `<out dir>/<name>.omwaddon` (default name `razdor_map`) and `<out dir>/textures/razdor/surf_*.tga`.
+- Writes `<out dir>/<name>.omwaddon` (default name `razdor_map`), `<out dir>/textures/razdor/surf_*.tga`
+  and `<out dir>/meshes/razdor/*.dae`.
 - `--debug-heightmap` also writes the global height grid as a binary PGM (`P5`, one pixel per land
   vertex, north at the top, the lowest height black). The file is always PGM; convert it to PNG
   outside the crate. It holds numbers made from the game's map, so keep it out of git.
@@ -76,6 +85,21 @@ by the smoke test (milestone 4).
   a one-tile apron), the bridge decks, hills, mountains, noise, quantising to 8 and clamping the
   neighbour steps to ±1016. Also the normals and the PGM picture.
 - `textures`: the 18 LTEX entries, the VTEX block order, the TGA writer.
+- `mesh`: the placeholder shapes as Collada 1.4.1 text (one colour per part, flat normals, Z-up, units
+  as OpenMW's). The shapes are tree (two kinds), dead tree, thicket, stone and rock by massif size,
+  bridge deck, castle, palace, fort, town and village houses, tavern, church, smithy, market,
+  shipyard, altar, obelisk, dungeon entrance and ruins. Each builder counts its parts (`pieces`),
+  and tests check them. Integer shapes only: an 8-gon table, no `sin`/`cos`.
+- `placement`: the references per cell, in the order of the kept objects and then the buildings;
+  the yaw table (16 entries from π); the town slot grid and its hash-chosen houses; the ground
+  height at a point (bilinear over M2's land).
 - `tes3`: the TES3 writer and reader for the records of M1 and M2, and the Windows-1251 strings.
-- `convert`: the map to plugin and textures; one CELL and one LAND for every cell of the map and of
-  the margin ring.
+- `convert`: the map to plugin, textures and meshes; one CELL and one LAND for every cell of the map
+  and of the margin ring, the CELLs of the references too, and one STAT per mesh (after LTEX).
+
+## Milestone 3 numbers (RK1 sample, game-derived, not committed)
+
+`esmtool dump -C` on the converted sample: 21 STAT, 81 LAND, 81 CELL, 18 LTEX and 1126 references
+(645 trees, 52 dead trees, 368 thickets, 21 stones, 28 mountain rocks, 4 villages, 2 castles, 1
+tavern, 1 church, 2 ruins, 2 bridge decks). The kept-object count of the sample is 1201, the same
+as its raw count. Two runs give byte-identical plugins and meshes.

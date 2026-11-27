@@ -427,6 +427,18 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
 - **Water** is OpenMW's own water plane; nothing is placed. Parked ships and ship armies: not in
   v1.
 
+**M3 notes (as built, 2026-11-27).** Where the build differs from the text above:
+- Stones: diameter 150 to 275 units by massif size (not `0.8·f·T`). Mountain rocks: one per massif,
+  diameter 400 to 900, at the middle of the massif's south edge inside its own square (the foot, not
+  the peak). Still one reference per massif.
+- Trees: two shapes per kind, about 800 units, the crown from 300 up. No `XSCL`, so no 0.8–1.25 scale
+  (`XSCL` is clamped anyway, §2.2). Thicket: a squat blob about 470 units, not three trees on a block.
+- Buildings: one reference per DT building, and the mesh holds all its parts (walls, towers, gate,
+  keep, houses). Town and village houses sit on a slot grid inside the footprint plus half a tile,
+  so they never overlap and the flat ground of §3.3 covers them unchanged.
+- Bridges: one deck reference per bridge building (the sample's bridges are 1×1).
+- No ACTI for altars and obelisks yet (M4 or M5 adds their activators), no LIGH, no doors.
+
 ### 3.8 Armies
 
 - One CREA record per army (`rz_army_<id>`, `FNAM` = the army's name) and one per garrison.
