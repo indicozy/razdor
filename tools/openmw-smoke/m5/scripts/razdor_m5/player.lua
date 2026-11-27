@@ -78,6 +78,14 @@ return {
             if d.kind == 'question' then
                 answer = QUESTION_ANSWERS[next_question] or 'no'
                 next_question = next_question + 1
+            elseif d.kind == 'hall' then
+                -- The hall: take the first quest or rumour listed (its answer starts with take:).
+                for _, b in ipairs(d.buttons or {}) do
+                    if string.sub(b.answer, 1, 5) == 'take:' then
+                        answer = b.answer
+                        break
+                    end
+                end
             elseif d.kind == 'end' then
                 answer = 'quit'
             end

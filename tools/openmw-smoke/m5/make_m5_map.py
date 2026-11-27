@@ -116,6 +116,10 @@ def scenario():
               cond={"happened_yes_check": 1, "happened_yes": [24, 0]}, res={"start_battle_with": 2}),
         event(26, 1, "Потеря", message="Артефакт потерян.",
               cond={"happened_yes_check": 1, "happened_yes": [25, 0]}, res={"artifacts_remove": [7, 0, 0, 0]}),
+        # 27 and 28: the hall of building 1 (an ordinary castle). 27 is a quest, listed first and taken from
+        # the hall window (the driver picks it); 28 is a rumour, listed too, and is not taken here.
+        event(27, 3, "Тайна замка", message="Ключ спрятан в башне."),
+        event(28, 4, "Слух о казне", message="Говорят, в замке есть казна."),
     ]
     return events
 
@@ -143,7 +147,7 @@ def build():
         "objects": [],
         "buildings": [{
             "index": 1, "x": 6, "y": 8, "size_x": 2, "size_y": 2, "kind": 3, "kind_name": "castle",
-            "faction": 1, "owner_army": 255, "events": [12], "start_for": [1],
+            "faction": 1, "owner_army": 255, "events": [12, 27, 28], "start_for": [1],
         }],
         "armies": [
             {"id": 1, "x": 10, "y": 5, "name": "Отряд", "leader_name": "Лидер", "leader_unit": 13,

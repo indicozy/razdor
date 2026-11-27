@@ -92,19 +92,37 @@ local function open_window(d)
         if d.victory and d.next_map and d.next_map ~= '' then
             table.insert(lines, text_line('Следующая карта: ' .. d.next_map, 19, 30))
         end
-    else
+    elseif d.kind ~= 'hall' then
         table.insert(lines, text_line(d.text or '', 19, 170))
     end
+    -- A button is an answer string (OK, Yes, ...) or { answer, label } (the hall's entries).
     local row = {}
     for _, b in ipairs(d.buttons or {}) do
-        local label = ({ ok = 'OK', yes = 'Да', no = 'Нет', quit = 'Выход' })[b] or b
-        table.insert(row, button(label, b))
+        if type(b) == 'table' then
+            table.insert(row, button(b.label, b.answer))
+        else
+            local label = ({ ok = 'OK', yes = 'Да', no = 'Нет', quit = 'Выход' })[b] or b
+            table.insert(row, button(label, b))
+        end
     end
-    table.insert(lines, {
-        type = ui.TYPE.Flex,
-        props = { horizontal = true, arrange = ui.ALIGNMENT.Center, size = util.vector2(WIDTH, 34) },
-        content = ui.content(row),
-    })
+    local height = WINDOW_H
+    if d.kind == 'hall' then
+        -- The hall stacks its entries, one per row, and the window grows with them.
+        for _, btn in ipairs(row) do
+            table.insert(lines, {
+                type = ui.TYPE.Flex,
+                props = { horizontal = true, arrange = ui.ALIGNMENT.Center, size = util.vector2(WIDTH, 34) },
+                content = ui.content({ btn }),
+            })
+        end
+        height = math.max(WINDOW_H, 70 + 36 * #row + 2 * PAD)
+    else
+        table.insert(lines, {
+            type = ui.TYPE.Flex,
+            props = { horizontal = true, arrange = ui.ALIGNMENT.Center, size = util.vector2(WIDTH, 34) },
+            content = ui.content(row),
+        })
+    end
     local backdrop = {
         type = ui.TYPE.Image,
         props = {
@@ -117,7 +135,7 @@ local function open_window(d)
         type = ui.TYPE.Flex,
         props = {
             position = util.vector2(PAD, PAD),
-            size = util.vector2(WIDTH, WINDOW_H - 2 * PAD),
+            size = util.vector2(WIDTH, height - 2 * PAD),
             arrange = ui.ALIGNMENT.Center,
         },
         content = ui.content(lines),
@@ -128,7 +146,7 @@ local function open_window(d)
         props = {
             relativePosition = util.vector2(0.5, 0.5),
             anchor = util.vector2(0.5, 0.5),
-            size = util.vector2(WIDTH + 2 * PAD, WINDOW_H),
+            size = util.vector2(WIDTH + 2 * PAD, height),
         },
         content = ui.content({ backdrop, body }),
     })

@@ -144,9 +144,8 @@ by the smoke test (milestone 4).
   and `INTV` as "Unknown subrecord" (esmtool), but `addJournalEntry(10)` and `(100)` find their entries
   when DATA holds the index there (checked in the game). The first try (index in DATA bytes 0..4)
   gave "unknown journal index".
-- Not played (logged as `RAZDOR_NOTE`): counter flags (`^`), `cast_spell`, lanterns (Q7), delay. The hall
-  list (quests and rumours of an ordinary building, spec 3.11) is not built: the building's own local
-  events fire on the step. Patrol, show army, move to hero, battle, artifacts, spells and class change
+- Not played (logged as `RAZDOR_NOTE`): counter flags (`^`), `cast_spell`, lanterns (Q7), delay. Patrol,
+  show army, move to hero, battle, artifacts, spells and class change
   are played since the follow-up below.
 - Deviations: no frame (the Template has no menu textures, so the windows use a plain backdrop instead,
   see M6 below); `Герой` stands in for the hero's name; the army-strength condition passes (not tracked);

@@ -7,7 +7,7 @@ start, artifacts, spells and class change are played and logged (crate README, "
 event windows have a dark backdrop, and the docs are in `docs/flows/testing-and-tools.md`. M1 to M5 are
 built in `crates/openmw-world`. The units exporter is done (2026-11-28): `razdor-units-json` writes the
 install's unit cards, and `razdor-openmw --units` gives the armies real stats and names (§3.8, "units
-notes"). Next, not started: real art, rounder massifs, the hall list, ships that move, interiors. The owner's answers of 2026-11-27 are
+notes"). Next, not started: real art, rounder massifs, ships that move, interiors. The hall list is built (M7 notes). The owner's answers of 2026-11-27 are
 in the last column of the §7 table and are applied in the sections they name. Owner decisions already made: the converter lives in this
 repo as its own workspace crate, it reads the JSON v1 of `razdor-dtm-json` (not `.DTm`), the target
 is OpenMW 0.51 on the public-domain OpenMW Game Template, and the player needs no Morrowind.
@@ -756,6 +756,16 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
 - The M5 synthetic run passes with `tools/openmw-smoke/m5` (test-only): the events fire in
   `m5/EXPECTED.txt` order and victory is logged. The RK1 sample starts with its first event's message
   (the knight's «Начало») and fires event 20 after it when the windows are answered.
-- Open: the hall list (§3.11, "Hall") is not built; no frame or background for the windows (the Template has
-  no menu textures). The world pauses during a window (M5 follow-up, crate README). Q6 (no door
+- Open: no frame or background for the windows (the Template has no menu textures). The world pauses during a window (M5 follow-up, crate README). Q6 (no door
   window) and Q7 (no lanterns) are applied as written.
+
+## M7 notes (hall list, as built)
+
+- The hall (§3.11, "Hall", events.md §10): stepping into an ordinary building (not a village or shipyard)
+  runs the scan as before; when nothing fires, the building's quests (kind 3) and rumours (kind 4) that
+  pass the full check are listed in a hall window (`RAZDOR_HALL <zone> quests=n rumours=m`). A quest is a
+  «Взять» button and a rumour a «Слух» button; each opens its question or message at once, with no new check
+  (`RAZDOR_HALL take <id>`, then the usual `RAZDOR_EVENT`). Close ends the offer, once per entry. Rumours are
+  buttons, not inert text, so that their gold and flags apply as events.md §10 says (the M7 brief asked for
+  text; this follows the spec).
+- Rust: no change; the zone's events list already holds every event of the building.

@@ -11,7 +11,7 @@ local map = require('scripts.razdor.map_data')
 local M = {}
 
 -- Event kinds (the exporter's `kind`): 1 global, 2 local, 3 quest, 4 rumour.
-local KIND_GLOBAL, KIND_LOCAL, KIND_QUEST = 1, 2, 3
+local KIND_GLOBAL, KIND_LOCAL, KIND_QUEST, KIND_RUMOUR = 1, 2, 3, 4
 -- Building kinds whose every event counts (village 2, shipyard 9, events.md §2).
 local BUILDING_ALL_EVENTS = { [2] = true, [9] = true }
 local JOURNAL_TAKEN, JOURNAL_FINISHED = 10, 100
@@ -441,6 +441,39 @@ local function show(env, s, ev, stage, text, buttons)
     return 'shown'
 end
 
+-- The hall of an ordinary building (events.md §10, spec 3.11 "Hall"): its quests and rumours that pass
+-- the full check, in list order. Quests are listed first; a rumour is listed too and opens its text
+-- when picked, as a quest does (a rumour has no journal entry).
+local function hall_list(env, s, z)
+    local quests, rumours = {}, {}
+    for _, id in ipairs(z.events or {}) do
+        local ev = by_id[id]
+        if ev and (ev.kind == KIND_QUEST or ev.kind == KIND_RUMOUR) and eligible(env, s, ev)
+            and conditions_ok(env, s, ev, false) then
+            table.insert(ev.kind == KIND_QUEST and quests or rumours, ev)
+        end
+    end
+    return quests, rumours
+end
+
+-- Opens the hall window: one button per quest ("Взять") and per rumour ("Слух"), then Close. The
+-- answer 'take:<id>' takes the event at once, with no new check (events.md §10).
+local function show_hall(env, s, z, quests, rumours)
+    s.wid = s.wid + 1
+    s.pending = { id = nil, stage = 'hall', wid = s.wid }
+    local buttons = {}
+    for _, ev in ipairs(quests) do
+        table.insert(buttons, { answer = 'take:' .. ev.id, label = 'Взять: ' .. env.title(ev) })
+    end
+    for _, ev in ipairs(rumours) do
+        table.insert(buttons, { answer = 'take:' .. ev.id, label = 'Слух: ' .. env.title(ev) })
+    end
+    table.insert(buttons, { answer = 'close', label = 'Закрыть' })
+    print(string.format('RAZDOR_HALL %d quests=%d rumours=%d', z.index, #quests, #rumours))
+    env.show({ wid = s.wid, kind = 'hall', title = 'Главный зал', text = '', buttons = buttons })
+    return 'shown'
+end
+
 -- The dialog-time results (events.md §7.1): the units added and removed. The artifacts and the
 -- spells are not played (v1).
 local function index_of(list, id)
@@ -622,6 +655,18 @@ function M.scan(env, s)
             break
         end
     end
+    -- Idle, in an ordinary building the player just entered: its hall is offered (once, since the offer ends here).
+    if s.offer and s.inside then
+        local z = zone_by_index[s.inside]
+        if z and not BUILDING_ALL_EVENTS[z.kind] then
+            local quests, rumours = hall_list(env, s, z)
+            if #quests + #rumours > 0 then
+                s.offer = false
+                s.met = nil
+                return show_hall(env, s, z, quests, rumours)
+            end
+        end
+    end
     s.met = nil
     s.offer = false
     M.refresh_holds(env, s)
@@ -636,6 +681,20 @@ function M.answer(env, s, wid, answer)
     end
     s.pending = nil
     env.close(wid)
+    if p.stage == 'hall' then
+        -- A quest or rumour picked in the hall is taken at once; Close (or anything else) ends the hall.
+        local id = tonumber(string.match(answer, '^take:(%d+)$') or '')
+        local picked = id and by_id[id]
+        if picked then
+            print('RAZDOR_HALL take ' .. id)
+            if take(env, s, picked) ~= 'shown' then
+                M.scan(env, s)
+            end
+        else
+            M.scan(env, s)
+        end
+        return
+    end
     local ev = by_id[p.id]
     print('RAZDOR_ANSWER ' .. p.id .. ' ' .. answer)
     if p.stage == 'end' then
