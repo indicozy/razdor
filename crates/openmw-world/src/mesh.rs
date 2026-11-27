@@ -561,6 +561,46 @@ pub fn shed(w: i64, d: i64) -> Builder {
     b
 }
 
+/// A placeholder figure for an army body (M4, spec §3.8): legs, trunk, arms and head as boxes,
+/// about 176 units tall, standing on z = 0. It has no skeleton, so it does not animate.
+pub fn figure() -> Builder {
+    let mut b = Builder::new();
+    b.boxed(Paint::Dark, [-26, -12, 0], [-6, 12, 80]);
+    b.boxed(Paint::Dark, [6, -12, 0], [26, 12, 80]);
+    b.boxed(Paint::Cloth, [-30, -14, 80], [30, 14, 150]);
+    b.boxed(Paint::Cloth, [-40, -10, 84], [-30, 10, 146]);
+    b.boxed(Paint::Cloth, [30, -10, 84], [40, 10, 146]);
+    b.boxed(Paint::Plaster, [-12, -12, 150], [12, 12, 176]);
+    b
+}
+
+/// The raft under a ship army (spec §3.8): a slab one tile wide whose top is the water surface
+/// (z = 0). The army's bodies stand on it.
+pub fn raft() -> Builder {
+    let mut b = Builder::new();
+    b.boxed(Paint::Wood, [-480, -480, -48], [480, 480, 0]);
+    b
+}
+
+impl Builder {
+    /// The bounding box of the mesh in its own units: `[x0, x1, y0, y1]` (z is not needed).
+    pub fn extent(&self) -> [i64; 4] {
+        let mut e = [i64::MAX, i64::MIN, i64::MAX, i64::MIN];
+        for (_, tri) in &self.tris {
+            for p in tri {
+                e[0] = e[0].min(p[0]);
+                e[1] = e[1].max(p[0]);
+                e[2] = e[2].min(p[1]);
+                e[3] = e[3].max(p[1]);
+            }
+        }
+        if e[0] > e[1] {
+            return [0, 0, 0, 0];
+        }
+        e
+    }
+}
+
 // ---- tests ------------------------------------------------------------------------------------
 
 #[cfg(test)]

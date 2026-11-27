@@ -29,6 +29,71 @@ pub struct Map {
     pub objects: Vec<MapObject>,
     #[serde(default)]
     pub buildings: Vec<Building>,
+    #[serde(default)]
+    pub heroes: Vec<Hero>,
+    #[serde(default)]
+    pub armies: Vec<Army>,
+}
+
+/// A hero of the preset list: `archetype` is `knight`, `archmage` or `ranger`; `(x, y)` his start tile.
+#[derive(Debug, Deserialize)]
+pub struct Hero {
+    #[serde(default)]
+    pub archetype: String,
+    pub x: i64,
+    pub y: i64,
+}
+
+/// One unit card of an army: its DT unit id, level and troop count (M4 spawns `count` bodies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct Troop {
+    pub unit: i64,
+    #[serde(default)]
+    pub level: i64,
+    #[serde(default = "one")]
+    pub count: i64,
+}
+
+fn one() -> i64 {
+    1
+}
+
+/// An army (spec §3.8). `(x, y)` is its home tile, `leader_unit` and `leader_level` its leader's
+/// card; `relations` is the army's own list (its relation to each faction; index 0 is not
+/// known to be the player, spec §3.8 open point); `ship` is non-zero for a ship army.
+#[derive(Debug, Deserialize)]
+pub struct Army {
+    pub id: i64,
+    pub x: i64,
+    pub y: i64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub leader_name: String,
+    #[serde(default)]
+    pub leader_unit: i64,
+    #[serde(default)]
+    pub leader_level: i64,
+    #[serde(default)]
+    pub troops: Vec<Troop>,
+    #[serde(default)]
+    pub faction: i64,
+    #[serde(default)]
+    pub relations: Vec<i64>,
+    #[serde(default)]
+    pub inactive: i64,
+    #[serde(default)]
+    pub patrols: i64,
+    #[serde(default)]
+    pub patrol_radius: i64,
+    #[serde(default)]
+    pub behaviour: i64,
+    #[serde(default)]
+    pub home_building: i64,
+    #[serde(default)]
+    pub respawn_days: i64,
+    #[serde(default)]
+    pub ship: i64,
 }
 
 /// One scenery object: `class` 1-4 hills, 5-8 massifs (mountains, stones), 9-12 plants.

@@ -24,6 +24,8 @@ const PURPOSE_TOWN: u64 = 41;
 pub struct MeshFile {
     pub name: String,
     pub dae: String,
+    /// The mesh's bounding box in its own units: `[x0, x1, y0, y1]`.
+    pub extent: [i64; 4],
 }
 
 /// One reference: the index of its mesh in [`Plan::meshes`], its position and its yaw (radians).
@@ -40,6 +42,9 @@ pub struct Placed {
 pub struct Plan {
     pub meshes: Vec<MeshFile>,
     pub cells: BTreeMap<(i64, i64), Vec<Placed>>,
+    /// The footprint of every building in world units, `[x0, x1, y0, y1]`: its mesh's extent at
+    /// its position (M4: no army body is spawned inside one, spec §3.8). Bridges are not boxes.
+    pub boxes: Vec<[i64; 4]>,
 }
 
 /// The mesh files, made once per name.
@@ -54,9 +59,10 @@ impl Catalog {
         if let Some(&i) = self.index.get(name) {
             return i;
         }
-        let dae = make().dae(name);
+        let b = make();
+        let (dae, extent) = (b.dae(name), b.extent());
         let i = self.files.len();
-        self.files.push(MeshFile { name: name.to_string(), dae });
+        self.files.push(MeshFile { name: name.to_string(), dae, extent });
         self.index.insert(name.to_string(), i);
         i
     }
@@ -159,6 +165,7 @@ pub fn plan(map: &Map, grid: &Grid, heights: &HeightField) -> Plan {
     let seed = map.info.generator_seed;
     let mut cat = Catalog::default();
     let mut cells: BTreeMap<(i64, i64), Vec<Placed>> = BTreeMap::new();
+    let mut boxes = Vec::new();
     let mut add = |mesh: usize, pos: [i64; 3], yaw: f64| {
         cells.entry(cell_of(pos[0], pos[1])).or_default().push(Placed { mesh, pos, yaw });
     };
@@ -227,10 +234,12 @@ pub fn plan(map: &Map, grid: &Grid, heights: &HeightField) -> Plan {
             _ => (format!("{kind}_{w}x{d}"), Vec::new()),
         };
         let m = cat.get(&name, || building_mesh(b.kind, w, d, &slots));
+        let e = cat.files[m].extent;
+        boxes.push([cx + e[0], cx + e[1], cy + e[2], cy + e[3]]);
         add(m, [cx, cy, ground(heights, cx, cy)], 0.0);
     }
 
-    Plan { meshes: cat.files, cells }
+    Plan { meshes: cat.files, cells, boxes }
 }
 
 #[cfg(test)]

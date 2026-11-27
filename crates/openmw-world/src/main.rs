@@ -9,7 +9,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>]";
+const USAGE: &str = "usage: razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>] [--archetype knight|archmage|ranger] [--time-scale N] [--no-guard] [--template-assets]";
 
 #[derive(Debug)]
 enum CliError {
@@ -32,6 +32,10 @@ struct Args {
     tile_units: i64,
     template: Option<PathBuf>,
     debug_heightmap: Option<PathBuf>,
+    time_scale: i64,
+    guard: bool,
+    archetype: Option<String>,
+    template_assets: bool,
 }
 
 fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
@@ -41,6 +45,10 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
     let mut tile_units = 1024i64;
     let mut template = None;
     let mut debug_heightmap = None;
+    let mut time_scale = 120i64;
+    let mut guard = true;
+    let mut archetype = None;
+    let mut template_assets = false;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |flag: &str| -> Result<String, CliError> {
@@ -56,6 +64,13 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
             }
             "--template" => template = Some(PathBuf::from(value("--template")?)),
             "--debug-heightmap" => debug_heightmap = Some(PathBuf::from(value("--debug-heightmap")?)),
+            "--archetype" => archetype = Some(value("--archetype")?),
+            "--time-scale" => {
+                let v = value("--time-scale")?;
+                time_scale = v.parse().map_err(|_| CliError::Usage(format!("--time-scale {v} is not a number")))?;
+            }
+            "--no-guard" => guard = false,
+            "--template-assets" => template_assets = true,
             flag if flag.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option {flag}\n{USAGE}")));
             }
@@ -75,7 +90,10 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
     if ![512, 1024, 2048].contains(&tile_units) {
         return Err(CliError::Usage(format!("--tile-units must be 512, 1024 or 2048, not {tile_units}")));
     }
-    Ok(Some(Args { input, out, name, tile_units, template, debug_heightmap }))
+    if time_scale < 1 {
+        return Err(CliError::Usage(format!("--time-scale must be at least 1, not {time_scale}")));
+    }
+    Ok(Some(Args { input, out, name, tile_units, template, debug_heightmap, time_scale, guard, archetype, template_assets }))
 }
 
 /// The master's name and size: the file name of `--template` and its size, or `template.omwgame`
@@ -100,7 +118,15 @@ fn run(args: &Args) -> Result<(), CliError> {
     let text = std::fs::read_to_string(&args.input)
         .map_err(|e| CliError::Usage(format!("cannot read {}: {e}", args.input.display())))?;
     let map = Map::from_json(&text).map_err(|e| CliError::Usage(e.to_string()))?;
-    let options = Options { name: args.name.clone(), tile_units: args.tile_units, master: master_of(&args.template)? };
+    let options = Options {
+        name: args.name.clone(),
+        tile_units: args.tile_units,
+        master: master_of(&args.template)?,
+        time_scale: args.time_scale,
+        guard: args.guard,
+        archetype: args.archetype.clone(),
+        template_assets: args.template_assets,
+    };
     let out = convert::convert(&map, &options).map_err(|e| CliError::Usage(e.to_string()))?;
 
     let tex_dir = args.out.join("textures").join("razdor");
@@ -114,6 +140,13 @@ fn run(args: &Args) -> Result<(), CliError> {
     std::fs::create_dir_all(&mesh_dir).map_err(|e| io_error(&mesh_dir, &e))?;
     for (rel, bytes) in &out.meshes {
         write(&args.out.join(rel), bytes)?;
+    }
+    for (rel, bytes) in &out.scripts {
+        let path = args.out.join(rel);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| io_error(dir, &e))?;
+        }
+        write(&path, bytes)?;
     }
     if let Some(path) = &args.debug_heightmap {
         write(path, &out.heights.pgm())?;

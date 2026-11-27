@@ -3,12 +3,14 @@
 //! building meshes and their references. See
 //! `README.md` and `docs/specs/2026-11-27-openmw-world.md`.
 
+pub mod actors;
 pub mod convert;
 pub mod mesh;
 pub mod placement;
 pub mod grid;
 pub mod heightmap;
 pub mod input;
+pub mod lua;
 pub mod passable;
 pub mod tes3;
 pub mod textures;
