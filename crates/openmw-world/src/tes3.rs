@@ -208,17 +208,29 @@ pub fn cell(gx: i32, gy: i32) -> Record {
 /// A LAND record of cell `(cx, cy)`: `heights` are 65x65 vertices in units, row-major (row 0 =
 /// south, index `row * 65 + col`); `texels` are the 256 VTEX values, already in file order.
 pub fn land(cx: i32, cy: i32, heights: &[i32], texels: &[u16; 256]) -> Result<Record, Tes3Error> {
+    let flat = vec![[0i8, 0, 127]; LAND_VERTS * LAND_VERTS];
+    land_with_normals(cx, cy, heights, &flat, texels)
+}
+
+/// [`land`] with the vertex normals given (`normals[row * 65 + col]` as x, y, z; OpenMW's VNML).
+pub fn land_with_normals(
+    cx: i32,
+    cy: i32,
+    heights: &[i32],
+    normals: &[[i8; 3]],
+    texels: &[u16; 256],
+) -> Result<Record, Tes3Error> {
     let n = LAND_VERTS * LAND_VERTS;
     if heights.len() != n {
         return Err(Tes3Error::BadLength { name: "LAND heights", expected: n, got: heights.len() });
     }
+    if normals.len() != n {
+        return Err(Tes3Error::BadLength { name: "LAND normals", expected: n, got: normals.len() });
+    }
     let mut intv = Vec::with_capacity(8);
     intv.extend_from_slice(&cx.to_le_bytes());
     intv.extend_from_slice(&cy.to_le_bytes());
-    let mut vnml = Vec::with_capacity(n * 3);
-    for _ in 0..n {
-        vnml.extend_from_slice(&[0, 0, 127]);
-    }
+    let vnml: Vec<u8> = normals.iter().flat_map(|v| v.iter().map(|&c| c as u8)).collect();
     let mut vtex = Vec::with_capacity(512);
     for v in texels {
         vtex.extend_from_slice(&v.to_le_bytes());

@@ -9,7 +9,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>]";
+const USAGE: &str = "usage: razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>]";
 
 #[derive(Debug)]
 enum CliError {
@@ -31,6 +31,7 @@ struct Args {
     name: String,
     tile_units: i64,
     template: Option<PathBuf>,
+    debug_heightmap: Option<PathBuf>,
 }
 
 fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
@@ -39,6 +40,7 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
     let mut name = "razdor_map".to_string();
     let mut tile_units = 1024i64;
     let mut template = None;
+    let mut debug_heightmap = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |flag: &str| -> Result<String, CliError> {
@@ -53,6 +55,7 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
                 tile_units = v.parse().map_err(|_| CliError::Usage(format!("--tile-units {v} is not a number")))?;
             }
             "--template" => template = Some(PathBuf::from(value("--template")?)),
+            "--debug-heightmap" => debug_heightmap = Some(PathBuf::from(value("--debug-heightmap")?)),
             flag if flag.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option {flag}\n{USAGE}")));
             }
@@ -72,7 +75,7 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
     if ![512, 1024, 2048].contains(&tile_units) {
         return Err(CliError::Usage(format!("--tile-units must be 512, 1024 or 2048, not {tile_units}")));
     }
-    Ok(Some(Args { input, out, name, tile_units, template }))
+    Ok(Some(Args { input, out, name, tile_units, template, debug_heightmap }))
 }
 
 /// The master's name and size: the file name of `--template` and its size, or `template.omwgame`
@@ -106,6 +109,9 @@ fn run(args: &Args) -> Result<(), CliError> {
     write(&plugin_path, &out.plugin)?;
     for (rel, bytes) in &out.textures {
         write(&args.out.join(rel), bytes)?;
+    }
+    if let Some(path) = &args.debug_heightmap {
+        write(path, &out.heights.pgm())?;
     }
     Ok(())
 }

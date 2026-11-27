@@ -2,6 +2,7 @@
 //! Only the fields the converter uses are typed; every other key is ignored.
 
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// The `format` value the exporter writes.
@@ -24,6 +25,31 @@ pub struct Map {
     #[serde(default)]
     pub legend: Legend,
     pub terrain: Terrain,
+    #[serde(default)]
+    pub objects: Vec<MapObject>,
+    #[serde(default)]
+    pub buildings: Vec<Building>,
+}
+
+/// One scenery object: `class` 1-4 hills, 5-8 massifs (mountains, stones), 9-12 plants.
+/// `sprite div 10` is the side of a massif's square in tiles.
+#[derive(Debug, Deserialize)]
+pub struct MapObject {
+    pub x: i64,
+    pub y: i64,
+    pub sprite: i64,
+    pub class: i64,
+}
+
+/// A building or bridge: `(x, y)` is the bottom-right tile of its footprint, as the exporter writes
+/// it (`docs/flows/testing-and-tools.md`, "The map exporter"). Kinds 13 and 14 are bridges.
+#[derive(Debug, Deserialize)]
+pub struct Building {
+    pub x: i64,
+    pub y: i64,
+    pub size_x: i64,
+    pub size_y: i64,
+    pub kind: i64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -102,6 +128,22 @@ impl Map {
         Ok(map)
     }
 
+    /// The objects the converter keeps (world.md §1.1): classes 1-12 on the map, at most one massif
+    /// (classes 1-8) and one plant (9-12) per tile, the later record of a tile winning. Ordered row by
+    /// row, from the north, then by column, as DT scans them.
+    pub fn kept_objects(&self) -> Vec<&MapObject> {
+        let mut by_tile: BTreeMap<(i64, i64, u8), &MapObject> = BTreeMap::new();
+        for o in &self.objects {
+            let inside = o.x >= 0 && o.y >= 0 && o.x < self.width as i64 && o.y < self.height as i64;
+            if !inside || !(1..=12).contains(&o.class) {
+                continue;
+            }
+            let group = if o.class <= 8 { 0 } else { 1 };
+            by_tile.insert((o.y, o.x, group), o);
+        }
+        by_tile.into_values().collect()
+    }
+
     /// The surface code of every tile, row-major (index `y * width + x`, row 0 = north).
     pub fn tile_codes(&self) -> Result<Vec<u8>, InputError> {
         let (w, h) = (self.width, self.height);
@@ -144,6 +186,54 @@ impl Map {
             }
         }
         Ok(out)
+    }
+}
+
+/// A map from synthetic parts (tests only): `codes` row-major from the north, `w` wide.
+#[cfg(test)]
+pub(crate) fn synthetic(
+    w: usize,
+    h: usize,
+    codes: &[u8],
+    objects: serde_json::Value,
+    buildings: serde_json::Value,
+) -> Map {
+    let rows: Vec<String> = (0..h)
+        .map(|y| codes[y * w..(y + 1) * w].iter().map(|c| format!("{c:x}")).collect())
+        .collect();
+    let text = serde_json::json!({
+        "format": FORMAT,
+        "version": VERSION,
+        "width": w,
+        "height": h,
+        "info": { "generator_seed": 7 },
+        "legend": { "surfaces": [] },
+        "terrain": { "encoding": "hex-rows", "rows": rows },
+        "objects": objects,
+        "buildings": buildings,
+    })
+    .to_string();
+    Map::from_json(&text).unwrap()
+}
+
+#[cfg(test)]
+mod object_tests {
+    use super::*;
+
+    #[test]
+    fn one_massif_and_one_plant_per_tile_the_later_record_winning() {
+        let objects = serde_json::json!([
+            { "x": 1, "y": 1, "sprite": 40, "class": 9 },
+            { "x": 1, "y": 1, "sprite": 40, "class": 10 },
+            { "x": 1, "y": 1, "sprite": 40, "class": 1 },
+            { "x": 2, "y": 0, "sprite": 40, "class": 5 },
+            { "x": 0, "y": 2, "sprite": 40, "class": 77 },
+            { "x": 9, "y": 9, "sprite": 40, "class": 9 }
+        ]);
+        let map = synthetic(3, 3, &[5; 9], objects, serde_json::json!([]));
+        let kept: Vec<(i64, i64, i64)> = map.kept_objects().iter().map(|o| (o.x, o.y, o.class)).collect();
+        // Row 0 first, then row 1 (the plant of (1, 1) wins over the tree; the hill keeps the massif slot).
+        assert_eq!(kept, vec![(2, 0, 5), (1, 1, 1), (1, 1, 10)]);
     }
 }
 
