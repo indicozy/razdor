@@ -197,8 +197,9 @@
   },
   {
    "name": "kuski.webp",
-   "sprite": "Battle/--KUSKI.ugs",
+   "sprite": "Graphics/Battle/--KUSKI.ugs",
    "frames": "all",
+   "additive": true,
    "layout": "row"
   },
   {
