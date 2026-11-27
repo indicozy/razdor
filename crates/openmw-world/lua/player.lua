@@ -58,10 +58,21 @@ local function button(label, answer)
     }
 end
 
-local function text_line(text, size)
+-- A line of text in a box of the window's width and the given height (a Flex child needs both).
+local WIDTH = 440
+
+local function text_line(text, size, height)
     return {
         type = ui.TYPE.Text,
-        props = { text = text, textSize = size or 18, textColor = GOLD, multiline = true, wordWrap = true, size = util.vector2(420, 0) },
+        props = {
+            text = text,
+            textSize = size or 18,
+            textColor = GOLD,
+            multiline = true,
+            wordWrap = true,
+            autoSize = false,
+            size = util.vector2(WIDTH, height or 40),
+        },
     }
 end
 
@@ -69,15 +80,15 @@ end
 local function open_window(d)
     close_window()
     shown = { wid = d.wid, kind = d.kind }
-    local lines = { text_line(d.title or '', 24) }
+    local lines = { text_line(d.title or '', 24, 36) }
     if d.kind == 'end' then
         local head = d.victory and 'Победа' or 'Поражение'
-        table.insert(lines, text_line(head, 20))
+        table.insert(lines, text_line(head, 20, 30))
         if d.victory and d.next_map and d.next_map ~= '' then
-            table.insert(lines, text_line('Следующая карта: ' .. d.next_map, 18))
+            table.insert(lines, text_line('Следующая карта: ' .. d.next_map, 18, 30))
         end
     else
-        table.insert(lines, text_line(d.text or '', 18))
+        table.insert(lines, text_line(d.text or '', 18, 170))
     end
     local row = {}
     for _, b in ipairs(d.buttons or {}) do
@@ -86,7 +97,7 @@ local function open_window(d)
     end
     table.insert(lines, {
         type = ui.TYPE.Flex,
-        props = { horizontal = true, arrange = ui.ALIGNMENT.Center },
+        props = { horizontal = true, arrange = ui.ALIGNMENT.Center, size = util.vector2(WIDTH, 34) },
         content = ui.content(row),
     })
     win = ui.create({
@@ -95,7 +106,7 @@ local function open_window(d)
         props = {
             relativePosition = util.vector2(0.5, 0.5),
             anchor = util.vector2(0.5, 0.5),
-            autoSize = true,
+            size = util.vector2(WIDTH + 20, 280),
             arrange = ui.ALIGNMENT.Center,
         },
         content = ui.content(lines),

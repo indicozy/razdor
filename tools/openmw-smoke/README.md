@@ -46,3 +46,15 @@ converter plugin (`patch`). It needs no game files.
 - The Template's `settings.cfg` is copied as is (its `[Models]` and `[Game]` lines).
 - Known noise, the same with or without the converter's files: about 16 `E` lines (missing
   `menu_*.dds`, and menu scripts that cannot start). None names a razdor file.
+
+## M5 driver (`m5/`, test-only)
+
+- `m5/make_m5_map.py <out.json>` writes the synthetic scenario (16 x 16 grass, two armies, a building zone,
+  a point, sixteen events, victory 14, defeat 15). Synthetic input only.
+- `m5/scripts/razdor_m5/player.lua` (`m5/m5_test.omwscripts`, loaded with `--content m5_test.omwscripts
+  --extra-data m5`) answers the windows in order (Yes, No, then OK; Quit to the end window), walks the player
+  onto the scenario's tiles, and kills army 2's bodies (`body.lua`, a CREATURE script). Its expected event
+  order is `m5/EXPECTED.txt`: `RAZDOR_EVENT` lines in that order and `RAZDOR_VICTORY 14`.
+- `m5/scripts/razdor_m5/auto.lua` (`m5/m5_auto.omwscripts`) answers every window (Yes, OK, Quit) for runs
+  with nobody at the screen.
+- Run the synthetic scenario with the converter's `--time-scale 600` (one DT hour is 6 s), `--seconds 40`.

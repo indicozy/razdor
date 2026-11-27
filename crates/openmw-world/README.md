@@ -108,8 +108,33 @@ by the smoke test (milestone 4).
   the yaw table (16 entries from π); the town slot grid and its hash-chosen houses; the ground
   height at a point (bilinear over M2's land).
 - `tes3`: the TES3 writer and reader for the records of M1 and M2, and the Windows-1251 strings.
+- `events`: the scenario for `map_data.lua` (the exporter's `events`, `points`, building zones with
+  their footprint tiles, the info, the hero's party and gold, the army units), written as Lua literals
+  with the JSON names (`lua_value`), and the journal records: a DIAL `rz_q<id>` (type journal) with two
+  INFOs, index 10 (taken) and 100 (finished, `QSTF`).
 - `convert`: the map to plugin, textures and meshes; one CELL and one LAND for every cell of the map
   and of the margin ring, the CELLs of the references too, and one STAT per mesh (after LTEX).
+
+## Milestone 5 notes (events, windows, journal)
+
+- Lua: `lua/events.lua` is the engine (pure logic, reaching the world through `env`); `global.lua`
+  builds `env` and runs the clock (a scan every 30 DT minutes), the meetings (within 1024 units of a
+  leader) and the army registry; `player.lua` sends each tile change as `RazdorStep`, builds the
+  windows (`RazdorShow`/`RazdorClose`) and sends `RazdorAnswer`; `menu.lua` (MENU script) quits.
+- Log lines: `RAZDOR_EVENT <id>` once per firing, `RAZDOR_ANSWER <id> <yes|no|ok|quit>`,
+  `RAZDOR_VICTORY <id>` / `RAZDOR_DEFEAT <id>`, `RAZDOR_JOURNAL rz_q<id> stage=<n>`, `RAZDOR_HOLD <army>
+  fight=<n>` (a waiting meet event holds a hostile army at fight 0), `RAZDOR_MEET <army>`,
+  `RAZDOR_SQUAD <army> k= x= y=` (body positions at the check), `RAZDOR_NOTE` for results not played.
+- The journal index is the second field of the INFO's DATA (bytes 4..8). OpenMW 0.51 rejects `INDX`
+  and `INTV` as "Unknown subrecord" (esmtool), but `addJournalEntry(10)` and `(100)` find their entries
+  when DATA holds the index there (checked in the game). The first try (index in DATA bytes 0..4)
+  gave "unknown journal index".
+- Not played in v1 (logged as `RAZDOR_NOTE`): counter flags (`^`), artifacts, spells, patrol, show army,
+  lanterns (Q7), move army to hero, new hero class, battle, delay. The hall list (quests and rumours
+  of an ordinary building, spec 3.11) is not built: the building's own local events fire on the step.
+- Deviations: the windows do not pause the world (no UI mode); no frame (the Template has no menu
+  textures, so the windows are text over the world); `Герой` stands in for the hero's name; the
+  strength and artifact conditions pass; a unit's `named` test reads the party's names only.
 
 ## Milestone 4 counts on the RK1 sample (game-derived; not committed)
 

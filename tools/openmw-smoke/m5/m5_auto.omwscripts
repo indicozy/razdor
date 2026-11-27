@@ -1,0 +1,2 @@
+# Test-only (tools/openmw-smoke/m5): answers every window. Never part of the converter output.
+PLAYER: scripts/razdor_m5/auto.lua

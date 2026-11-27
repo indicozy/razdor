@@ -173,10 +173,11 @@ end
 -- exempt by design (spec 3.8, Q4) and counted apart.
 local function check_army(a, b)
     local bad, exempt, checked = 0, 0, 0
-    for _, obj in ipairs(b.actors) do
+    for k, obj in ipairs(b.actors) do
         if obj:isValid() then
             checked = checked + 1
             local p = obj.position
+            print(string.format("RAZDOR_SQUAD %d k=%d x=%.0f y=%.0f", a.id, k, p.x, p.y))
             local inside = common.in_building(p.x, p.y)
             local closed = not common.is_open(p.x, p.y)
             if a.ship then

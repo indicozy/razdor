@@ -710,3 +710,25 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
   bodies stand within 160 units of the leader, about 2 tiles away, and overlap in the picture).
 - Not verified: that followers actually walk after the leader (no position log; the scripts raise no error).
 
+
+## M4 follow-ups and M5 notes (as built)
+
+- Squad spacing: bodies stand on a grid of 300 units around the leader (`actors::BODY_SPACING`). The
+  log at the post-spawn check (`RAZDOR_SQUAD`, +2 s) shows followers already at about 250 units: the
+  Follow packages pull them to their follow distance. Not measured after that.
+- Deaths: each body reports itself to the global script (`RazdorBodyReady` on every load, `RazdorBodyDead`
+  once) with its army, number and spawn generation. The global keeps the dead per army in saved state, so
+  a reload keeps the count. An army is defeated when every body is dead.
+- Attitude: an army is hostile when `info.relations[0][faction - 1] < 0` (the spec's rule, §3.8). Its
+  bodies get AI fight 100 from their own script (only a body may write its stats). A meet event that waits
+  for a hostile army holds its bodies at 0 (`RazdorFight`). The rule in world.md §4.3 (both attitudes) is not used.
+- Events: `lua/events.lua` plays the v1 column of §3.11 (see the crate README, M5 notes). The clock is
+  DT minutes from `info.start_time`; the scan runs on each step, every 30 DT minutes, on a meeting and after
+  each window.
+- Journal: the index is in the INFO's DATA bytes 4..8 (OpenMW 0.51 rejects INDX and INTV subrecords).
+- The M5 synthetic run passes with `tools/openmw-smoke/m5` (test-only): the events fire in
+  `m5/EXPECTED.txt` order and victory is logged. The RK1 sample starts with its first event's message
+  (the knight's «Начало») and fires event 20 after it when the windows are answered.
+- Open: the hall list (§3.11, "Hall") is not built; the windows are not modal (the world runs during a
+  window); no frame or background for the windows (the Template has no menu textures). Q6 (no door
+  window) and Q7 (no lanterns) are applied as written.
