@@ -1,5 +1,5 @@
 {
- "_about": "Pictures the site uses, packed by tools/site/art_pack.py (kinds: sprite, shot, file). Names must match the /art/ references in site/src.",
+ "_about": "Pictures and sounds the site uses, packed by tools/site/art_pack.py (kinds: sprite, shot, file, and the kinds lit, dt-title, pcm, button88). Names must match the /art/ references in site/src.",
  "entries": [
   {
    "name": "a-big.webp",
@@ -74,6 +74,34 @@
    "name": "shot-langs.webp",
    "shot": "title.png",
    "width": 1200
+  },
+  {
+   "name": "marble.webp",
+   "kind": "lit",
+   "lit": "Graphics/Windows/Win-marble.lit"
+  },
+  {
+   "name": "title-burning.webp",
+   "kind": "dt-title",
+   "title": "Graphics/Windows/Title_RUS.ugs",
+   "flame": "Graphics/Windows/TitleFlame_RUS.lit"
+  },
+  {
+   "name": "title-still.webp",
+   "kind": "dt-title",
+   "title": "Graphics/Windows/Title_RUS.ugs",
+   "flame": "Graphics/Windows/TitleFlame_RUS.lit",
+   "still": true
+  },
+  {
+   "name": "menu-theme.ogg",
+   "kind": "pcm",
+   "sound": "Sounds/menu.raw"
+  },
+  {
+   "name": "thorny-88x31.png",
+   "kind": "button88",
+   "file": "ads/thorny-times/capsule.png"
   }
  ]
 }
