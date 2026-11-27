@@ -110,6 +110,11 @@ fn run(args: &Args) -> Result<(), CliError> {
     for (rel, bytes) in &out.textures {
         write(&args.out.join(rel), bytes)?;
     }
+    let mesh_dir = args.out.join("meshes").join("razdor");
+    std::fs::create_dir_all(&mesh_dir).map_err(|e| io_error(&mesh_dir, &e))?;
+    for (rel, bytes) in &out.meshes {
+        write(&args.out.join(rel), bytes)?;
+    }
     if let Some(path) = &args.debug_heightmap {
         write(path, &out.heights.pgm())?;
     }

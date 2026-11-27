@@ -205,6 +205,37 @@ pub fn cell(gx: i32, gy: i32) -> Record {
     Record::new(b"CELL").sub(b"NAME", vec![0]).sub(b"DATA", data)
 }
 
+/// One reference of a CELL (spec §2.2): its plugin-wide index (from 1), its base object's id, its
+/// position in units and its yaw in radians (the only rotation we write). Scale 1 writes no XSCL.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reference {
+    pub frmr: u32,
+    pub base: String,
+    pub pos: [f32; 3],
+    pub yaw: f32,
+}
+
+/// An exterior CELL with its references (FRMR, NAME, DATA per reference, in the order given).
+pub fn cell_with_refs(gx: i32, gy: i32, refs: &[Reference]) -> Record {
+    let mut rec = cell(gx, gy);
+    for r in refs {
+        let mut data = Vec::with_capacity(24);
+        for v in [r.pos[0], r.pos[1], r.pos[2], 0.0, 0.0, r.yaw] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        rec = rec
+            .sub(b"FRMR", r.frmr.to_le_bytes().to_vec())
+            .sub(b"NAME", zstring(&r.base))
+            .sub(b"DATA", data);
+    }
+    rec
+}
+
+/// A STAT record: its id and the model path relative to `meshes/`.
+pub fn stat(id: &str, model: &str) -> Record {
+    Record::new(b"STAT").sub(b"NAME", zstring(id)).sub(b"MODL", zstring(model))
+}
+
 /// A LAND record of cell `(cx, cy)`: `heights` are 65x65 vertices in units, row-major (row 0 =
 /// south, index `row * 65 + col`); `texels` are the 256 VTEX values, already in file order.
 pub fn land(cx: i32, cy: i32, heights: &[i32], texels: &[u16; 256]) -> Result<Record, Tes3Error> {

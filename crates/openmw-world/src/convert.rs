@@ -5,8 +5,10 @@
 use crate::grid::{self, Grid, GridError, CELL_TEXELS, CELL_VERTS, TEXEL_UNITS};
 use crate::heightmap::{self, HeightField, Terrain};
 use crate::input::{InputError, Map};
+use crate::placement::{self, Plan};
 use crate::tes3::{self, Tes3Error};
 use crate::textures;
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// What to write: the plugin's name and tile size, and the master it depends on.
@@ -24,12 +26,13 @@ pub struct Master {
     pub size: u64,
 }
 
-/// The converter's files: the plugin bytes, the textures as (path under the output folder, bytes),
-/// and the heights the plugin was built from (for the `--debug-heightmap` picture).
+/// The converter's files: the plugin bytes, the textures and the meshes as (path under the output
+/// folder, bytes), and the heights the plugin was built from (for the `--debug-heightmap` picture).
 #[derive(Debug)]
 pub struct Output {
     pub plugin: Vec<u8>,
     pub textures: Vec<(String, Vec<u8>)>,
+    pub meshes: Vec<(String, Vec<u8>)>,
     pub heights: HeightField,
 }
 
@@ -73,7 +76,8 @@ pub fn convert(map: &Map, opts: &Options) -> Result<Output, ConvertError> {
     let grid = Grid::new(map.width, map.height, opts.tile_units)?;
     let terrain = Terrain::new(grid, map.tile_codes()?);
     let heights = heightmap::build(&terrain, map);
-    write(opts, &grid, &terrain, heights, &|_, _, surface| surface)
+    let plan = placement::plan(map, &grid, &heights);
+    write(opts, &grid, &terrain, heights, plan, &|_, _, surface| surface)
 }
 
 /// The conversion with two hooks, used by the tests: `height(i, j)` gives the height of global
@@ -89,7 +93,8 @@ pub(crate) fn convert_with(
     let grid = Grid::new(map.width, map.height, opts.tile_units)?;
     let terrain = Terrain::new(grid, map.tile_codes()?);
     let heights = HeightField::from_fn(heightmap::bounds(&grid), height);
-    write(opts, &grid, &terrain, heights, texel)
+    let plan = placement::plan(map, &grid, &heights);
+    write(opts, &grid, &terrain, heights, plan, texel)
 }
 
 fn write(
@@ -97,14 +102,16 @@ fn write(
     grid: &Grid,
     terrain: &Terrain,
     heights: HeightField,
+    plan: Plan,
     texel: &dyn Fn(i64, i64, u8) -> u8,
 ) -> Result<Output, ConvertError> {
     // The cells of the map, and the margin ring around them (§3.4): -1 to the count, both ends in.
     let (cells_x, cells_y) = grid.cells();
-    let mut cell_records = Vec::new();
     let mut land_records = Vec::new();
+    let mut ring = BTreeSet::new();
     for cy in -1..=cells_y {
         for cx in -1..=cells_x {
+            ring.insert((cx, cy));
             let mut texels = [[0u8; 16]; 16];
             for (row, line) in texels.iter_mut().enumerate() {
                 for (col, value) in line.iter_mut().enumerate() {
@@ -127,7 +134,6 @@ fn write(
                     cell_normals[at] = heights.normal(i, j);
                 }
             }
-            cell_records.push(tes3::cell(cx as i32, cy as i32));
             land_records.push(tes3::land_with_normals(
                 cx as i32,
                 cy as i32,
@@ -138,12 +144,46 @@ fn write(
         }
     }
 
+    // Every cell with a reference gets a CELL record too (none falls outside the ring, but the
+    // writer does not depend on it). FRMR indices run from 1 over the whole plugin, cell by cell.
+    let all_cells: BTreeSet<(i64, i64)> = ring.iter().copied().chain(plan.cells.keys().copied()).collect();
+    let mut next_ref = 1u32;
+    let mut cell_records = Vec::new();
+    for &(cx, cy) in &all_cells {
+        let refs: Vec<tes3::Reference> = plan
+            .cells
+            .get(&(cx, cy))
+            .map(|placed| {
+                placed
+                    .iter()
+                    .map(|p| {
+                        let r = tes3::Reference {
+                            frmr: next_ref,
+                            base: format!("razdor_{}", plan.meshes[p.mesh].name),
+                            pos: [p.pos[0] as f32, p.pos[1] as f32, p.pos[2] as f32],
+                            yaw: p.yaw as f32,
+                        };
+                        next_ref += 1;
+                        r
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        cell_records.push(tes3::cell_with_refs(cx as i32, cy as i32, &refs));
+    }
+
     let ltex_count = textures::SURFACES.len();
-    let num_records = (ltex_count + cell_records.len() + land_records.len()) as u32;
+    let stat_records: Vec<tes3::Record> = plan
+        .meshes
+        .iter()
+        .map(|m| tes3::stat(&format!("razdor_{}", m.name), &format!("razdor/{}.dae", m.name)))
+        .collect();
+    let num_records = (ltex_count + stat_records.len() + cell_records.len() + land_records.len()) as u32;
     let mut records = vec![tes3::tes3_header(num_records, &opts.master.name, opts.master.size)];
     for index in 0..ltex_count {
         records.push(tes3::ltex(index as u32, &textures::ltex_id(index), &textures::texture_path(index)));
     }
+    records.extend(stat_records);
     records.extend(cell_records);
     records.extend(land_records);
 
@@ -153,7 +193,12 @@ fn write(
             (path, textures::tga(textures::TEXTURE_SIZE, textures::SURFACES[index].rgb))
         })
         .collect();
-    Ok(Output { plugin: tes3::encode(&records), textures, heights })
+    let meshes = plan
+        .meshes
+        .iter()
+        .map(|m| (format!("meshes/razdor/{}.dae", m.name), m.dae.clone().into_bytes()))
+        .collect();
+    Ok(Output { plugin: tes3::encode(&records), textures, meshes, heights })
 }
 
 #[cfg(test)]

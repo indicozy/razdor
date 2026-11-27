@@ -20,7 +20,7 @@ const SHORE_FLOOR: i64 = 24;
 /// Lowest height of a flattened building footprint (§3.3 step 4).
 const FLAT_FLOOR: i64 = 48;
 /// Height of a bridge's deck edge on the land beside it (§3.3 step 4).
-const DECK_HEIGHT: i64 = 64;
+pub const DECK_HEIGHT: i64 = 64;
 /// Peak of a hill of side 1 (§3.3 step 5), times the side.
 const HILL_PEAK: i64 = 160;
 /// Peak of a mountain of side 1 (§3.3 step 6), times the side.
@@ -278,7 +278,7 @@ fn smoothstep_milli(t: i64) -> i64 {
     (3 * t * t * 1000 - 2 * t * t * t) / 1_000_000
 }
 
-fn splitmix64(x: u64) -> u64 {
+pub(crate) fn splitmix64(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
@@ -286,7 +286,7 @@ fn splitmix64(x: u64) -> u64 {
 }
 
 /// One value from a splitmix64 stream keyed by `keys` (§4: seed, purpose, then the coordinates).
-fn keyed(keys: &[u64]) -> u64 {
+pub(crate) fn keyed(keys: &[u64]) -> u64 {
     keys.iter().fold(0u64, |acc, &k| splitmix64(acc.wrapping_add(k)))
 }
 
