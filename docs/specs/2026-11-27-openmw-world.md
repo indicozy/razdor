@@ -778,3 +778,68 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
 - Hero kit (§3.9): the chosen hero's artifacts and spells are seeded at start (`RAZDOR_HERO start`).
 - Not built in M7: ships that move (item 4 of the M7 brief). The converter still writes `patrols = false` for a ship
   army (RK1's army 9 has `patrols = 1, patrol_radius = 38` in its JSON), so it stands on the water.
+
+## M8: spells and the squad fight (2026-11-28)
+
+Goal (the owner, 2026-11-28): one proper 4 vs 4 fight. The hero's party of four bodies against a
+hostile army of four, in real time, with melee, shots and magic, until one side is dead. This
+replaces "spells: Lua counters and lists in v1" (§3.9) and the `cast_spell` message line (§3.11).
+
+**Input.** `razdor-units-json` version 2 adds a top-level `spells` array: the raw fields of the
+install's spell list plus a summary `kind` (damage, heal, modifier, none). DT has no unit-to-spell
+table: a unit casts by its school (`magic`), its direction (`magic_direction`) and its magic power
+at its level (battle.md §0, §3). So unit spells are built per unit card and level from those three
+fields; the world spells (the hero's) come from the `spells` array.
+
+**Records.** One SPEL per built spell, ids lower case: `rz_strike_u<unit>_l<level>`,
+`rz_heal_u<unit>_l<level>`, `rz_bless_u<unit>_l<level>`, `rz_shot_u<unit>_l<level>`,
+`rz_spell_<id>` (world spells). Unit spells are type 0 (spell), cost 1, flags "always succeeds";
+the body's magicka is large enough for the fight. A CREA lists its spells with NPCS. The effect ids
+are OpenMW's (ESM::MagicEffect), checked against the Game Template's records and OpenMW's own list.
+
+**Unit spells** (`P` = the unit's magic power at the card's level, `units.rs magic_power_at`):
+
+| Unit | Spell | Effect (range target unless said) |
+|---|---|---|
+| direction to_enemy or to_all, school elemental | strike | Fire Damage, magnitude `3P/4` (battle.md §0: ×3/4 on everyone) |
+| same, school death | strike | Damage Health, magnitude `P` |
+| same, school life | strike | Damage Health, magnitude `P` (the ×2 on Undead is not modelled) |
+| direction to_ally or to_all, school life | heal | Restore Health on self, magnitude `P`, 1 s |
+| same, school elemental | heal | Restore Health on self, magnitude `P/2`, 1 s |
+| same, school death | bless | Fortify Attack on self, magnitude `P/6 + 1`, 30 s |
+| `ranged` (attack shot > 0) | shot | Damage Health, magnitude min `shot/2` (at least 1), max `shot` |
+
+- Shots go through the same cast path as magic (the owner, 2026-11-28: "for ranged use mage attack
+  animation"). The box figures have no animation; once real rigs exist, shots and strikes play the
+  spellcast group.
+- Approximations, listed: no protections against the school (MW resistances stand in later), no
+  nature table, no curses, friendly magic on self only (OpenMW's AI picks beneficial spells for
+  itself), DT's turn-long buffs become 30 s.
+
+**World spells** (the hero). `kind` heal → Restore Health on self, magnitude `delta_fixed_hits`.
+`kind` modifier: each `add`/`percent` key becomes one effect (attack → Fortify Attack, defence →
+Shield, hit_points → Fortify Health, initiative → Fortify Attribute Speed, regeneration → Restore
+Health at a small magnitude, protections → Resist Fire/Frost/Shock for elemental, Resist Poison for
+death, Resist Magicka for life); percent values use the hero's current numbers at 1 point per
+percent; target hero → self, target enemy → the negative effect on target (Damage Attribute,
+Weakness). `kind` damage with target enemy → Damage Health on target. `kind` damage with target
+hero is an event spell (cast on the player by `cast_spell`), not a magic-menu spell. Duration =
+`time_work_hours` in game time (`hours · 3600 / timescale` real seconds, timescale 30), capped at
+one game day; a missing duration is instant. Cost = `cost_mana`.
+
+- The hero gets `rz_spell_<id>` in the magic menu for each spell of the start kit and each
+  `spells_learned` result (Lua `types.Actor.spells(player):add`); the `RAZDOR_HERO spell+` print stays.
+- `cast_spell` applies the event spell to the player.
+- Mana: one pool. The Lua counter `s.mana` is the truth for events; it is written into the player's
+  magicka (base and current) whenever it changes, and the player's current magicka is read back into
+  `s.mana` every second, so a spell cast in the magic menu spends DT mana.
+
+**The party.** At the start each party entry becomes one body (the unit's CREA at its level), placed
+by the follower offsets of global.lua, with a Follow package on the player; OpenMW's followers join
+the player's fights. Party deaths remove the entry.
+
+**The fight check.** A synthetic map (no game data) in the smoke: the hero with a party of four
+(two melee, one shooter, one caster) and a hostile army of four of the same make, 1500 units apart
+with the army walking in. The smoke logs `RAZDOR_FIGHT` lines (health per body per second, deaths,
+spell hits) and ends with `RAZDOR_FIGHT_END winner=…`. PASS: at least one shot hit, one strike hit
+and one melee hit are logged, and one side is wholly dead within 120 s.
