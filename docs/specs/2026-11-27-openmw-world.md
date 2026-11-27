@@ -880,7 +880,44 @@ bolt or hit meshes. So:
   respawns, event timers) does not advance, and the game time scale is set to 0 if OpenMW 0.51's
   world API allows it (else DT's clock alone is held). The fight driver only lets bodies of the two
   sides hit each other.
-- The fight ends when one side is wholly dead or the player gets more than 3000 units away from
-  every living body of the army (a retreat). Then the held armies get their packages and fight
-  values back and the clock runs again.
-- Logged as `RAZDOR_FIGHT_START army=<id>` and `RAZDOR_FIGHT_END winner=player|army|retreat`.
+- The fight ends by DT's end check only (battle.md §5): a side with no units, a side whose every
+  remaining unit has Surrender > 0, or the turn limit. DT has no retreat and no draw. Then the held
+  armies get their packages and fight values back and the clock runs again.
+- Logged as `RAZDOR_FIGHT_START army=<id>` and `RAZDOR_FIGHT_END winner=player|army reason=wipe|surrender|time`.
+
+## M9: DT's battle rules around the real-time fight (the owner, 2026-11-28)
+
+The owner: "make sure that it replicates overall DT rules so any map will work". Only the tactical
+grid is replaced by real time; everything a map or mod can see before and after a battle follows
+DT. Sources: world.md §4.2–4.3 (contact), battle.md §5 and the wrap-up (§11), experience.md §1–§3,
+economy.md (loot, trophies). Razdor's own Rust implementation in `src/rules/battle.rs`,
+`src/rules/economy.rs` and the experience code is the reference for the Lua port: each Lua
+function names the Rust function and the original's address it mirrors.
+
+- **Data.** The exporter adds what Lua needs: per unit `surrender` (units JSON, version 3), and a
+  top-level `options` block with BattleEndTurn, VictoryGoldDiv and the other battle and XP
+  constants the wrap-up reads (from the install's ini, as `src/dt/data.rs` reads them).
+- **Contact** (world.md §4.2): any army on open ground is engaged, friendly or not, unless the
+  cell is one of the listed buildings or its own attitude is > 0 inside a non-bridge building;
+  building guards and garrisons as §4.2 items 2–3 (an empty garrison captures the building, a
+  village is captured by entering it). The event scan runs first; an event that fires means no
+  battle (already in M5: the meeting hold). AI armies attack the hero by §4.3's score rule where
+  M5 has the data, else when hostile.
+- **The fight**: M8 (real time, closed sides, the world frozen). The garrison's units fight as an
+  army.
+- **End** (battle.md §5): wipe, surrender (every remaining unit of a side has Surrender > 0: that
+  side's units are removed, the enemy's surrender sum goes to the player as mana; it applies to
+  the player's side too, and the hero counts as Surrender 0), or the turn limit: BattleEndTurn
+  turns, one turn = the slowest pace among the fighters' intervals (approximation), a win for the
+  player if his side has any unit. No draw.
+- **Wrap-up** (battle.md §11, experience.md §3): XP shares rolled as DT does and given to the
+  party's units and the hero (promotion by experience.md §4 where the units JSON has the data);
+  victory gold `enemy gold / VictoryGoldDiv`; trophies as economy.md; a beaten field army is
+  destroyed even if units survived; the party keeps its wounds (health carries over), dead party
+  units leave the party; the death registry and the events engine see the army's defeat (an army
+  is beaten when the fight is won, not when its leader dies). Defeat (the player's side has no
+  unit, or the player dies) is the game over of §3.12.
+- **Check**: the M8 fight test, plus synthetic scenarios for surrender (an army of only
+  Surrender > 0 units gives up after the first hit and pays mana), the turn limit, a garrison
+  capture, a friendly army on open ground engaged, and the XP given after a win matching the Rust
+  reference for the same inputs.
