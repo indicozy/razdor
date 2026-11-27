@@ -227,7 +227,12 @@ function env.text(text)
     return events.plain_text(text, HERO_NAME)
 end
 
+-- An event window stops the world (the clock, the armies and the scans) until it closes (spec 3.11).
+-- The tag is held by the window only; a saved game does not keep it.
+local PAUSE_TAG = 'razdor_window'
+
 function env.show(d)
+    world.pause(PAUSE_TAG)
     local p = player()
     if p then
         p:sendEvent('RazdorShow', d)
@@ -235,6 +240,7 @@ function env.show(d)
 end
 
 function env.close(wid)
+    world.unpause(PAUSE_TAG)
     local p = player()
     if p then
         p:sendEvent('RazdorClose', { wid = wid })

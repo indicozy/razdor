@@ -50,7 +50,25 @@ at(90, function()
     print('RAZDOR_DRIVER timeout')
 end)
 
+local due = {} -- { at = real seconds, fn = function }
+
+local function later(secs, fn)
+    table.insert(due, { at = core.getRealTime() + secs, fn = fn })
+end
+
 return {
+    engineHandlers = {
+        onFrame = function()
+            local now = core.getRealTime()
+            for i = #due, 1, -1 do
+                if due[i].at <= now then
+                    local fn = due[i].fn
+                    table.remove(due, i)
+                    fn()
+                end
+            end
+        end,
+    },
     eventHandlers = {
         RazdorShow = function(d)
             print(string.format('RAZDOR_DRIVER show wid=%d kind=%s', d.wid, d.kind))
@@ -64,7 +82,9 @@ return {
                 answer = 'quit'
             end
             -- The end window stays up for 20 s, so a screenshot taken during it shows it.
-            at(d.kind == 'end' and 20 or 0.3, function()
+            -- A window stops the world, so its answer waits on real time (onFrame), not on the
+            -- simulation's timers.
+            later(d.kind == 'end' and 20 or 0.3, function()
                 core.sendGlobalEvent('RazdorAnswer', { wid = d.wid, answer = answer })
             end)
         end,

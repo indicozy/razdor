@@ -32,5 +32,7 @@ python3 -I "$HERE/make_m5_map.py" "$WORK/m5.json" || exit 2
 $PREFIX "$CARGO_TARGET_DIR/fasttest/razdor-openmw" "$WORK/m5.json" -o "$WORK/out" --template "$TEMPLATE" \
     --time-scale 600 > "$WORK/convert.log" 2>&1 || { echo "run_m5.sh: conversion failed (see $WORK/convert.log)" >&2; exit 2; }
 
+# --seconds is real seconds (the smoke script's delays run on real time, since the windows stop the
+# simulation): the picture is taken at 40 s, inside the end window (the driver keeps it 20 s).
 OPENMW_SMOKE_SCRATCH="$WORK" "$SMOKE/run.sh" "$WORK/out" --name run --seconds 40 \
     --extra-data "$HERE" --content m5_test.omwscripts --expect "$HERE/EXPECTED.txt"
