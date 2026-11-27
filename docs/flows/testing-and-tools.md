@@ -587,7 +587,8 @@ stats are the formula; the exporter is `razdor-units-json` (above). No fog of wa
 Crate: `crates/openmw-world/README.md`. Harness: `tools/openmw-smoke/README.md`. The `m5/` folder of the
 harness is a test driver; `play.sh` loads its auto-answer only so the start window does not cover the picture.
 The M5 check is one command, `m5/run_m5.sh`: it passes when the event order, the victory and the tracked
-results in `m5/EXPECTED.txt` hold (`run.sh --expect`). An event window pauses the world, so the drivers
+results in `m5/EXPECTED.txt` hold (`run.sh --expect`). It covers the building hall (a quest taken from
+the hall window, events 27-28), the army-strength test (29-30) and the hero's start kit. An event window pauses the world, so the drivers
 answer on real time; `play.sh --probe x,y` passes probe points to the run.
 
 ## The player's performance test (Settings → Other)

@@ -769,3 +769,12 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
   buttons, not inert text, so that their gold and flags apply as events.md §10 says (the M7 brief asked for
   text; this follows the spec).
 - Rust: no change; the zone's events list already holds every event of the building.
+- Army strength (§3.11 table, `army_strength`): under the `stats_check` gate, the party's strength against the
+  signed value. Strength = sum of the unit costs of every record, dead included (experience.md §1, events.md §4),
+  so the army's value is fixed by its units. Costs: `--units` gives units.json's `cost`, which is the price, not
+  DT's tactical cost (that needs the stat block and the cost multiplier): an approximation, open. The placeholder
+  is 50 per unit. Level is not in the cost. The hero is not a counted record (the party is its units).
+  The M5 scenario tests it: event 29 passes at 40 with a party of 50, event 30 (60) does not fire.
+- Hero kit (§3.9): the chosen hero's artifacts and spells are seeded at start (`RAZDOR_HERO start`).
+- Not built in M7: ships that move (item 4 of the M7 brief). The converter still writes `patrols = false` for a ship
+  army (RK1's army 9 has `patrols = 1, patrol_radius = 38` in its JSON), so it stands on the water.
