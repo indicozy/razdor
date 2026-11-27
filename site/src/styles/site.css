@@ -35,6 +35,32 @@ body > * { position: relative; z-index: 1; }
 @media (min-width: 861px) {
   .title-band, .menubar, .page, .site-footer { box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
 }
+/* the home page is wider: the main column and the right sidebar (P11) */
+body:has(.home) .title-band, body:has(.home) .menubar, body:has(.home) .page, body:has(.home) .site-footer { max-width: 1180px; }
+
+/* the home page: a main column (2fr) and a right sidebar of bevelled marble windows (1fr), one column on phones */
+.home { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.home-main, .home-side { min-width: 0; }
+.home-side .win {
+  background: rgba(20, 43, 36, 0.88);
+  border: 2px solid;
+  border-color: #eef1f3 var(--silver-dark) var(--silver-deep) var(--silver);
+  margin: 0 0 18px;
+  padding: 0;
+}
+.home-side .win > h2 {
+  margin: 0;
+  padding: 6px 12px;
+  background: linear-gradient(#2d5648, var(--marble-dark));
+  border-bottom: 2px solid var(--silver);
+  font-size: 22px;
+}
+.home-side .win-body { padding: 12px 14px; }
+.home-side .shot-stack { display: grid; gap: 4px; }
+.home-side .hub-tiles { grid-template-columns: 1fr; margin: 8px 0; }
+.home-side .pic-img { max-width: 220px; }
+.home-side .total { font-size: 15px; margin: 0 0 8px; }
+.home-side .btn { display: inline-block; margin-bottom: 8px; }
 
 h1, h2, h3 { font-family: var(--font-head); font-weight: 400; color: var(--gold); line-height: 1.2; margin: 0 0 0.5em; }
 h1 { font-size: 30px; }
@@ -356,6 +382,7 @@ button { font: inherit; }
 
 /* --- phones: one column, sizes never below 15 px, targets at least 44 px --- */
 @media (max-width: 860px) {
+  .home { grid-template-columns: 1fr; }
   .changes-layout { grid-template-columns: 1fr; }
   .changes-layout > .vnav { border-right: 0; border-bottom: 2px solid var(--silver-dark); }
 }

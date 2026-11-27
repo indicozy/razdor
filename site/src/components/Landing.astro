@@ -80,8 +80,16 @@ const features = [
   { href: href(lang, "wiki/start/language-fonts/"), ...L.feat[4] },
 ];
 const relDate = rel ? dotted(rel.date) : "";
+// The sidebar: three screenshots as frames (the gallery opens from them) and the download line per system.
+const sideShots = ["b-battle", "b-town", "a-big"] as const;
+const lineFor = (k: keyof typeof sysNames) => {
+  const size = sizes?.get(sysFiles[k]);
+  return [version, size ? formatSize(size, lang) : ""].filter(Boolean).join(", ");
+};
+const lineBySystem = Object.fromEntries((Object.keys(sysNames) as (keyof typeof sysNames)[]).map((k) => [k, lineFor(k)]));
 ---
 <div class="home">
+  <div class="home-main">
   <p class="release-line">
     <a class="release-link" href={href(lang, "changes/")}><span class="bullet" aria-hidden="true"></span>{fill(L.release, { version })}</a>
     <span class="release-date">{relDate}</span>
@@ -158,47 +166,6 @@ const relDate = rel ? dotted(rel.date) : "";
     </ul>
   </section>
 
-  <section class="sec" id="maps" aria-labelledby="maps-title">
-    <h2 id="maps-title">{L.mapsTitle}</h2>
-    <p>{hub}</p>
-    {picks.length > 0 && (
-      <ul class="hub-tiles">
-        {picks.map((e) => {
-          const thumb = pictureUrl(e);
-          return (
-            <li class="hub-tile">
-              {thumb ? <img class="pic-img frame" src={thumb} alt="" width="480" height="270" loading="lazy" decoding="async" /> : null}
-              <span class="hub-title">{entryTitle(e)}</span>
-              <span class="small">{kindText(e.kind)}, {L.hubAuthor}: {e.author}</span>
-            </li>
-          );
-        })}
-      </ul>
-    )}
-    {totalLine && <p class="total">{totalLine}</p>}
-    {mapNames && (
-      <div class="play-stats" id="play-stats" data-lang={lang} data-wins={R.statsWins} data-original={R.statsOriginal} hidden>
-        <table data-board="top-maps" hidden>
-          <caption>{R.statsTop}</caption>
-          <thead><tr><th>{R.statsMap}</th><th class="n">{R.statsCount}</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <table data-board="hard-maps" hidden>
-          <caption>{R.statsHard}</caption>
-          <thead><tr><th>{R.statsMap}</th><th class="n">{R.statsRate}</th></tr></thead>
-          <tbody></tbody>
-        </table>
-        <table data-board="games" hidden>
-          <caption>{R.statsGames}</caption>
-          <thead><tr><th>{R.statsGame}</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    )}
-    <script is:inline type="application/json" id="map-names" set:html={JSON.stringify(mapNames).replace(/</g, "\\u003c")}></script>
-    <p class="more"><a class="link" href={href(lang, "community/")}>{R.mapsAll}</a></p>
-  </section>
-
   <section class="sec" id="news" aria-labelledby="news-title">
     <h2 id="news-title">{R.news}</h2>
     {news.map((n) => (
@@ -225,6 +192,91 @@ const relDate = rel ? dotted(rel.date) : "";
       <li><a class="link" href="https://github.com/indicozy/razdor">{L.extraGithub}</a></li>
     </ul>
   </section>
+  </div>
+
+  <aside class="home-side" aria-label={R.links}>
+    <section class="win" id="download" aria-labelledby="side-dl-title">
+      <h2 id="side-dl-title">{R.dlTitle}</h2>
+      <div class="win-body">
+        <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
+        <p class="small" data-dl-meta={JSON.stringify(lineBySystem)}>{lineFor("windows")}</p>
+        <p class="small"><a class="link" href={href(lang, "download/")}>{R.allSystems}</a></p>
+      </div>
+    </section>
+
+    <section class="win" id="side-shots" aria-labelledby="side-shots-title">
+      <h2 id="side-shots-title">{R.shots}</h2>
+      <div class="win-body shot-stack">
+        {sideShots.map((f) => (
+          <a class="shot frame" href={href(lang, "screenshots/")}>
+            <img src={`${B}art/${f}.webp`} alt={R.shotCaps[f]} width="640" height="400" loading="lazy" decoding="async" />
+          </a>
+        ))}
+        <p class="small"><a class="link" href={href(lang, "screenshots/")}>{R.shotsAll}</a></p>
+      </div>
+    </section>
+
+    <section class="win" id="stats" aria-labelledby="stats-title">
+      <h2 id="stats-title">{R.statsTitle}</h2>
+      <div class="win-body">
+        {totalLine && <p class="total">{totalLine}</p>}
+        {mapNames && (
+          <div class="play-stats" id="play-stats" data-lang={lang} data-wins={R.statsWins} data-original={R.statsOriginal} hidden>
+            <table data-board="top-maps" hidden>
+              <caption>{R.statsTop}</caption>
+              <thead><tr><th>{R.statsMap}</th><th class="n">{R.statsCount}</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <table data-board="hard-maps" hidden>
+              <caption>{R.statsHard}</caption>
+              <thead><tr><th>{R.statsMap}</th><th class="n">{R.statsRate}</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <table data-board="games" hidden>
+              <caption>{R.statsGames}</caption>
+              <thead><tr><th>{R.statsGame}</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        )}
+        <script is:inline type="application/json" id="map-names" set:html={JSON.stringify(mapNames).replace(/</g, "\\u003c")}></script>
+      </div>
+    </section>
+
+    <section class="win" id="maps" aria-labelledby="maps-title">
+      <h2 id="maps-title">{L.mapsTitle}</h2>
+      <div class="win-body">
+        <p class="small">{hub}</p>
+        {picks.length > 0 && (
+          <ul class="hub-tiles">
+            {picks.map((e) => {
+              const thumb = pictureUrl(e);
+              return (
+                <li class="hub-tile">
+                  {thumb ? <img class="pic-img" src={thumb} alt="" width="480" height="270" loading="lazy" decoding="async" /> : null}
+                  <span class="hub-title">{entryTitle(e)}</span>
+                  <span class="small">{kindText(e.kind)}, {L.hubAuthor}: {e.author}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p class="small"><a class="link" href={href(lang, "community/")}>{R.mapsAll}</a></p>
+      </div>
+    </section>
+
+    <section class="win" id="links" aria-labelledby="links-title">
+      <h2 id="links-title">{R.links}</h2>
+      <div class="win-body">
+        <ul class="bullets">
+          <li><a class="link" href="https://discord.gg/wmMksmWFDM">{R.linkDiscord}</a></li>
+          <li><a class="link" href="https://github.com/indicozy/razdor">{R.linkGithub}</a></li>
+          <li><a class="link" href={href(lang, "wiki/")}>{R.linkWiki}</a></li>
+          <li><a class="link" href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{R.linkThorny}</a></li>
+        </ul>
+      </div>
+    </section>
+  </aside>
 </div>
 
 <ShotDialog lang={lang} />
