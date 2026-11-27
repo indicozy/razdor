@@ -1,0 +1,9 @@
+---
+import Base from "../../../layouts/Base.astro";
+import Changes from "../../../components/pages/Changes.astro";
+import { strings } from "../../../i18n";
+const m = strings("en").meta.changes;
+---
+<Base lang="en" path="/changes/" title={m.title} description={m.description} rss>
+  <Changes lang="en" />
+</Base>

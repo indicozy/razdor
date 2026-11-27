@@ -1,0 +1,9 @@
+---
+import Base from "../../../layouts/Base.astro";
+import Download from "../../../components/pages/Download.astro";
+import { strings } from "../../../i18n";
+const m = strings("en").meta.download;
+---
+<Base lang="en" path="/download/" title={m.title} description={m.description}>
+  <Download lang="en" />
+</Base>

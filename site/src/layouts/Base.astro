@@ -3,20 +3,38 @@ import "../styles/tokens.css";
 import "../styles/site.css";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import { strings, type Lang } from "../i18n";
+import { fill } from "../lib/i18n";
+import { latest } from "../lib/changelog";
 
 interface Props {
-  lang: "ru" | "en";
+  lang: Lang;
   title: string;
   description: string;
   /** The page path without the language or the base, e.g. "/" or "/download/". */
   path: string;
+  /** Adds the RSS link of the changes page. */
+  rss?: boolean;
 }
-const { lang, title, description, path } = Astro.props;
+const { lang, title, description, path, rss = false } = Astro.props;
+const S = strings(lang);
 const site = "https://razdor.indicozy.dev";
 const ruUrl = site + path;
 const enUrl = site + "/en" + path;
 const canonical = lang === "ru" ? ruUrl : enUrl;
 const B = import.meta.env.BASE_URL;
+// The download buttons' labels, by platform (the script below picks one).
+const label = (platform: string) => fill(S.download.detectLink, { platform });
+const labels = {
+  windows: label("Windows"),
+  mac: label("macOS"),
+  linux: label("Linux"),
+  android: label("Android"),
+  ios: label("iOS"),
+  generic: S.common.download,
+};
+const releases = "https://github.com/indicozy/razdor/releases/latest";
+const version = latest()?.version ?? "";
 ---
 <!doctype html>
 <html lang={lang}>
@@ -29,6 +47,7 @@ const B = import.meta.env.BASE_URL;
     <link rel="alternate" hreflang="ru" href={ruUrl} />
     <link rel="alternate" hreflang="en" href={enUrl} />
     <link rel="alternate" hreflang="x-default" href={ruUrl} />
+    {rss && <link rel="alternate" type="application/rss+xml" title="Razdor: изменения" href={`${site}/changes/rss.xml`} />}
     <link rel="icon" href={`${B}favicon.ico`} sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href={`${B}favicon-32.png`} />
     <link rel="icon" type="image/png" sizes="192x192" href={`${B}icon-192.png`} />
@@ -36,26 +55,25 @@ const B = import.meta.env.BASE_URL;
     <meta name="theme-color" content="#142b24" />
   </head>
   <body>
-    <a class="skip" href="#main">К содержанию</a>
+    <a class="skip" href="#main">{S.common.skip}</a>
     <Header lang={lang} path={path} />
     <slot />
     <Footer lang={lang} />
-    <script>
+    <script define:vars={{ labels, releases }}>
       // Download buttons: the label and link follow the visitor's platform (JS only; without it the
-      // buttons say «Скачать» and link to /download/).
+      // buttons say «Скачать» and link to the download page).
       const ua = navigator.userAgent;
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
       const isMac = /Macintosh/.test(ua) && !isIOS;
       const isWin = /Windows/.test(ua);
-      let label = "Скачать для Linux";
-      if (isWin) label = "Скачать для Windows";
-      else if (isMac) label = "Скачать для macOS";
-      else if (isAndroid) label = "Скачать для Android";
-      else if (isIOS) label = "Скачать для iOS";
-      const releases = "https://github.com/indicozy/razdor/releases/latest";
-      document.querySelectorAll<HTMLAnchorElement>("[data-dl]").forEach((a) => {
-        a.textContent = label;
+      let text = labels.linux;
+      if (isWin) text = labels.windows;
+      else if (isMac) text = labels.mac;
+      else if (isAndroid) text = labels.android;
+      else if (isIOS) text = labels.ios;
+      document.querySelectorAll("[data-dl]").forEach((a) => {
+        a.textContent = text;
         a.href = releases;
       });
     </script>

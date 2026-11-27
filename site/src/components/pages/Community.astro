@@ -1,0 +1,58 @@
+---
+import { catalog, counts, type CatalogEntry } from "../../lib/catalog";
+import { strings, hubLine, type Lang } from "../../i18n";
+import CatalogItem from "../CatalogItem.astro";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const S = strings(lang);
+const C = S.community;
+// The catalog is read at build time; without it the page links to the Discord forums instead.
+const cat = await catalog();
+const count = cat ? hubLine(lang, counts(cat)) : null;
+const maps: CatalogEntry[] = cat ? cat.entries.filter((e) => e.kind !== "mod") : [];
+const mods: CatalogEntry[] = cat ? cat.entries.filter((e) => e.kind === "mod") : [];
+---
+<section class="sec first content" aria-labelledby="community-title">
+  <h1 id="community-title">{C.h1}</h1>
+
+  <section class="dl-section" aria-labelledby="discord-title">
+    <h2 id="discord-title">{C.discordTitle}</h2>
+    <p>{C.discordText}</p>
+    <a class="btn sm" href="https://discord.gg/wmMksmWFDM">{C.discordBtn}</a>
+  </section>
+
+  <section class="dl-section" id="catalog" aria-labelledby="catalog-title">
+    <h2 id="catalog-title">{C.catalogTitle}</h2>
+    {count ? <p>{count}</p> : <p>{C.catalogFallback}</p>}
+    {cat && (
+      <nav class="filters" aria-label={C.catalogTitle}>
+        <a href="#catalog">{S.common.more}</a>
+        <a href="#maps-list">{C.filterMaps}</a>
+        <a href="#mods-list">{C.filterMods}</a>
+      </nav>
+    )}
+    {cat && (
+      <>
+        <h3 id="maps-list">{C.mapsHeading}</h3>
+        <ul class="cat-list">{maps.map((e) => <CatalogItem lang={lang} entry={e} />)}</ul>
+        <h3 id="mods-list">{C.modsHeading}</h3>
+        <ul class="cat-list">{mods.map((e) => <CatalogItem lang={lang} entry={e} />)}</ul>
+      </>
+    )}
+    {!cat && <p><a class="link" href="https://discord.gg/wmMksmWFDM">{C.discordBtn} →</a></p>}
+  </section>
+
+  <section class="dl-section" aria-labelledby="add-title">
+    <h2 id="add-title">{C.addTitle}</h2>
+    <p>{C.addText}</p>
+  </section>
+
+  <section class="dl-section" aria-labelledby="help-title">
+    <h2 id="help-title">{C.helpTitle}</h2>
+    <p>{C.helpText}</p>
+    <p><a class="link" href="https://github.com/indicozy/razdor/blob/main/CONTRIBUTING.md">{C.helpLink} →</a></p>
+  </section>
+</section>

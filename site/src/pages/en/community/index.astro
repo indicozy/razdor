@@ -1,0 +1,9 @@
+---
+import Base from "../../../layouts/Base.astro";
+import Community from "../../../components/pages/Community.astro";
+import { strings } from "../../../i18n";
+const m = strings("en").meta.community;
+---
+<Base lang="en" path="/community/" title={m.title} description={m.description}>
+  <Community lang="en" />
+</Base>

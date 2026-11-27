@@ -1,0 +1,9 @@
+---
+import Base from "../../../layouts/Base.astro";
+import Features from "../../../components/pages/Features.astro";
+import { strings } from "../../../i18n";
+const m = strings("en").meta.features;
+---
+<Base lang="en" path="/features/" title={m.title} description={m.description}>
+  <Features lang="en" />
+</Base>

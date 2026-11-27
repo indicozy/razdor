@@ -1,20 +1,27 @@
 ---
 import { latest } from "../lib/changelog";
+import { strings, href, type Lang } from "../i18n";
+import { fill } from "../lib/i18n";
+
 interface Props {
-  lang: "ru" | "en";
+  lang: Lang;
 }
+const { lang } = Astro.props;
+const S = strings(lang);
 const B = import.meta.env.BASE_URL;
 const version = latest()?.version ?? "";
+const other = lang === "ru" ? "en" : "ru";
+const otherHref = lang === "ru" ? `${B}en/` : `${B}`;
 ---
 <footer class="site-footer">
   <div class="inner">
-    <nav class="footer-links" aria-label="Ссылки">
-      <a href="https://github.com/indicozy/razdor">GitHub</a>
-      <a href={`${B}wiki/`}>Вики</a>
-      <a href="https://discord.gg/wmMksmWFDM">Discord</a>
-      <a href={`${B}wiki/license/`}>Лицензия и благодарности</a>
-      <a href={`${B}en/`} lang="en" hreflang="en">English</a>
+    <nav class="footer-links" aria-label={S.common.footerNav}>
+      <a href="https://github.com/indicozy/razdor">{S.common.github}</a>
+      <a href={href(lang, "wiki/")}>{S.common.wiki}</a>
+      <a href="https://discord.gg/wmMksmWFDM">{S.common.discord}</a>
+      <a href={href(lang, "wiki/license/")}>{S.footer.license}</a>
+      <a href={otherHref} lang={other} hreflang={other}>{S.footer.english}</a>
     </nav>
-    <p class="footer-note">Razdor {version}, движок для «Времён раздора» (Aterdux, 2004). Игровая графика используется с разрешения Aterdux.</p>
+    <p class="footer-note">{fill(S.footer.note, { version })}</p>
   </div>
 </footer>

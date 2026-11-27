@@ -1,0 +1,9 @@
+---
+import Base from "../../../layouts/Base.astro";
+import Faq from "../../../components/pages/Faq.astro";
+import { strings } from "../../../i18n";
+const m = strings("en").meta.faq;
+---
+<Base lang="en" path="/faq/" title={m.title} description={m.description}>
+  <Faq lang="en" />
+</Base>

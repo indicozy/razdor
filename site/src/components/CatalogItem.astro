@@ -1,0 +1,29 @@
+---
+import { pictureUrl, type CatalogEntry } from "../lib/catalog";
+import { strings, type Lang } from "../i18n";
+
+interface Props {
+  lang: Lang;
+  entry: CatalogEntry;
+}
+const { lang, entry: e } = Astro.props;
+const C = strings(lang).community;
+const pic = pictureUrl(e);
+const text = (t: { ru: string; en: string } | undefined) => (lang === "en" && t?.en ? t.en : t?.ru ?? "");
+const kind = e.kind === "mod" ? C.kindMod : e.kind === "campaign" ? C.kindCampaign : C.kindMap;
+const title = text(e.title) || e.id;
+const desc = text(e.description);
+---
+<li class="cat-item panel">
+  {pic ? (
+    <img class="cat-pic" src={pic} alt="" width="160" height="100" loading="lazy" decoding="async" />
+  ) : (
+    <div class="cat-pic cat-nopic" aria-hidden="true"></div>
+  )}
+  <div class="cat-body">
+    <div class="titlebar">{title}</div>
+    <p class="small"><span class="cat-kind">{kind}</span> · {C.author}: {e.author}</p>
+    {desc && <p class="cat-desc">{desc}</p>}
+    {e.source_url && <a class="link small" href={e.source_url}>{C.source} →</a>}
+  </div>
+</li>

@@ -1,0 +1,21 @@
+---
+import { strings, href, type Lang } from "../../i18n";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const S = strings(lang);
+const Q = S.faq;
+---
+<section class="sec first content" aria-labelledby="faq-title">
+  <h1 id="faq-title">{Q.h1}</h1>
+  <p class="lead">{Q.intro}</p>
+  {Q.items.map((it) => (
+    <details class="faq-item">
+      <summary>{it.q}</summary>
+      <p>{it.a}</p>
+      <p><a class="link" href={href(lang, it.href)}>{it.link} →</a></p>
+    </details>
+  ))}
+</section>
