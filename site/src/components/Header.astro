@@ -27,7 +27,7 @@ const other = lang === "ru" ? "en" : "ru";
     {nav.map((n) => <a href={href(lang, n.href)}>{n.label}</a>)}
   </nav>
   <span class="header-spacer"></span>
-  <a class="lang-link" href={switchHref} hreflang={other} lang={other} aria-label={S.header.langLabel}>{S.header.langLink}</a>
+  <a class="lang-link" href={switchHref} hreflang={other} lang={other} data-set-lang={other} aria-label={S.header.langLabel}>{S.header.langLink}</a>
   <a class="btn sm" href={href(lang, "download/")} style="white-space:nowrap">{S.common.download}</a>
   <details class="menu">
     <summary aria-label={S.common.menu}>☰</summary>
@@ -36,3 +36,11 @@ const other = lang === "ru" ? "en" : "ru";
     </nav>
   </details>
 </header>
+<script is:inline>
+  // The language link remembers the choice (cookie lang) for the bare / redirect; the link works without JS.
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest && event.target.closest(".lang-link");
+    if (!link) return;
+    try { document.cookie = "lang=" + link.getAttribute("data-set-lang") + "; Path=/; Max-Age=31536000; SameSite=Lax"; } catch (e) {}
+  });
+</script>

@@ -51,8 +51,9 @@ The current site is hand-written HTML on `gh-pages` (index, en, install, a hand-
   `hreflang` alternates on every page. Old `en.html`, `install.html`, `install-en.html` redirect.
 - `razdor.indicozy.dev` is canonical; GitHub Pages is a full copy whose canonical points there.
 - On razdor.indicozy.dev, nginx redirects only the bare `/`: `Accept-Language` led by ru/uk/be/kk
-  stays, anything else gets a 302 to `/en/` (`Vary: Accept-Language`). A `lang` cookie, set by
-  `/lang/ru` and `/lang/en` (the switch's links), beats the header. Pages keeps a small
+  stays, anything else gets a 302 to `/en/` (`Vary: Accept-Language, Cookie`). A `lang` cookie, set by
+  the site's language link (a tiny inline script: it sets `lang=ru` or `lang=en` for a year, then the
+  link is followed; with no JS the link still works), beats the header. Pages keeps a small
   "English version" hint instead. Installing the nginx change needs the owner's root approval.
 
 ## Landing page

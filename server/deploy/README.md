@@ -113,6 +113,8 @@ The site file needs its certificate before nginx can load it. Order:
    test). The website's access log is off. The API has its own log that keeps no addresses (see
    «Logs and privacy»). Errors go to nginx's error log.
 
+   The bare `/` answers in the visitor's language. A `lang` cookie wins: the site's language link sets it, so a choice made on the site sticks. Without a cookie, Russian is served when one of `ru`, `uk`, `be` or `kk` comes first in `Accept-Language`. Everyone else gets English, a 302 to `/en/`. Russian is served at `/`. The response varies by `Accept-Language` and `Cookie`.
+
    nginx's own 429 (the per-address limit below) carries `Retry-After: 1`. The service's 429s carry their
    own `Retry-After`: the seconds until the window frees, or 60 when it is not known.
 
