@@ -115,6 +115,15 @@ by the smoke test (milestone 4).
 - `convert`: the map to plugin, textures and meshes; one CELL and one LAND for every cell of the map
   and of the margin ring, the CELLs of the references too, and one STAT per mesh (after LTEX).
 
+## Milestone 6 notes (the one command, the windows' backdrop)
+
+- `textures/razdor/panel.tga`: a 4x4 dark texel the event windows stretch behind their text (85%
+  opaque, 18 px padding, the text 1 to 4 sp larger than in M5). The converter writes it with the ground
+  textures; `convert` tests count it.
+- Russian text draws in the Template's own fonts: the event windows show the Russian text of the RK1
+  sample as written, so no Morrowind `mygui` files and no extra font are needed (spec Q9).
+- `tools/openmw-smoke/play.sh` runs the whole pipeline from a `.DTm` or `.json` in one folder (spec 6).
+
 ## Milestone 5 notes (events, windows, journal)
 
 - Lua: `lua/events.lua` is the engine (pure logic, reaching the world through `env`); `global.lua`
@@ -133,7 +142,7 @@ by the smoke test (milestone 4).
   lanterns (Q7), move army to hero, new hero class, battle, delay. The hall list (quests and rumours
   of an ordinary building, spec 3.11) is not built: the building's own local events fire on the step.
 - Deviations: the windows do not pause the world (no UI mode); no frame (the Template has no menu
-  textures, so the windows are text over the world); `Герой` stands in for the hero's name; the
+  textures, so the windows use a plain backdrop instead, see M6 below); `Герой` stands in for the hero's name; the
   strength and artifact conditions pass; a unit's `named` test reads the party's names only.
 
 ## Milestone 4 counts on the RK1 sample (game-derived; not committed)

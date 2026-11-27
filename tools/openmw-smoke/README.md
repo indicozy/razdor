@@ -4,6 +4,27 @@ Off-screen check of the converter's output (`crates/openmw-world`) in OpenMW 0.5
 game under its own Xvfb display, looks at the start cell, and reports PASS or FAIL. Not part of
 `cargo test`. Design: `docs/specs/2026-11-27-openmw-world.md`, section 5.
 
+## One command: play.sh (M6)
+
+```
+tools/openmw-smoke/play.sh <map.DTm | map.json> [--name N] [--archetype …] [--shot png] [--camera …] [--window]
+```
+
+From a fresh folder `/mnt/ai_models/razdor-scratch/openmw/play/<name>/` it exports the `.DTm` with
+`razdor-dtm-json` (skipped for a `.json`), converts with `razdor-openmw` (the Game Template from
+`OPENMW_EXAMPLE`), writes the standalone config and runs OpenMW off-screen (run.sh). Exit 0 is PASS.
+Everything goes into the folder: `map.json`, `out/` (the plugin, textures, meshes, Lua), `smoke/`
+(the config, `openmw.log`), `shot.png`, the build logs. The folder is never reused.
+
+- The default camera (`view.py`) stands two tiles north-west of the hero's start tile and looks at the
+  map's first building, 1800 units up, pitched 0.3 rad. `--camera` overrides it.
+- The picture hides the map's start window: the test-only `m5/m5_auto.omwscripts` answers every window
+  (the M5 driver, loaded by play.sh only). `run.sh` alone does not load it.
+- `--window` runs nothing. It writes the play config (`<folder>/window/`: no smoke scripts, the game's own
+  settings) and prints the command for a real window on the desktop, for the owner to play by hand:
+  `openmw --replace=config --config <folder>/window --skip-menu --start 0,0`.
+- Build cache: `CARGO_TARGET_DIR` (default `/mnt/ai_models/razdor-scratch/openmw/target`).
+
 ## Run
 
 ```
@@ -17,7 +38,13 @@ tools/openmw-smoke/run.sh <converter out dir> [--name <run name>] [--cell cx,cy]
   `OPENMW_EXAMPLE`.
 - `--probe x,y` teleports the player to a world point (units; a cell is 8192 wide) on the ground,
   one point after another from second 1 (2 s each, up to four). Each reading is a `RAZDOR_PROBE` line.
-- `--camera` puts a static camera there (pitch and yaw in radians) for the picture.
+- `--camera` puts a static camera there (pitch and yaw in radians) for the picture. A static camera
+  does not load the cells around it: OpenMW loads the cells around the player, so a picture of a
+  far spot needs `--probe` at the same spot (on a passable tile, or the guard sends the player back).
+- `--cyrillic-test` shows the Russian test message (off by default).
+- `--play-config` writes the standalone config without the smoke scripts or the wider view distance,
+  prints the folder and exits (play.sh `--window` uses it).
+- `OPENMW_SMOKE_SCRATCH` replaces the scratch folder (default `…/openmw/smoke-run`).
 - Exit 0 is PASS. It fails when the `RAZDOR_SMOKE` line is missing, the picture is one flat colour
   (top 560 rows), or the log has an `Error` line naming razdor. The Xvfb display and OpenMW are
   stopped on exit.
@@ -44,6 +71,8 @@ converter plugin (`patch`). It needs no game files.
 - In `settings.cfg`, `[Video]` takes `fullscreen = false`. `window mode = Windowed` makes OpenMW
   abort on "Failed to parse number".
 - The Template's `settings.cfg` is copied as is (its `[Models]` and `[Game]` lines).
+- Smoke runs add `[Camera] viewing distance = 12000`: at the default the fog hides the land a few
+  tiles away. Play configs keep the game's own value.
 - Known noise, the same with or without the converter's files: about 16 `E` lines (missing
   `menu_*.dds`, and menu scripts that cannot start). None names a razdor file.
 
