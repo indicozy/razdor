@@ -8,6 +8,7 @@ pub mod cards;
 pub mod container;
 pub mod data;
 pub mod dtm;
+pub mod dtm_json;
 pub mod english;
 pub mod game_import;
 pub mod gfx;

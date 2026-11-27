@@ -484,6 +484,31 @@ install they run against (`razdor::dt::install::locate`), replacing older copies
   reasoning_effort/response_format once (LM Studio: no json_object) is not sent them again
   in the run (`PLAIN_SERVERS`), so a batch costs one request.
 
+## The map exporter (`razdor-dtm-json`)
+
+`razdor-dtm-json <map.DTm> [-o <out.json>] [--compact]` writes one `.DTm` map as JSON, for
+converters to other games (OpenMW first). The layout is in `src/dt/dtm_json.rs` (pure, no
+install needed); the command is `src/bin/razdor-dtm-json.rs`. It reads only the map file.
+Output is pretty JSON on stdout (`-o` writes a file, `--compact` puts it on one line). Errors
+go to stderr with exit code 2.
+
+- **Format `razdor-dtm-json`, version 1.** `format` and `version` are the first two keys. Any
+  change of the layout bumps `VERSION`; a converter checks it before reading.
+- Keys in the order: `format`, `version`, `source_file` (the file name only, never a path),
+  `width`, `height`, `info`, `heroes`, `legend`, `terrain`, `objects`, `buildings`, `armies`,
+  `points`, `events`, `named_characters`, `has_scenario_picture`.
+- Numbers are the file's raw values. Names are snake_case (`kind_name`, `model_name`,
+  `class_name`, `legend`). Ids are 1-based as the file uses them (`buildings[].index`,
+  `events[].id`, `victory_event`).
+- `terrain` is `hex-rows` (one hex digit per cell, row 0 at the top), or `numbers` when a code
+  is above 15.
+- Never written: picture bytes (only the flags `has_scenario_picture` and `has_custom_picture`)
+  and any `unknown_*` field of the file.
+- Key order is kept by the text form (`dtm_json::scenario_to_string`). `dtm_json::scenario_to_json`
+  returns a `serde_json::Value`, whose keys come out sorted (serde_json built without the preserve_order feature).
+- Tests: `cargo test --profile fasttest --lib dt::dtm_json::`. The real-map test exports every
+  map of the install (`RAZDOR_DT_DIR`) and skips without it.
+
 ## The player's performance test (Settings → Other)
 
 «Тест производительности» (`src/ui/bench.rs`, the windows in `src/ui/bench_view.rs`, the owner's request 2026-11-12)
