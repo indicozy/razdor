@@ -185,6 +185,8 @@ img { max-width: 100%; }
 .stop { position: absolute; left: 172px; width: 120px; transform: translateY(-50%); }
 .stop-mark { font: 15px/1.2 var(--font-head); color: var(--gold); text-shadow: 0 0 4px #000, 0 0 2px #000; display: block; }
 .stop[data-stop-active="true"] .stop-mark { color: #fff1c4; }
+/* The battle stop's label sits under the two armies that stand around it. */
+.stop[data-stop-index="4"] { transform: translateY(calc(-50% + 72px)); }
 .fire {
   position: absolute; width: 64px; height: 64px; image-rendering: pixelated; mix-blend-mode: screen;
   background-size: auto 64px; background-repeat: no-repeat;

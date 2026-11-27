@@ -69,11 +69,12 @@ const version = latest()?.version ?? "";
       const isAndroid = /Android/.test(ua);
       const isMac = /Macintosh/.test(ua) && !isIOS;
       const isWin = /Windows/.test(ua);
-      let text = labels.linux;
-      if (isWin) text = labels.windows;
-      else if (isMac) text = labels.mac;
-      else if (isAndroid) text = labels.android;
-      else if (isIOS) text = labels.ios;
+      const key = isWin ? "windows" : isMac ? "mac" : isAndroid ? "android" : isIOS ? "ios" : "linux";
+      const text = labels[key];
+      document.querySelectorAll("[data-dl-meta]").forEach((p) => {
+        const line = JSON.parse(p.dataset.dlMeta || "{}")[key];
+        if (line) p.textContent = line;
+      });
       document.querySelectorAll("[data-dl]").forEach((a) => {
         a.textContent = text;
         a.href = releases;

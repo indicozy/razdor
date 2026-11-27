@@ -26,6 +26,17 @@ const news = lang === "ru" && rel ? [...rel.fixed, ...rel.changed, ...rel.added]
 const sizes = await assetSizes();
 const exeSize = sizes?.get("Razdor.exe");
 const sizeText = exeSize ? formatSize(exeSize, lang) : "";
+// The line under the download button follows the visitor's system (the layout's script picks the key): the
+// version, that system's file size and the other systems. Without JS the Windows line stays.
+const sysNames = { windows: "Windows", mac: "macOS", linux: "Linux", android: "Android", ios: "iOS" } as const;
+const sysFiles = { windows: "Razdor.exe", mac: "razdor-macos", linux: "razdor", android: "razdor.apk", ios: "razdor.ipa" } as const;
+const othersWord = L.meta.split(":")[0];
+const metaFor = (k: keyof typeof sysNames) => {
+  const size = sizes?.get(sysFiles[k]);
+  const others = (Object.keys(sysNames) as (keyof typeof sysNames)[]).filter((o) => o !== k).map((o) => sysNames[o]);
+  return [version, size ? formatSize(size, lang) : "", `${othersWord}: ${others.join(", ")}`].filter(Boolean).join(", ");
+};
+const metaBySystem = Object.fromEntries((Object.keys(sysNames) as (keyof typeof sysNames)[]).map((k) => [k, metaFor(k)]));
 const cat = await catalog();
 const hub = hubLine(lang, cat ? counts(cat) : null) ?? L.hubFallback;
 // The Hub block: the first three catalog entries (real title, author, kind, picture) as flags and a plain list.
@@ -77,7 +88,7 @@ const routeD = [
       <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
       <a class="btn ghost" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a>
     </div>
-    <p class="small muted">{[version, sizeText, L.meta].filter(Boolean).join(", ")}</p>
+    <p class="small muted" data-dl-meta={JSON.stringify(metaBySystem)}>{metaFor("windows")}</p>
     <p class="small muted">{L.autoGame}</p>
     <div class="pic fog crt shota" role="img" aria-label={L.heroAlt} style={art("a-big.webp")}></div>
   </section>
