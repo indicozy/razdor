@@ -287,12 +287,14 @@ fn write(
     records.extend(cell_records);
     records.extend(land_records);
 
-    let textures = (0..ltex_count)
+    let mut textures: Vec<(String, Vec<u8>)> = (0..ltex_count)
         .map(|index| {
             let path = format!("textures/{}", textures::texture_path(index));
             (path, textures::tga(textures::TEXTURE_SIZE, textures::SURFACES[index].rgb))
         })
         .collect();
+    // The backdrop of the event windows (M6): a 4x4 dark texel, stretched by the UI.
+    textures.push((format!("textures/{}", textures::PANEL_PATH), textures::tga(textures::PANEL_SIZE, textures::PANEL_RGB)));
     let meshes = plan
         .meshes
         .iter()
@@ -430,8 +432,13 @@ mod tests {
     fn a_16_by_16_map_has_its_cells_and_the_margin_ring() {
         let map = map_of(16, 16, |x, y| ((x + y) % 8) as u8);
         let out = convert(&map, &opts(1024)).unwrap();
-        assert_eq!(out.textures.len(), 18);
-        assert!(out.textures.iter().all(|(p, b)| p.starts_with("textures/razdor/") && b.len() == 18 + 64 * 64 * 3));
+        // 18 ground textures of 64x64, then the 4x4 window backdrop.
+        assert_eq!(out.textures.len(), 19);
+        assert!(out.textures.iter().all(|(p, _)| p.starts_with("textures/razdor/")));
+        assert!(out.textures[..18].iter().all(|(_, b)| b.len() == 18 + 64 * 64 * 3));
+        let panel = &out.textures[18];
+        assert_eq!(panel.0, "textures/razdor/panel.tga");
+        assert_eq!(panel.1.len(), 18 + 4 * 4 * 3);
         if !esmtool_installed() {
             eprintln!("skipped: esmtool is not on PATH");
             return;

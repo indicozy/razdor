@@ -12,6 +12,8 @@
 #   --camera   static camera position and angles (radians) for the picture; default: the player's view.
 #   --shot     where the PNG goes. Default: <run dir>/shot.png.
 #   --content     an .omwscripts name, found in an --extra-data folder, loaded as content (test drivers).
+#   --cyrillic-test  show the Russian test message (off by default).
+#   --play-config    write the standalone config for a window (no smoke scripts, no run), print it, exit 0.
 #   --extra-data  a folder added to the data path (e.g. the Template's example_animated_creature/data
 #              for meshes/land_racer.dae). Repeatable.
 #
@@ -19,7 +21,7 @@
 set -u
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-SCRATCH=/mnt/ai_models/razdor-scratch/openmw/smoke-run
+SCRATCH=${OPENMW_SMOKE_SCRATCH:-/mnt/ai_models/razdor-scratch/openmw/smoke-run}
 EXAMPLE=${OPENMW_EXAMPLE:-/mnt/ai_models/razdor-scratch/openmw/example-suite}
 RESOURCES=/usr/share/openmw/resources
 
@@ -32,6 +34,8 @@ CAMERA=""
 PROBES=()
 EXTRA_DATA=()
 CONTENT=()
+CYRILLIC=0
+PLAY_CONFIG=0
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
@@ -48,6 +52,8 @@ while [ $# -gt 0 ]; do
         --probe) PROBES+=("$2"); shift 2 ;;
         --extra-data) EXTRA_DATA+=("$2"); shift 2 ;;
         --content) CONTENT+=("$2"); shift 2 ;;
+        --cyrillic-test) CYRILLIC=1; shift ;;
+        --play-config) PLAY_CONFIG=1; shift ;;
         -h|--help) usage ;;
         *) echo "run.sh: unknown argument $1" >&2; usage ;;
     esac
@@ -76,9 +82,11 @@ user-data=$RUN/userdata
 data=$RESOURCES/vfs
 data=$EXAMPLE/game_template/data
 data=$OUT
-data=$HERE/smoke
-data=$RUN/smokedata
 EOF
+# The smoke scripts are test-only: a play config (--play-config) has none of them.
+if [ "$PLAY_CONFIG" = 0 ]; then
+    printf 'data=%s\ndata=%s\n' "$HERE/smoke" "$RUN/smokedata" >> "$RUN/openmw.cfg"
+fi
 for d in "${EXTRA_DATA[@]+"${EXTRA_DATA[@]}"}"; do
     echo "data=$(cd "$d" && pwd)" >> "$RUN/openmw.cfg"
 done
@@ -88,7 +96,7 @@ done
     echo "content=razdor_map.omwaddon"
     # The converter's Lua runtime (M4+): only when the converter wrote it.
     [ -f "$OUT/razdor_map.omwscripts" ] && echo "content=razdor_map.omwscripts"
-    echo "content=smoke.omwscripts"
+    [ "$PLAY_CONFIG" = 0 ] && echo "content=smoke.omwscripts"
     for c in "${CONTENT[@]+"${CONTENT[@]}"}"; do echo "content=$c"; done
     echo "encoding=win1251"
 } >> "$RUN/openmw.cfg"
@@ -102,6 +110,11 @@ resolution x = 1280
 resolution y = 720
 fullscreen = false
 EOF
+# A wider view distance for the smoke pictures only (the fog hides the scenery at the default);
+# the play config keeps the game's own setting.
+if [ "$PLAY_CONFIG" = 0 ]; then
+    printf '\n[Camera]\nviewing distance = 12000\n' >> "$RUN/settings.cfg"
+fi
 
 # --- test-only Lua config (read by smoke/scripts/razdor_smoke/player.lua) ---
 LUA_PROBES=""
@@ -109,6 +122,8 @@ for p in "${PROBES[@]+"${PROBES[@]}"}"; do
     LUA_PROBES="$LUA_PROBES{${p%%,*},${p#*,}},"
 done
 LUA_CAMERA="nil"
+LUA_CYRILLIC=false
+[ "$CYRILLIC" = 1 ] && LUA_CYRILLIC=true
 if [ -n "$CAMERA" ]; then
     IFS=, read -r cx cy cz cp cyw <<< "$CAMERA"
     LUA_CAMERA="{x=$cx,y=$cy,z=$cz,pitch=$cp,yaw=$cyw}"
@@ -120,8 +135,15 @@ return {
     quitAfter = 5,
     probes = { $LUA_PROBES },
     camera = $LUA_CAMERA,
+    cyrillic = $LUA_CYRILLIC,
 }
 EOF
+
+# --- play config: written, printed, not run (play.sh --window starts it by hand) ---
+if [ "$PLAY_CONFIG" = 1 ]; then
+    echo "config:     $RUN"
+    exit 0
+fi
 
 # --- a free display (never :0, the owner's desktop) ---
 D=""

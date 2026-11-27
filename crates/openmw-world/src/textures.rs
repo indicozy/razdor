@@ -40,6 +40,11 @@ pub const DEEP_SEA: u8 = 2;
 /// Texture size in texels (square, flat colour).
 pub const TEXTURE_SIZE: u16 = 64;
 
+/// The event windows' backdrop (M6): a dark 4x4 texture under `textures/`, stretched by the UI.
+pub const PANEL_PATH: &str = "razdor/panel.tga";
+pub const PANEL_SIZE: u16 = 4;
+pub const PANEL_RGB: [u8; 3] = [14, 11, 8];
+
 /// The LTEX record id of entry `index`.
 pub fn ltex_id(index: usize) -> String {
     format!("rz_{}", SURFACES[index].name)

@@ -1,5 +1,6 @@
 -- Test-only player script for tools/openmw-smoke. Prints one line to the log, shows a Russian
--- message (font check), optionally moves the camera and teleports to probe points, then quits.
+-- message when run.sh --cyrillic-test asks for it (font check), optionally moves the camera and
+-- teleports to probe points, then quits.
 -- Settings come from config.lua, which run.sh writes into the run's own data folder.
 local self = require('openmw.self')
 local core = require('openmw.core')
@@ -52,7 +53,9 @@ async:newUnsavableSimulationTimer(smokeAt, function()
     local cell = self.cell
     print(string.format('RAZDOR_SMOKE cell=%d,%d pos=%.1f,%.1f,%.1f',
         cell.gridX, cell.gridY, pos.x, pos.y, pos.z))
-    ui.showMessage('Тест кириллицы: Раздор, Пепельная Марка, ёжик 123')
+    if config.cyrillic then
+        ui.showMessage('Тест кириллицы: Раздор, Пепельная Марка, ёжик 123')
+    end
 end)
 
 async:newUnsavableSimulationTimer(smokeAt + (config.quitAfter or 5), function()

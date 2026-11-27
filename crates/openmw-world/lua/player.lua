@@ -43,13 +43,15 @@ local function press(answer)
 end
 
 -- The windows use no template: the MWUI frames need the Morrowind menu textures, which a converted
--- map does not have (the Template ships none). The text is drawn over the world.
+-- map does not have (the Template ships none). Each window is a dark backdrop (textures/razdor/panel.tga,
+-- written by the converter, M6) with the text on it.
 local GOLD = util.color.rgb(0.95, 0.85, 0.55)
+local PANEL_PATH = 'textures/razdor/panel.tga'
 
 local function button(label, answer)
     return {
         type = ui.TYPE.Text,
-        props = { text = '[ ' .. label .. ' ]', textSize = 20, textColor = GOLD },
+        props = { text = '[ ' .. label .. ' ]', textSize = 22, textColor = GOLD },
         events = {
             mouseClick = async:callback(function()
                 press(answer)
@@ -60,6 +62,8 @@ end
 
 -- A line of text in a box of the window's width and the given height (a Flex child needs both).
 local WIDTH = 440
+local PAD = 18 -- the text's padding inside the backdrop
+local WINDOW_H = 300
 
 local function text_line(text, size, height)
     return {
@@ -76,19 +80,20 @@ local function text_line(text, size, height)
     }
 end
 
--- The window of a message, a question or the end of the game (spec 3.11, 3.12).
+-- The window of a message, a question or the end of the game (spec 3.11, 3.12). The backdrop is a
+-- dark panel, 85% opaque, stretched over the whole window; the text sits inside its padding.
 local function open_window(d)
     close_window()
     shown = { wid = d.wid, kind = d.kind }
-    local lines = { text_line(d.title or '', 24, 36) }
+    local lines = { text_line(d.title or '', 26, 36) }
     if d.kind == 'end' then
         local head = d.victory and 'Победа' or 'Поражение'
-        table.insert(lines, text_line(head, 20, 30))
+        table.insert(lines, text_line(head, 22, 30))
         if d.victory and d.next_map and d.next_map ~= '' then
-            table.insert(lines, text_line('Следующая карта: ' .. d.next_map, 18, 30))
+            table.insert(lines, text_line('Следующая карта: ' .. d.next_map, 19, 30))
         end
     else
-        table.insert(lines, text_line(d.text or '', 18, 170))
+        table.insert(lines, text_line(d.text or '', 19, 170))
     end
     local row = {}
     for _, b in ipairs(d.buttons or {}) do
@@ -100,16 +105,32 @@ local function open_window(d)
         props = { horizontal = true, arrange = ui.ALIGNMENT.Center, size = util.vector2(WIDTH, 34) },
         content = ui.content(row),
     })
-    win = ui.create({
-        layer = 'Windows',
+    local backdrop = {
+        type = ui.TYPE.Image,
+        props = {
+            resource = ui.texture({ path = PANEL_PATH }),
+            relativeSize = util.vector2(1, 1),
+            alpha = 0.85,
+        },
+    }
+    local body = {
         type = ui.TYPE.Flex,
         props = {
-            relativePosition = util.vector2(0.5, 0.5),
-            anchor = util.vector2(0.5, 0.5),
-            size = util.vector2(WIDTH + 20, 280),
+            position = util.vector2(PAD, PAD),
+            size = util.vector2(WIDTH, WINDOW_H - 2 * PAD),
             arrange = ui.ALIGNMENT.Center,
         },
         content = ui.content(lines),
+    }
+    win = ui.create({
+        layer = 'Windows',
+        type = ui.TYPE.Widget,
+        props = {
+            relativePosition = util.vector2(0.5, 0.5),
+            anchor = util.vector2(0.5, 0.5),
+            size = util.vector2(WIDTH + 2 * PAD, WINDOW_H),
+        },
+        content = ui.content({ backdrop, body }),
     })
 end
 
