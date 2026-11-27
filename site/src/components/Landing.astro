@@ -2,6 +2,7 @@
 import { latest } from "../lib/changelog";
 import { catalog, counts } from "../lib/catalog";
 import { strings, href, hubLine, type Lang } from "../i18n";
+import Battle from "./Battle.astro";
 
 interface Props {
   lang: Lang;
@@ -29,9 +30,6 @@ const routeD = [
   "M40 50 C140 10, 220 88, 330 46 S 520 6, 600 52 S 760 92, 860 30",
   "M60 30 C170 80, 240 -4, 370 40 S 590 90, 700 46 S 800 20, 880 56",
 ];
-// Portraits of the battle: 2 rows of 6 for each side, the enemy side has one empty row.
-const enemyCards = ["00", "03", "04", "05", "06", "07"];
-const yourCards = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"];
 ---
 <main id="main">
   <section class="sec first content" data-stop="0" aria-labelledby="hero-title">
@@ -105,28 +103,7 @@ const yourCards = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "
 
   <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[3]} /></svg></div>
 
-  <section class="sec content" data-stop="4" data-battle aria-labelledby="battle-title">
-    <div class="hd">
-      <h2 id="battle-title">{L.battleTitle}</h2>
-      <svg class="squig" viewBox="0 0 300 12" aria-hidden="true"><path d="M2 8 C60 3, 100 10, 150 6 S 240 2, 298 7" fill="none" stroke="#f0c96a" stroke-width="2.5" /></svg>
-    </div>
-    <p>{L.battleText}</p>
-    <div class="field fog" data-battle-field="enemy">
-      <div class="cards">
-        {enemyCards.map((n) => <div class="card" style={art(`portrait-${n}.webp`)}></div>)}
-        {enemyCards.map(() => <div class="card empty"></div>)}
-      </div>
-    </div>
-    <div class="parch" role="status" data-battle-status>{L.battleStatus}</div>
-    <div class="field fog" data-battle-field="you">
-      <div class="cards">
-        {yourCards.map((n) => <div class="card" style={art(`portrait-${n}.webp`)}></div>)}
-      </div>
-    </div>
-    <div class="e-tail">
-      <a class="btn ghost sm" href="#path" data-battle-skip>{L.battleSkip}</a>
-    </div>
-  </section>
+  <Battle lang={lang} />
 
   <section class="sec content" id="path" data-stop="5" aria-labelledby="path-title">
     <div class="hd">
@@ -174,10 +151,4 @@ const yourCards = ["08", "09", "10", "11", "12", "13", "14", "15", "16", "17", "
   </section>
 </main>
 
-<script>
-  // Battle: the skip link goes to the next section; the scripted turn comes in a later step.
-  document.querySelectorAll<HTMLElement>("[data-battle-skip]").forEach((a) => a.addEventListener("click", (e) => {
-    e.preventDefault();
-    document.getElementById("path")?.scrollIntoView({ behavior: "smooth" });
-  }));
-</script>
+

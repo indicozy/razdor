@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 /* Razdor site: direction C «Карта» (the map ground, fog-of-war pictures, gold headings) with the
    2000s bevelled buttons and panels. Square corners everywhere except the hero and army markers. */
 
@@ -73,14 +74,22 @@ img { max-width: 100%; }
   background-image: radial-gradient(ellipse at 40% 30%, #6b4826 0, #3a2716 55%, #24150a 100%);
   background-size: cover; background-position: center; background-repeat: no-repeat;
 }
+/* The fog (3C): edges dissolve into the ground */
 .fog {
   -webkit-mask-image: radial-gradient(ellipse 60% 66% at 50% 52%, #000 66%, transparent 100%),
     radial-gradient(ellipse 26% 40% at 4% 14%, #000 40%, transparent 100%),
-    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%);
+    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%),
+    radial-gradient(ellipse 56% 58% at 50% 50%, #000 78%, transparent 100%),
+    radial-gradient(circle at 92% 10%, transparent 5%, #000 14%),
+    radial-gradient(circle at 6% 90%, transparent 5%, #000 13%);
   mask-image: radial-gradient(ellipse 60% 66% at 50% 52%, #000 66%, transparent 100%),
     radial-gradient(ellipse 26% 40% at 4% 14%, #000 40%, transparent 100%),
-    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%);
-  -webkit-mask-composite: source-in, source-in; mask-composite: intersect, intersect;
+    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%),
+    radial-gradient(ellipse 56% 58% at 50% 50%, #000 78%, transparent 100%),
+    radial-gradient(circle at 92% 10%, transparent 5%, #000 14%),
+    radial-gradient(circle at 6% 90%, transparent 5%, #000 13%);
+  -webkit-mask-composite: source-over, source-over, source-over, source-in, source-in, source-in;
+  mask-composite: add, add, add, intersect, intersect, intersect;
 }
 .crt::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;

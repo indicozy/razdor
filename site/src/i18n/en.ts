@@ -253,4 +253,15 @@ export const en: typeof ru = {
       },
     ],
   },
+  battle: {
+    noscript: "To play the battle, turn on JavaScript. The armies stand here for now.",
+    turn: "Your turn: choose whom to attack",
+    attack: "Attack: {name}",
+    hit: "{a} hits {b}: −{n}",
+    dead: "dead",
+    victory: "Victory! The siege of the Royal Valley is lifted",
+    next: "Onward on the road",
+    foes: ["Mercenary", "Bandit", "Necromancer", "Cutthroat", "Marksman", "Ghoul"],
+    ours: ["Knight", "Archer", "Monk", "Pikeman", "Crossbowman", "Militiaman"],
+  },
 };
