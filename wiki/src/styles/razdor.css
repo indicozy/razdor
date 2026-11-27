@@ -1,30 +1,31 @@
-/* The wiki's look, after the main site (style.css on gh-pages): Kurale for headings,
-   PT Sans for text, the site's ember, gold and cream colours. */
+/* The wiki's look, after the Razdor site: Becker for headings, PT Sans for text, DT's ember ground, cream text,
+   gold accents and the marble green of the header. The fonts are the site's own (public/fonts). */
 
-@font-face { font-family: "Kurale"; src: url("/fonts/Kurale-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Becker"; src: url("/fonts/Becker-Medium.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
 
-/* Dark (the default): ember ground, cream text, gold accents. */
+/* Dark (the default): DT's burnt ground, cream text, gold accents, the marble green for the header. */
 :root {
 	--sl-font: "PT Sans", system-ui, sans-serif;
 	--sl-font-system: "PT Sans", system-ui, sans-serif;
 	--sl-font-system-mono: ui-monospace, monospace;
-	--sl-color-black: #1f1109;
+	--sl-color-black: #1c0e06;
 	--sl-color-white: #f1e6c9;
 	--sl-color-gray-1: #f1e6c9;
 	--sl-color-gray-2: #dcb97c;
-	--sl-color-gray-3: #a88d5c;
+	--sl-color-gray-3: #b9a888;
 	--sl-color-gray-4: #7a6544;
-	--sl-color-gray-5: #4f3c25;
-	--sl-color-gray-6: #2e2014;
+	--sl-color-gray-5: #5a3a1e;
+	--sl-color-gray-6: #2e1a0c;
+	--sl-color-gray-7: #241409;
 	--sl-color-accent-low: #3b220f;
-	--sl-color-accent: #d8b25a;
+	--sl-color-accent: #b8591c;
 	--sl-color-accent-high: #f0c96a;
 	--sl-color-text: #f1e6c9;
 	--sl-color-text-accent: #f0c96a;
-	--sl-color-bg-nav: #2a1a0e;
-	--sl-color-bg-sidebar: #2a1a0e;
+	--sl-color-bg-nav: #24473b;
+	--sl-color-bg-sidebar: #1f1109;
 }
 
 /* Light: parchment ground, dark brown text, the same gold turned darker to stay readable. */
@@ -43,22 +44,26 @@
 	--sl-color-accent-high: #5c3a08;
 	--sl-color-text: #2c1b0b;
 	--sl-color-text-accent: #8a5a12;
-	--sl-color-bg-nav: #f3e9cf;
-	--sl-color-bg-sidebar: #fbf5e6;
+	--sl-color-bg-nav: #24473b;
+	--sl-color-bg-sidebar: #f3e9cf;
 }
 
 :where(h1, h2, h3, h4, h5, h6, .site-title, .hero h1, .hero .title) {
-	font-family: "Kurale", serif;
+	font-family: "Becker", serif;
 	font-weight: 400;
-	letter-spacing: 0.01em;
+	letter-spacing: 0.02em;
 }
 
 :where(body) {
 	font-size: 1.0625rem;
 }
 
-:root[data-theme="dark"] .hero h1,
-:root:not([data-theme]) .hero h1 {
+/* The header is the marble green of the site's top bar, with a gold rule under it. */
+header.header {
+	border-bottom: 2px solid var(--sl-color-accent);
+}
+
+:root:not([data-theme="light"]) .hero h1 {
 	text-shadow: 0 2px 0 #1a0d05, 0 0 22px rgba(255, 150, 60, 0.35);
 }
 

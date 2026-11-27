@@ -11,6 +11,9 @@ export default defineConfig({
 	integrations: [
 		starlight({
 			title: 'Razdor — вики',
+			components: {
+				SiteTitle: './src/components/SiteTitle.astro',
+			},
 			defaultLocale: 'root',
 			locales: {
 				root: { label: 'Русский', lang: 'ru' },

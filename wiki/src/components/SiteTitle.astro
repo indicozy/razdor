@@ -1,0 +1,29 @@
+---
+// The wiki's header title: a link back to the Razdor site (the wiki's own base is .../wiki/, the site is one level up)
+// and a «Вики» label (English pages: «Wiki»). Replaces Starlight's title, which named the wiki only.
+// The header is marble green in both themes, so its colours are fixed here.
+const base = import.meta.env.BASE_URL; // /razdor/wiki/ on GitHub Pages, /wiki/ on the owner's server
+const home = base.replace(/wiki\/$/, ''); // /razdor/ or /
+const english = Astro.url.pathname.startsWith(`${base}en/`) || Astro.url.pathname === `${base}en`;
+---
+<a href={english ? `${home}en/` : home} class="razdor-home">Razdor</a>
+<span class="razdor-label">{english ? 'Wiki' : 'Вики'}</span>
+
+<style>
+  .razdor-home {
+    font-family: 'Becker', serif;
+    font-size: 1.35rem;
+    letter-spacing: 0.02em;
+    color: #f0c96a;
+    text-decoration: none;
+  }
+  .razdor-label {
+    margin-inline-start: 0.5rem;
+    padding: 0.05rem 0.45rem;
+    border: 1px solid #dcb97c;
+    color: #f1e6c9;
+    font-size: 0.8rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+</style>

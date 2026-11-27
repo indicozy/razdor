@@ -76,11 +76,18 @@ img { max-width: 100%; }
 .fog {
   -webkit-mask-image: radial-gradient(ellipse 60% 66% at 50% 52%, #000 66%, transparent 100%),
     radial-gradient(ellipse 26% 40% at 4% 14%, #000 40%, transparent 100%),
-    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%);
+    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%),
+    radial-gradient(ellipse 56% 58% at 50% 50%, #000 78%, transparent 100%),
+    radial-gradient(circle at 92% 10%, transparent 5%, #000 14%),
+    radial-gradient(circle at 6% 90%, transparent 5%, #000 13%);
   mask-image: radial-gradient(ellipse 60% 66% at 50% 52%, #000 66%, transparent 100%),
     radial-gradient(ellipse 26% 40% at 4% 14%, #000 40%, transparent 100%),
-    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%);
-  -webkit-mask-composite: source-in, source-in; mask-composite: intersect, intersect;
+    radial-gradient(ellipse 26% 42% at 97% 92%, #000 40%, transparent 100%),
+    radial-gradient(ellipse 56% 58% at 50% 50%, #000 78%, transparent 100%),
+    radial-gradient(circle at 92% 10%, transparent 5%, #000 14%),
+    radial-gradient(circle at 6% 90%, transparent 5%, #000 13%);
+  -webkit-mask-composite: source-over, source-over, source-over, source-in, source-in, source-in;
+  mask-composite: add, add, add, intersect, intersect, intersect;
 }
 .crt::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -190,8 +197,8 @@ img { max-width: 100%; }
 @keyframes hero-walk { from { background-position: 0 0; } to { background-position: -1024px 0; } }
 .army-grp { position: absolute; width: 128px; height: 112px; }
 .army-grp i { position: absolute; width: 64px; height: 64px; background-repeat: no-repeat; background-size: 512px 512px; image-rendering: pixelated; }
-.army-grp i.k { background-image: url("/art/knight-sheet.webp"); background-position: 0 -192px; }
-.army-grp i.n { background-image: url("/art/necromant-sheet.webp"); background-position: 0 -448px; }
+.army-grp i.k { background-image: var(--sheet); background-position: 0 -192px; }
+.army-grp i.n { background-image: var(--sheet); background-position: 0 -448px; }
 .road[data-walking="true"] .army-grp i.k { animation: march-k .8s steps(8) infinite; }
 .road[data-walking="true"] .army-grp i.n { animation: march-n .8s steps(8) infinite; }
 @keyframes march-k { from { background-position: 0 -192px; } to { background-position: -512px -192px; } }

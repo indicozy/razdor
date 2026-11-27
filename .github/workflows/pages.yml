@@ -1,20 +1,26 @@
-# Deploys GitHub Pages (https://indicozy.github.io/razdor/): the hand-made site from the gh-pages
-# branch plus the player wiki (wiki/, Starlight) built into its wiki/ folder
-# (https://indicozy.github.io/razdor/wiki/). Pages' source is "GitHub Actions", so nothing is
-# pushed to any branch (the "indicozy only" ruleset lets no bot push). A push to gh-pages starts
-# this workflow through gh-pages' own .github/workflows/deploy.yml (a workflow_dispatch).
-# The job root-copy makes the same site for the owner's server (razdor.indicozy.dev, /wiki/ at the root) and publishes
-# it as the one asset of the pre-release site-latest; the server pulls it (docs/specs/own-mirror-2026-11-24.md).
+# Deploys GitHub Pages (https://indicozy.github.io/razdor/): the Razdor website (site/, Astro) at the root and
+# the player wiki (wiki/, Starlight) under wiki/. Nothing comes from the gh-pages branch any more: the site's
+# pictures are not in git. They are the asset site-art.zip of the pre-release site-art, made by
+# tools/site/art_pack.py from the owner's install; this workflow downloads it at build time. If it is missing
+# the site builds without pictures (every picture degrades gracefully).
+# Pages' source is "GitHub Actions". The owner's server gets the same site at the root of
+# https://razdor.indicozy.dev/ (job root-copy): it is packed as site.tar.gz, the one asset of the pre-release
+# site-latest (docs/specs/own-mirror-2026-11-24.md). The app reads config.json from the Pages root: it must stay.
 name: Pages
 
 on:
   push:
     branches: [main]
     paths:
+      - "site/**"
       - "wiki/**"
+      - "changelog/**"
       - "data/remote/**"
       - "tools/site/**"
       - ".github/workflows/pages.yml"
+  schedule:
+    # Daily, so a new Hub catalog shows on the site within a day.
+    - cron: "17 4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -36,38 +42,55 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: wiki/package-lock.json
+          cache-dependency-path: |
+            site/package-lock.json
+            wiki/package-lock.json
 
       - name: Build the wiki
         working-directory: wiki
+        env:
+          RAZDOR_WIKI_BASE: /razdor/wiki
         run: npm ci && npm run build
 
-      - name: Check out the site (gh-pages)
-        uses: actions/checkout@v5
-        with:
-          ref: gh-pages
-          path: site
-
-      - name: Put the wiki into the site
+      # The site's pictures (not in git). A missing pack means a site without pictures, not a failed deploy.
+      - name: Download the site's pictures
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          rm -rf site/.git site/.github
-          rsync -a --delete wiki/dist/ site/wiki/
+          mkdir -p art-pack
+          if gh release download site-art -p site-art.zip -R "$GITHUB_REPOSITORY" -D art-pack --clobber; then
+            unzip -q -o art-pack/site-art.zip -d site/public
+          else
+            echo "::warning::the site-art release is missing: the site is built without pictures"
+          fi
 
-      # The remote config the app reads (https://indicozy.github.io/razdor/config.json). Source:
-      # data/remote/config.json; the owner's server copies it from here (docs/specs/own-mirror-2026-11-24.md).
-      - name: Put the remote config into the site
-        run: cp data/remote/config.json site/config.json
+      - name: Build the site
+        working-directory: site
+        env:
+          RAZDOR_SITE_BASE: /razdor/
+        run: npm ci && npm run build
+
+      - name: Assemble the Pages site
+        run: |
+          mkdir -p out/wiki
+          cp -r site/dist/. out/
+          cp -r wiki/dist/. out/wiki/
+          # The remote config the app reads (https://indicozy.github.io/razdor/config.json). Source:
+          # data/remote/config.json; the owner's server copies it from here (docs/specs/own-mirror-2026-11-24.md).
+          cp data/remote/config.json out/config.json
+          touch out/.nojekyll
+          python3 -I tools/site/canonical.py out
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: out
 
-  # The owner's server's copy of the same site, at the root of https://razdor.indicozy.dev/ (and /wiki/). The wiki is
-  # built with base /wiki, tools/site/root_copy.py makes the copy, and the copy is packed as site.tar.gz, the one asset of
-  # the pre-release site-latest in this repository (GITHUB_TOKEN cannot write to the community repository, and no secret
-  # is set). The owner's server pulls it (server/src/mirror/site.rs): no secret, no push to the server. The release is a
-  # pre-release that is not the latest, so the Hub's catalog (the latest release of razdor-community) and the app's
-  # releases are not affected.
+  # The owner's server's copy of the same site, at the root of https://razdor.indicozy.dev/ (and /wiki/). The site is
+  # built with base /, the wiki with base /wiki, tools/site/root_copy.py makes the copy, and the copy is packed as
+  # site.tar.gz, the one asset of the pre-release site-latest in this repository (GITHUB_TOKEN cannot write to the
+  # community repository, and no secret is set). The owner's server pulls it (server/src/mirror/site.rs): no secret,
+  # no push to the server. The release is a pre-release that is not the latest, so the Hub's catalog (the latest
+  # release of razdor-community) and the app's releases are not affected.
   root-copy:
     runs-on: ubuntu-22.04
     permissions:
@@ -82,7 +105,9 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: wiki/package-lock.json
+          cache-dependency-path: |
+            site/package-lock.json
+            wiki/package-lock.json
 
       - name: Build the wiki for the root (base /wiki)
         working-directory: wiki
@@ -90,20 +115,32 @@ jobs:
           RAZDOR_WIKI_BASE: /wiki
         run: npm ci && npm run build
 
-      - name: Check out the site (gh-pages)
-        uses: actions/checkout@v5
-        with:
-          ref: gh-pages
-          path: site
+      - name: Download the site's pictures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p art-pack
+          if gh release download site-art -p site-art.zip -R "$GITHUB_REPOSITORY" -D art-pack --clobber; then
+            unzip -q -o art-pack/site-art.zip -d site/public
+          else
+            echo "::warning::the site-art release is missing: the site is built without pictures"
+          fi
+
+      - name: Build the site for the root (base /)
+        working-directory: site
+        env:
+          RAZDOR_SITE_BASE: /
+        run: npm ci && npm run build
 
       - name: Assemble the site as the Pages build does
         run: |
-          rm -rf site/.git site/.github
-          rsync -a --delete wiki/dist/ site/wiki/
-          cp data/remote/config.json site/config.json
+          mkdir -p assembled/wiki
+          cp -r site/dist/. assembled/
+          cp -r wiki/dist/. assembled/wiki/
+          cp data/remote/config.json assembled/config.json
 
       - name: Make the root copy
-        run: python3 -I tools/site/root_copy.py site root-site
+        run: python3 -I tools/site/root_copy.py assembled root-site
 
       - name: Pack it
         run: tar -C root-site -czf site.tar.gz .
