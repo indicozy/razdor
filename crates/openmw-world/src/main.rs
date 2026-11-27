@@ -1,15 +1,16 @@
-//! `razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 1024] [--template <path>]`
+//! `razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 1024] [--template <path>] [--units <units.json>]`
 //!
 //! Writes `<out>/<name>.omwaddon` and `<out>/textures/razdor/*.tga`. Exit codes: 0 done, 1 a file
 //! could not be written, 2 bad input or usage.
 
 use razdor_openmw::convert::{self, Master, Options};
 use razdor_openmw::input::Map;
+use razdor_openmw::units::Units;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>] [--archetype knight|archmage|ranger] [--time-scale N] [--no-guard] [--template-assets]";
+const USAGE: &str = "usage: razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>] [--archetype knight|archmage|ranger] [--time-scale N] [--no-guard] [--template-assets] [--units <units.json>]";
 
 #[derive(Debug)]
 enum CliError {
@@ -36,6 +37,7 @@ struct Args {
     guard: bool,
     archetype: Option<String>,
     template_assets: bool,
+    units: Option<PathBuf>,
 }
 
 fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
@@ -49,6 +51,7 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
     let mut guard = true;
     let mut archetype = None;
     let mut template_assets = false;
+    let mut units = None;
     let mut it = args.iter();
     while let Some(arg) = it.next() {
         let mut value = |flag: &str| -> Result<String, CliError> {
@@ -71,6 +74,7 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
             }
             "--no-guard" => guard = false,
             "--template-assets" => template_assets = true,
+            "--units" => units = Some(PathBuf::from(value("--units")?)),
             flag if flag.starts_with('-') => {
                 return Err(CliError::Usage(format!("unknown option {flag}\n{USAGE}")));
             }
@@ -93,7 +97,7 @@ fn parse_args(args: &[String]) -> Result<Option<Args>, CliError> {
     if time_scale < 1 {
         return Err(CliError::Usage(format!("--time-scale must be at least 1, not {time_scale}")));
     }
-    Ok(Some(Args { input, out, name, tile_units, template, debug_heightmap, time_scale, guard, archetype, template_assets }))
+    Ok(Some(Args { input, out, name, tile_units, template, debug_heightmap, time_scale, guard, archetype, template_assets, units }))
 }
 
 /// The master's name and size: the file name of `--template` and its size, or `template.omwgame`
@@ -118,6 +122,14 @@ fn run(args: &Args) -> Result<(), CliError> {
     let text = std::fs::read_to_string(&args.input)
         .map_err(|e| CliError::Usage(format!("cannot read {}: {e}", args.input.display())))?;
     let map = Map::from_json(&text).map_err(|e| CliError::Usage(e.to_string()))?;
+    let units = match &args.units {
+        None => None,
+        Some(path) => {
+            let text = std::fs::read_to_string(path)
+                .map_err(|e| CliError::Usage(format!("cannot read {}: {e}", path.display())))?;
+            Some(Units::from_json(&text).map_err(|e| CliError::Usage(format!("{}: {e}", path.display())))?)
+        }
+    };
     let options = Options {
         name: args.name.clone(),
         tile_units: args.tile_units,
@@ -126,6 +138,7 @@ fn run(args: &Args) -> Result<(), CliError> {
         guard: args.guard,
         archetype: args.archetype.clone(),
         template_assets: args.template_assets,
+        units,
     };
     let out = convert::convert(&map, &options).map_err(|e| CliError::Usage(e.to_string()))?;
 

@@ -1893,6 +1893,7 @@ dependencies = [
  "macroquad",
  "png",
  "quad-snd",
+ "razdor-openmw",
  "razdor-server",
  "razdor-wire",
  "rfd",

@@ -55,6 +55,8 @@ getrandom = "0.3"
 [dev-dependencies]
 # The cloud's end-to-end test (`src/cloud/e2e.rs`) runs the API server in-process on a local port.
 razdor-server = { path = "server" }
+# The contract test (`tests/units_contract.rs`): the units JSON reads in the OpenMW converter's input types.
+razdor-openmw = { path = "crates/openmw-world" }
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time"] }
 # The tests of `dt::unpack` write a 7z archive; the game itself only reads them.

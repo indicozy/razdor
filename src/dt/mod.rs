@@ -25,6 +25,7 @@ pub mod sound;
 pub mod stored;
 pub mod text;
 pub mod unpack;
+pub mod units_json;
 pub mod windows;
 
 use std::fmt;

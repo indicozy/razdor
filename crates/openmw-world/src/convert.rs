@@ -29,6 +29,8 @@ pub struct Options {
     pub archetype: Option<String>,
     /// Use `land_racer.dae` from the Template's example as the body model instead of the placeholder.
     pub template_assets: bool,
+    /// The install's unit cards (`--units`, spec §3.8): real army stats and names; `None` keeps the placeholder formula.
+    pub units: Option<crate::units::Units>,
 }
 
 /// The master (`MAST`/`DATA` in the header): its file name and its size, 0 when unknown.
@@ -133,7 +135,7 @@ fn runtime(
         None => (String::new(), 0, 0),
     };
     let model = if opts.template_assets { "land_racer.dae" } else { FIGURE_MODEL };
-    let armies: ArmyPlan = actors::plan_armies(map, grid, heights, codes, &passable, &boxes, model);
+    let armies: ArmyPlan = actors::plan_armies(map, grid, heights, codes, &passable, &boxes, model, opts.units.as_ref());
 
     // The figure and the raft are meshes of the plan (their STATs and files come with the rest).
     let figure = mesh::figure();
@@ -325,6 +327,7 @@ mod tests {
             guard: true,
             archetype: None,
             template_assets: false,
+            units: None,
         }
     }
 

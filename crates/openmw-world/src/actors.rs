@@ -11,6 +11,7 @@ use crate::heightmap::HeightField;
 use crate::input::Map;
 use crate::placement;
 use crate::tes3::{self, Record};
+use crate::units::{Unit, Units};
 use std::collections::BTreeMap;
 
 /// The placeholder body mesh, `meshes/razdor/figure.dae` (spec §3.8, `mesh::figure`).
@@ -32,6 +33,9 @@ pub struct Stats {
     pub health: i64,
     pub fatigue: i64,
     pub combat: i64,
+    /// Magic skill and magicka (0 for the placeholder stats; the units JSON gives them, see [`real_stats`]).
+    pub magic: i64,
+    pub magicka: i64,
     /// Three attack pairs (minimum, maximum).
     pub attack: [(i64, i64); 3],
 }
@@ -58,7 +62,54 @@ pub fn stats(level: i64) -> Stats {
         health: health(level, 1),
         fatigue: 100,
         combat: (40 + 10 * level).min(100),
+        magic: 0,
+        magicka: 0,
         attack: [(4 + 3 * level, 8 + 6 * level); 3],
+    }
+}
+
+/// The real stats of a body of unit `u` at the map's 0-based troop level `raw` (the units JSON, spec
+/// §3.8 "units notes"; CREA level = `raw + 1`, the game's level). Hit points → health; the melee
+/// attack → the first attack pair and strength; the ranged attack → the second pair; the magic power →
+/// the third pair, intelligence, magicka and the magic skill (0 without a school); combat skill = the
+/// larger of melee and ranged attack; willpower = the average protection; agility = melee plus ranged
+/// defence; speed = 3 × initiative (10..100); endurance, luck and personality are 50. Each attack pair
+/// is (half the value rounded down, at least 1; the value), or (0, 0) for none. Every number is at the
+/// unit's level (its growth applied). Attributes and skills are capped at 0..100.
+pub fn real_stats(u: &Unit, raw: i64) -> Stats {
+    let blow = u.attack_blow_at(raw).max(0);
+    let shot = u.attack_shot_at(raw).max(0);
+    let power = u.magic_power_at(raw).max(0);
+    let pair = |v: i64| if v > 0 { ((v / 2).max(1), v) } else { (0, 0) };
+    let protection = (u.protection_at("life", raw) + u.protection_at("death", raw) + u.protection_at("elemental", raw)) / 3;
+    let cap = |v: i64| v.clamp(0, 100);
+    Stats {
+        level: raw + 1,
+        attributes: [
+            cap(blow),
+            cap(power),
+            cap(protection),
+            cap(u.defence_blow_at(raw) + u.defence_shot_at(raw)),
+            cap(3 * u.initiative_at(raw)).max(10),
+            50,
+            50,
+            50,
+        ],
+        health: u.hit_points_at(raw).max(1),
+        fatigue: 100,
+        combat: cap(blow.max(shot)),
+        magic: cap(power),
+        magicka: power,
+        attack: [pair(blow), pair(shot), pair(power)],
+    }
+}
+
+/// The CREA name of unit `u`: its name, or `Unit <id>` for an empty name.
+fn unit_name(u: &Unit) -> String {
+    if u.name.is_empty() {
+        format!("Unit {}", u.id)
+    } else {
+        u.name.clone()
     }
 }
 
@@ -83,11 +134,11 @@ pub fn crea(id: &str, name: &str, model: &str, s: &Stats) -> Record {
         put(a);
     }
     put(s.health);
-    put(0); // magicka
+    put(s.magicka);
     put(s.fatigue);
     put(0); // soul
     put(s.combat);
-    put(0); // magic
+    put(s.magic);
     put(0); // stealth
     for (lo, hi) in s.attack {
         put(lo);
@@ -188,6 +239,10 @@ pub fn hostile(map: &Map, faction: i64) -> bool {
     }
 }
 
+/// Plans the armies of a map (see the module docs). With `units` (the `--units` JSON), a unit card
+/// takes its real name and stats at its level and a leader takes its unit's stats and the army
+/// leader's name (the army's name when the leader has none); a unit missing from the file keeps the
+/// placeholder stats and the name `Unit <id>`. Without `units` the placeholder formula is used (M4).
 pub fn plan_armies(
     map: &Map,
     grid: &Grid,
@@ -196,14 +251,15 @@ pub fn plan_armies(
     passable: &[u8],
     boxes: &[[i64; 4]],
     model: &str,
+    units: Option<&Units>,
 ) -> ArmyPlan {
     let mut records: BTreeMap<String, Record> = BTreeMap::new();
     let mut plan = ArmyPlan::default();
     let unit_record = |records: &mut BTreeMap<String, Record>, unit: i64, level: i64| -> String {
         let id = unit_id(unit, level);
-        records.entry(id.clone()).or_insert_with(|| {
-            let s = stats(body_level(level));
-            crea(&id, &format!("Unit {unit}"), model, &s)
+        records.entry(id.clone()).or_insert_with(|| match units.and_then(|us| us.get(unit)) {
+            Some(u) => crea(&id, &unit_name(u), model, &real_stats(u, level)),
+            None => crea(&id, &format!("Unit {unit}"), model, &stats(body_level(level))),
         });
         id
     };
@@ -230,8 +286,23 @@ pub fn plan_armies(
 
         // The leader has its own record, named after the army (spec §3.8).
         let leader = leader_id(a.id);
-        let leader_name = if a.name.is_empty() { a.leader_name.clone() } else { a.name.clone() };
-        let leader_stats = stats(body_level(a.leader_level));
+        let leader_unit = units.and_then(|us| us.get(a.leader_unit));
+        let (leader_name, leader_stats) = match (units, leader_unit) {
+            (Some(_), Some(u)) => {
+                let name = if !a.leader_name.is_empty() {
+                    a.leader_name.clone()
+                } else if !a.name.is_empty() {
+                    a.name.clone()
+                } else {
+                    unit_name(u)
+                };
+                (name, real_stats(u, a.leader_level))
+            }
+            _ => {
+                let name = if a.name.is_empty() { a.leader_name.clone() } else { a.name.clone() };
+                (name, stats(body_level(a.leader_level)))
+            }
+        };
         records.insert(leader.clone(), crea(&leader, &leader_name, model, &leader_stats));
         let mut units = vec![(leader, 1, true)];
         for t in &a.troops {
@@ -330,7 +401,7 @@ mod tests {
         let grid = Grid::new(w, h, 1024).unwrap();
         let heights = crate::heightmap::HeightField::from_fn(crate::heightmap::bounds(&grid), |_, _| 0);
         let passable = crate::passable::build(map, &grid, codes);
-        plan_armies(map, &grid, &heights, codes, &passable, boxes, FIGURE_MODEL)
+        plan_armies(map, &grid, &heights, codes, &passable, boxes, FIGURE_MODEL, None)
     }
 
     #[test]
@@ -421,5 +492,86 @@ mod tests {
         assert!(a.relocated);
         let s = a.spawn;
         assert!(!(s[0] >= boxes[0][0] && s[0] <= boxes[0][1] && s[1] >= boxes[0][2] && s[1] <= boxes[0][3]));
+    }
+
+    /// The units file of the synthetic tests: unit 13 (a knight), unit 4 (a militiaman) and unit 19
+    /// (a mage), with the knight's melee attack `blow`. No game data.
+    fn units_text(blow: i64) -> String {
+        let unit = |id: i64, name: &str, hp: i64, blow: i64, shot: i64, power: i64, school: Option<&str>| {
+            serde_json::json!({
+                "id": id, "name": name, "cost": 1, "hit_points": hp,
+                "attack": {"blow": blow, "shot": shot}, "defence": {"blow": 10, "shot": 4},
+                "magic_power": power, "magic": school, "magic_direction": null,
+                "protection": {"life": 20, "death": 20, "elemental": 20}, "initiative": 10,
+                "actions": 1, "regeneration": 0, "vampirism": 0, "ranged": shot > 0, "flying": false,
+                "nature": "normal", "bonus": null, "evasion": null, "min_magic_power": null,
+                "mana_drain": null, "experience": {"start": 60, "growth_percent": 140},
+                "level_up": {"hit_points": 5, "attack_blow": 2}
+            })
+        };
+        serde_json::json!({
+            "format": crate::units::FORMAT, "version": crate::units::VERSION, "language": "ru", "count": 3,
+            "units": [
+                unit(13, "Рыцарь", 80, blow, 0, 0, None),
+                unit(4, "Ополченец", 50, 25, 0, 0, None),
+                unit(19, "Маг", 40, 0, 0, 20, Some("elemental")),
+            ]
+        })
+        .to_string()
+    }
+
+    fn synthetic_units() -> Units {
+        Units::from_json(&units_text(40)).unwrap()
+    }
+
+    #[test]
+    fn real_stats_follow_the_units_mapping_at_the_level() {
+        let units = synthetic_units();
+        let knight = units.get(13).unwrap();
+        // Map level 0 (as hired): CREA level 1, hit points 80, melee 40 -> attack (20, 40).
+        let s = real_stats(knight, 0);
+        assert_eq!((s.level, s.health, s.attack[0]), (1, 80, (20, 40)));
+        assert_eq!(s.attack[1], (0, 0), "no ranged attack");
+        assert_eq!(s.attack[2], (0, 0), "no magic");
+        assert_eq!((s.attributes[0], s.attributes[3], s.attributes[4]), (40, 14, 30), "strength, agility, speed");
+        assert_eq!((s.magic, s.magicka, s.combat), (0, 0, 40));
+        // Map level 2 (CREA level 3): hit points 90, melee 44; no protection growth in this file.
+        let s = real_stats(knight, 2);
+        assert_eq!((s.level, s.health, s.attack[0].1), (3, 90, 44));
+        assert_eq!(s.attributes[2], 20);
+        // A mage: its magic power is the third pair, its intelligence and its magicka.
+        let mage = real_stats(units.get(19).unwrap(), 0);
+        assert_eq!((mage.attack[2], mage.attributes[1], mage.magicka, mage.magic), ((10, 20), 20, 20, 20));
+        // Values are capped at 100.
+        let big = Units::from_json(&units_text(200)).unwrap();
+        let s = real_stats(big.get(13).unwrap(), 0);
+        assert_eq!((s.attributes[0], s.combat), (100, 100));
+    }
+
+    #[test]
+    fn with_units_a_unit_card_and_a_leader_take_the_real_names_and_stats() {
+        let codes = vec![5u8; 16];
+        let armies = serde_json::json!([army(1, 2, 2, serde_json::json!({ "leader_name": "Альберт" }))]);
+        let map = map_with(4, 4, &codes, armies, serde_json::json!([]));
+        let grid = Grid::new(4, 4, 1024).unwrap();
+        let heights = crate::heightmap::HeightField::from_fn(crate::heightmap::bounds(&grid), |_, _| 0);
+        let passable = crate::passable::build(&map, &grid, &codes);
+        let units = synthetic_units();
+        let plan = plan_armies(&map, &grid, &heights, &codes, &passable, &[], FIGURE_MODEL, Some(&units));
+        let field = |r: &Record, sub: &[u8; 4]| -> Vec<u8> {
+            let v = r.get(sub).unwrap();
+            v[..v.len() - 1].to_vec()
+        };
+        let find = |id: &str| plan.records.iter().find(|r| field(r, b"NAME") == id.as_bytes()).unwrap();
+        assert_eq!(crate::tes3::decode_cp1251(&field(find("rz_army_1"), b"FNAM")), "Альберт", "the leader's name");
+        let card = find("rz_u4_l0");
+        assert_eq!(crate::tes3::decode_cp1251(&field(card, b"FNAM")), "Ополченец", "a unit's Russian name");
+        assert_eq!(&card.get(b"FNAM").unwrap()[..2], &crate::tes3::encode_cp1251("Оп")[..], "cp1251 bytes");
+        let health = |r: &Record| i32::from_le_bytes(r.get(b"NPDT").unwrap()[40..44].try_into().unwrap());
+        assert_eq!(health(find("rz_army_1")), 80, "the leader's unit hit points");
+        assert_eq!(health(card), 50);
+        // Without units the M4 names and formula stay.
+        let plain = plan_armies(&map, &grid, &heights, &codes, &passable, &[], FIGURE_MODEL, None);
+        assert!(plain.records.iter().any(|r| r.get(b"FNAM").unwrap() == &b"Unit 4\0"[..]));
     }
 }
