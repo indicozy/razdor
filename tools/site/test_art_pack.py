@@ -168,6 +168,15 @@ class ShippedListTest(unittest.TestCase):
 class NewKindsTest(unittest.TestCase):
     """The kinds added for the 2003 look: the title, the sound, the 88x31 button and the lit pictures."""
 
+    def test_key_dark_makes_the_black_ground_transparent(self):
+        im = Image.new("RGB", (3, 1))
+        im.putpixel((1, 0), (200, 10, 10))
+        im.putpixel((2, 0), (12, 12, 12))
+        out = art_pack.key_dark(im, 20)
+        self.assertEqual(out.getpixel((0, 0))[3], 0)
+        self.assertEqual(out.getpixel((2, 0))[3], 0)
+        self.assertEqual(out.getpixel((1, 0)), (200, 10, 10, 255))
+
     def test_rgba_of_additive_light(self):
         im = Image.new("RGB", (3, 1))
         im.putdata([(0, 0, 0), (136, 68, 0), (10, 200, 30)])

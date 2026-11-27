@@ -3,10 +3,8 @@ import "../styles/tokens.css";
 import "../styles/site.css";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
-import Marquee from "../components/Marquee.astro";
 import ThornyPopup from "../components/ThornyPopup.astro";
 import { strings, type Lang } from "../i18n";
-import { fill } from "../lib/i18n";
 import { latest } from "../lib/changelog";
 
 interface Props {
@@ -28,16 +26,6 @@ const ruUrl = site + path;
 const enUrl = site + "/en" + path;
 const canonical = lang === "ru" ? ruUrl : enUrl;
 const B = import.meta.env.BASE_URL;
-// The download buttons' labels, by platform (the script below picks one).
-const label = (platform: string) => fill(S.download.detectLink, { platform });
-const labels = {
-  windows: label("Windows"),
-  mac: label("macOS"),
-  linux: label("Linux"),
-  android: label("Android"),
-  ios: label("iOS"),
-  generic: S.common.download,
-};
 const releases = "https://github.com/indicozy/razdor/releases/latest";
 const version = latest()?.version ?? "";
 const altTitle = lang === "ru" ? "Времена раздора" : "Discord Times";
@@ -60,9 +48,9 @@ const redirectTo = redirect !== undefined ? (lang === "en" ? `${B}en/${redirect}
     <link rel="icon" type="image/png" sizes="32x32" href={`${B}favicon-32.png`} />
     <link rel="icon" type="image/png" sizes="192x192" href={`${B}icon-192.png`} />
     <link rel="apple-touch-icon" href={`${B}apple-touch-icon.png`} />
-    <meta name="theme-color" content="#142b24" />
+    <meta name="theme-color" content="#0d1f19" />
   </head>
-  <body style={`--marble: url('${B}art/marble.webp')`}>
+  <body style={`--marble: url('${B}art/marble.webp'); --swords: url('${B}art/swords.webp')`}>
     <a class="skip" href="#main">{S.common.skip}</a>
     <header class="title-band">
       <button type="button" class="music-btn" id="music-btn" aria-pressed="false" data-on={R.musicOff} data-off={R.musicOn}>{R.musicOn}</button>
@@ -70,56 +58,55 @@ const redirectTo = redirect !== undefined ? (lang === "en" ? `${B}en/${redirect}
         <source media="(prefers-reduced-motion: reduce)" srcset={`${B}art/title-still.webp`} />
         <img class="title-img" src={`${B}art/title-burning.webp`} alt={altTitle} width="720" height="180" fetchpriority="high" />
       </picture>
-      <p class="tagline">{R.tagline}</p>
       <audio id="menu-theme" src={`${B}art/menu-theme.ogg`} loop preload="none"></audio>
     </header>
     <Header lang={lang} path={path} />
-    <Marquee lang={lang} />
     <main id="main" class="page">
       <slot />
     </main>
     <Footer lang={lang} />
     <ThornyPopup lang={lang} />
-    <script define:vars={{ labels, releases }}>
-      // Download buttons: the label and link follow the visitor's platform (JS only; without it the
-      // buttons say «Скачать» and link to the download page).
+    <script define:vars={{ releases }}>
+      // Download buttons: the link goes to the latest release; the caption shows the visitor's platform
+      // and its file size (JS only; without it the buttons link to the download page).
       const ua = navigator.userAgent;
       const isIOS = /iPhone|iPad|iPod/.test(ua);
       const isAndroid = /Android/.test(ua);
       const isMac = /Macintosh/.test(ua) && !isIOS;
       const isWin = /Windows/.test(ua);
       const key = isWin ? "windows" : isMac ? "mac" : isAndroid ? "android" : isIOS ? "ios" : "linux";
-      const text = labels[key];
       document.querySelectorAll("[data-dl-meta]").forEach((p) => {
         const line = JSON.parse(p.dataset.dlMeta || "{}")[key];
         if (line) p.textContent = line;
       });
       document.querySelectorAll("[data-dl]").forEach((a) => {
-        a.textContent = text;
         a.href = releases;
       });
     </script>
     <script>
       // «♪ Музыка»: the menu theme loops at half volume while on. Never autoplays.
-      const btn = document.getElementById("music-btn");
       const audio = document.getElementById("menu-theme") as HTMLAudioElement | null;
-      if (btn && audio) {
+      if (audio) {
         audio.volume = 0.5;
-        btn.addEventListener("click", () => {
+        const toggle = () => {
           const playing = !audio.paused;
           if (playing) {
             audio.pause();
           } else {
             audio.play().catch(() => {});
           }
-          const on = !playing;
+          return !playing;
+        };
+        const btn = document.getElementById("music-btn");
+        btn?.addEventListener("click", () => {
+          const on = toggle();
           btn.setAttribute("aria-pressed", String(on));
           btn.textContent = on ? btn.dataset.on || "" : btn.dataset.off || "";
         });
+        document.querySelectorAll<HTMLButtonElement>("[data-music-toggle]").forEach((b) => {
+          b.addEventListener("click", () => b.setAttribute("aria-pressed", String(toggle())));
+        });
       }
-    </script>
-    <script>
-      import "../scripts/sparkles";
     </script>
   </body>
 </html>

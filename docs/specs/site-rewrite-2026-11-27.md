@@ -5,6 +5,8 @@ The current site is hand-written HTML on `gh-pages` (index, en, install, a hand-
 
 ## Round 2 changes (the owner, 2026-11-27, after the first low-fi mockups)
 
+Superseded by the final direction below: the road strip, the battle and the fog (one line each in this list is kept for the history).
+
 - The journey is not a big stage. Desktop: a narrow road strip on the left, about 25 % of the width, fixed,
   fading into the content (no hard edge); the whole landing's sections (first screen to the final download) are
   its stops, and the hero walks down it as the page scrolls. The battle is a section in the content column; the
@@ -18,6 +20,8 @@ The current site is hand-written HTML on `gh-pages` (index, en, install, a hand-
   not realistic video flames.
 
 ## Round 3–4 changes (the owner, 2026-11-27)
+
+Superseded by the final direction below: the map direction C (fog, route line, banner flags) is no longer used.
 
 - Desktop: the content is a centred column (~1000 px); the road strip is in the RIGHT margin, fading leftwards
   into the content. Below ~1300 px viewport width the road becomes the muted background, as on phones.
@@ -99,3 +103,28 @@ The current site is hand-written HTML on `gh-pages` (index, en, install, a hand-
 - Design checklists read once for this work: impeccable.style (/slop) and tasteskill.dev; the
   `frontend-design` skill for direction. Not installed as skills.
 - All public text through the humanizer before it ships. Images checked with imgtune once real art is in.
+
+## Final direction (2026-11-27 evening)
+
+Decided by the owner after the 2000s research (the captures in `research-2000s/`) and Fable's advice. Built as step P10.
+
+- Base: the official 2005 release site of Discord Times: one centred reading column (820 px at most, fluid) on a
+  dark ground, DT's emerald marble outside it (on phones the column is the full width, 16 px gutters, no marble).
+- Title band: the burning title centred over the column top; «♪ Музыка» small link top right.
+- Menu: small gold links split by bars, in centred rows: Главная | Скачать | Скриншоты | Карты и моды | Новости |
+  ЧаВо | Форум | Вики | English. Each link is at least 44 px tall on touch.
+- Headings: a crossed-swords icon (the game's wb1 picture, keyed out on black) before every heading, in gold Becker.
+- Release line under the title: an orange bullet, «Вышел Razdor <версия>!» and the date as 2026.11.26.
+- Sections in this order: Введение (a framed drop cap), Скриншоты (2×2 framed pictures), Трейлер (click to load,
+  framed), Об игре, two ornate buttons with captions above (left orange «Скачать!» with «Скачать Razdor (версия,
+  размер)», right blue «В Steam!» to Thorny Times), Системные требования, Возможности (each bullet starts with a
+  gold link to its wiki page), Карты и моды (the Hub line, three framed picks, play stats, «Всего скачиваний»),
+  Новости (the latest three releases), Дополнительно (music, trailer, wallpapers, wiki, source code).
+- Footer: the link row, the award badges in one centred row (no captions), the small print with the Aterdux
+  permission line and «Дизайн в духе 2005 года.»
+- Gold square bullets everywhere. Other pages use the same column and headings; no window boxes.
+- Removed: the marquee, the sparkle cursor trail and its toggle, the blinking NEW!, «Гостевая» (Discord is now
+  «Форум»), the green counter look, the «лучше всего в 1024×768» line. Kept: the burning title, «♪ Музыка», the
+  trailer, the Windows XP Thorny Times popup, the download total as plain text, the Hub picks, every page.
+- No new topic pages: the wiki is as it was.
+

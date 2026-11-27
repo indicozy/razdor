@@ -81,6 +81,15 @@
    "lit": "Graphics/Windows/Win-marble.lit"
   },
   {
+   "name": "swords.webp",
+   "kind": "lit",
+   "lit": "Graphics/Windows/wb1.lit",
+   "key_below": 20,
+   "width": 48,
+   "height": 48,
+   "lossless": true
+  },
+  {
    "name": "title-burning.webp",
    "kind": "dt-title",
    "title": "Graphics/Windows/Title_RUS.ugs",

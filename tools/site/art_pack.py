@@ -219,6 +219,15 @@ TITLE_FW, TITLE_FH = 256, 56  # one flame frame of the flame sheet (two halves p
 TITLE_NFLAME = 9
 
 
+def key_dark(im: Image.Image, threshold: int) -> Image.Image:
+    """A picture on a black ground: pixels whose brightest channel is below threshold become transparent."""
+    rgb = im.convert("RGB")
+    bright = ImageChops.lighter(ImageChops.lighter(rgb.getchannel("R"), rgb.getchannel("G")), rgb.getchannel("B"))
+    out = rgb.convert("RGBA")
+    out.putalpha(bright.point(lambda v: 255 if v >= threshold else 0))
+    return out
+
+
 def _to_rgba(rgb: Image.Image) -> Image.Image:
     """Additive light on transparency: alpha is the brightest channel, the colour un-premultiplied.
 
@@ -432,7 +441,13 @@ def build_entry(entry: dict, dt: Path, shots: Path, repo: Path, cache: dict, dum
     kind = entry.get("kind")
     if kind == "lit":
         path = find_case_insensitive(dt, entry["lit"])
-        return lambda target: image_writer(decode_with_dump(dump, path, cache)[0], False)(target)
+        im = decode_with_dump(dump, path, cache)[0]
+        if entry.get("key_below") is not None:
+            im = key_dark(im, int(entry["key_below"]))
+        im = resize_to_width(im, entry.get("width"))
+        if entry.get("height"):
+            im = im.resize((im.size[0], int(entry["height"])), Image.LANCZOS)
+        return image_writer(im, bool(entry.get("lossless")))
     if kind == "dt-title":
         return build_title(entry, dt, dump, cache)
     if kind == "pcm":

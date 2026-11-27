@@ -1,5 +1,6 @@
 ---
 import { strings, type Lang } from "../../i18n";
+import ShotDialog from "../ShotDialog.astro";
 
 interface Props {
   lang: Lang;
@@ -25,24 +26,4 @@ const files = ["a-big", "b-battle", "b-battle-alt", "b-town", "d-hub", "shot-gam
     </ul>
   </div>
 </section>
-<dialog class="shot-dialog" id="shot-dialog">
-  <img id="shot-full" alt="" />
-  <form method="dialog"><button class="btn sm" type="submit">{R.shotsClose}</button></form>
-</dialog>
-<script>
-  // Opens a screenshot in the dialog; without JS the link opens the picture in a new tab.
-  const dialog = document.getElementById("shot-dialog") as HTMLDialogElement | null;
-  const full = document.getElementById("shot-full") as HTMLImageElement | null;
-  if (dialog && full && typeof dialog.showModal === "function") {
-    document.querySelectorAll<HTMLAnchorElement>("a.shot").forEach((a) => {
-      a.addEventListener("click", (e) => {
-        e.preventDefault();
-        const img = a.querySelector("img");
-        full.src = a.href;
-        full.alt = img?.alt ?? "";
-        dialog.showModal();
-      });
-    });
-    dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
-  }
-</script>
+<ShotDialog lang={lang} />
