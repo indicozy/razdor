@@ -850,6 +850,7 @@ impl App {
                 self.dialogs.clear();
                 self.message = Some(tr("Test play: Esc > Main menu returns to the editor.").to_string());
                 self.map_view.reset();
+                self.map_view.forget_map();
                 self.map_view.open_around_hero(&game);
                 razdor::diag::play(&game.clock.label(), &play_game_line(&game, "editor test play"));
                 self.game = Some(game);
@@ -900,6 +901,7 @@ impl App {
                 self.load_error = None;
                 self.lacking = None;
                 self.map_view.reset();
+                self.map_view.forget_map();
                 self.map_view.forget_shows();
                 items_view::reset_pack_view();
                 razdor::diag::play(&game.clock.label(), &play_game_line(&game, "loaded"));
@@ -974,6 +976,7 @@ impl App {
         self.dialogs.clear();
         self.message = None;
         self.map_view.reset();
+        self.map_view.forget_map();
         self.screen = Screen::WorldMap;
     }
 
@@ -1554,6 +1557,7 @@ impl App {
         match handed {
             Some(g) => {
                 self.map_view.reset();
+                self.map_view.forget_map();
                 self.map_view.open_around_hero(&g);
                 items_view::reset_pack_view();
                 self.message = None;

@@ -778,6 +778,16 @@ impl MapView {
         LAST_CAM.with(|c| c.set(None));
     }
 
+    /// Another map is now shown (a new game, a loaded one, the campaign's next map): what the
+    /// pointer marked on the old one is dropped. Its building numbers index the old map's
+    /// locations (report 1708: Warmongers Returns 4 -> 5 crashed on the old outline).
+    pub fn forget_map(&mut self) {
+        self.hover = None;
+        self.outlined = None;
+        self.pointer_cell = None;
+        self.clash_marks.clear();
+    }
+
     /// The camera looks at `at` (world units) and stays there: the opening fog view, the event
     /// views and the glide back to the hero are dropped. Only the trailer's stills
     /// (`RAZDOR_TRAILER_TARGET`).
@@ -7720,7 +7730,8 @@ fn world_frame(game: &mut Game, assets: &Assets, view: &mut MapView, message: &m
     let taking = !input_blocked() && view.pointer != Shape::Clock;
     let now_s = crate::ui::clock::now();
     let mouse_cell = pointed_tile(game, &cam, on_minimap);
-    let near = |b: usize| mouse_cell.is_some_and(|(x, y)| game.world.locations[b].cells().any(|(cx, cy)| (cx - x).abs() <= 1 && (cy - y).abs() <= 1));
+    // Razdor's guard, not the original's: an index left from another map is no building here (report 1708).
+    let near = |b: usize| mouse_cell.is_some_and(|(x, y)| game.world.locations.get(b).is_some_and(|l| l.cells().any(|(cx, cy)| (cx - x).abs() <= 1 && (cy - y).abs() <= 1)));
     view.outlined = match (pointed_at, view.outlined) {
         (Some(b), _) => Some((b, now_s)),
         // Off it but still within a cell of it, and not on another building.
@@ -9423,6 +9434,21 @@ mod tests {
         let mut view = MapView { grab: Some(Grab { start: vec2(1.0, 1.0), from: vec2(0.0, 0.0), moved: false }), ..MapView::default() };
         view.drop_grab();
         assert_eq!(view.grab, None, "no right click (a stop) waits for the map's return");
+    }
+
+    #[test]
+    fn a_new_map_forgets_the_old_maps_outline() {
+        // Report 1708: the outline of building 21 of a 34-building map crashed the 12-building one.
+        let mut view = MapView {
+            outlined: Some((21, 0.0)),
+            hover: Some(super::MapHoverLook { cell: (3, 4), ring: None, building: Some(21) }),
+            pointer_cell: Some((3, 4)),
+            ..MapView::default()
+        };
+        view.forget_map();
+        assert_eq!(view.outlined, None);
+        assert_eq!(view.hover, None);
+        assert_eq!(view.pointer_cell, None);
     }
 
     #[test]
