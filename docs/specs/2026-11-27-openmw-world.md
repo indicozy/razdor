@@ -843,3 +843,30 @@ the player's fights. Party deaths remove the entry.
 with the army walking in. The smoke logs `RAZDOR_FIGHT` lines (health per body per second, deaths,
 spell hits) and ends with `RAZDOR_FIGHT_END winner=…`. PASS: at least one shot hit, one strike hit
 and one melee hit are logged, and one side is wholly dead within 120 s.
+
+### M8 spike result: the fight is driven from Lua
+
+The spike (2026-11-28, synthetic plugin, OpenMW 0.51) showed that OpenMW's own AI does not fight
+with the box figures: with a Combat package, bodies walk to about 120 units from each other and
+stop; casters never cast (magicka unchanged, no active spell). The likely cause is the missing
+animation groups (attack and spellcast text keys), not checked against an animated control. Damage
+dealt from Lua works (`target:sendEvent` to the target's local script, which lowers its own health;
+a body may write its own magicka). The Template has the 143 MGEF records, no SPEL, no CREA and no
+bolt or hit meshes. So:
+
+- Movement stays OpenMW's (Combat or Follow packages: pathing works). Hits come from Lua: every
+  body's local script runs a combat tick and deals melee, shots, strikes, heals and blessings by
+  events. A body hit by the player's real weapon or spell takes it the engine's way.
+- The converter still writes the SPEL records and NPCS lists (the hero's magic menu needs them; the
+  unit ones are for later, when rigs with animation groups replace the boxes).
+- The converter writes `scripts/razdor/combat_data.lua`: one entry per CREA id (unit cards and
+  leaders) with `melee = {min, max}`, `shot = {min, max}` or nil, `strike = {school, mag}` or nil,
+  `heal` and `bless` magnitudes or nil, and `interval` seconds between actions. Interval =
+  `max(1.0, 4.0 − 0.15·initiative)` (approximation: DT's initiative orders turns; here it sets the pace).
+- Reach: melee 180 units, shot and strike 3000 units with a line of sight to the target, heal when
+  the body is below 70% health, bless at the first contact and again when it ends. Melee damage =
+  a random value in the pair (DT's defence is not applied: approximation).
+- A body picks its target as the nearest living actor of the other side (the other army, or the
+  player and the party for a hostile army); party bodies fight what attacks the player or what the
+  player attacks, and any hostile body within 1500 units.
+- Each hit logs `RAZDOR_FIGHT hit from=<id> to=<id> kind=melee|shot|strike|heal|bless amount=<n> hp=<n>`.
