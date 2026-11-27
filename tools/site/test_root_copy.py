@@ -44,26 +44,6 @@ class RewriteTest(unittest.TestCase):
         self.assertEqual(root_copy.rewrite_text("see /my/razdor/x"), "see /my/razdor/x")
 
 
-class CanonicalTest(unittest.TestCase):
-    def test_each_page_points_at_its_github_address(self):
-        self.assertEqual(root_copy.github_path("index.html"), "https://indicozy.github.io/razdor/")
-        self.assertEqual(root_copy.github_path("en.html"), "https://indicozy.github.io/razdor/en.html")
-        self.assertEqual(root_copy.github_path("wiki/index.html"), "https://indicozy.github.io/razdor/wiki/")
-        self.assertEqual(
-            root_copy.github_path("wiki/en/mods/index.html"),
-            "https://indicozy.github.io/razdor/wiki/en/mods/",
-        )
-
-    def test_an_old_canonical_is_replaced_not_duplicated(self):
-        html = (
-            '<html><head><link rel="canonical" href="https://indicozy.github.io/wiki/x/">'
-            "<title>t</title></head><body></body></html>"
-        )
-        out = root_copy.canonical_for(html, "wiki/x/index.html")
-        self.assertEqual(out.count('rel="canonical"'), 1)
-        self.assertIn('<link rel="canonical" href="https://indicozy.github.io/razdor/wiki/x/"></head>', out)
-
-
 class CopyTest(unittest.TestCase):
     def make_site(self, base: Path) -> Path:
         src = base / "site"
@@ -88,7 +68,7 @@ class CopyTest(unittest.TestCase):
             self.assertEqual((out / "fire" / "x.webp").read_bytes(), b"\x00\x01\x02")
             self.assertIn("/razdor/wiki/", (src / "index.html").read_text(encoding="utf-8"))
             self.assertIn(
-                '<link rel="canonical" href="https://indicozy.github.io/razdor/wiki/en/">',
+                '<link rel="canonical" href="https://razdor.indicozy.dev/wiki/en/">',
                 (out / "wiki" / "en" / "index.html").read_text(encoding="utf-8"),
             )
 

@@ -8,7 +8,8 @@ of it for the owner's server, where the site is at the root of the domain instea
   Markdown writes such links by hand, and Astro does not rewrite them when the base changes;
 - the wiki's absolute addresses (https://indicozy.github.io/wiki/...) get the GitHub path back, so the
   Open Graph tags name GitHub's pages;
-- every HTML page gets a <link rel="canonical"> to its GitHub address, so search engines index GitHub's copy.
+- every HTML page gets its canonical link on the owner's domain (canonical.fix_canonical), so search engines
+  index the domain's address, not GitHub's copy.
 
 The source is never changed. The output must hold index.html and wiki/index.html, or the run fails.
 
@@ -20,6 +21,10 @@ import shutil
 import sys
 from pathlib import Path
 
+# python3 -I does not put the script's folder on the path, so the sibling module is found by hand.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import canonical  # noqa: E402
+
 GITHUB_SITE = "https://indicozy.github.io/razdor"
 TEXT_SUFFIXES = {".html", ".htm", ".css", ".js", ".mjs", ".json", ".xml", ".txt", ".webmanifest", ".svg"}
 
@@ -29,32 +34,13 @@ ABS_RAZDOR_LINK = re.compile(r"""(?P<attr>\b(?:href|src|action)=["'])https://ind
 ROOT_RAZDOR = re.compile(r"""(?P<pre>["'(=\s,])/razdor/""")
 # Astro's absolute addresses for the wiki when the base is /wiki (Open Graph and similar tags).
 ABS_WIKI = re.compile(r"https://indicozy\.github\.io/wiki(?=[/\"'])")
-CANONICAL = re.compile(r"""<link\s+rel=["']canonical["'][^>]*>\s*""", re.IGNORECASE)
 
 
 def rewrite_text(text: str) -> str:
-    """The root-copy rewrite of one text file (no canonical link; see canonical_for)."""
+    """The root-copy rewrite of one text file (no canonical link; see canonical.fix_canonical)."""
     text = ABS_RAZDOR_LINK.sub(lambda m: m.group("attr") + (m.group("rest") or "/"), text)
     text = ROOT_RAZDOR.sub(lambda m: m.group("pre") + "/", text)
     return ABS_WIKI.sub(GITHUB_SITE + "/wiki", text)
-
-
-def github_path(rel: str) -> str:
-    """The GitHub address of a page, from its path under the site root (index.html -> the folder's URL)."""
-    if rel == "index.html":
-        return GITHUB_SITE + "/"
-    if rel.endswith("/index.html"):
-        return GITHUB_SITE + "/" + rel[: -len("index.html")]
-    return GITHUB_SITE + "/" + rel
-
-
-def canonical_for(html: str, rel: str) -> str:
-    """The page with its canonical link set to its GitHub address (any old canonical link is replaced)."""
-    html = CANONICAL.sub("", html)
-    tag = f'<link rel="canonical" href="{github_path(rel)}">'
-    if "</head>" in html:
-        return html.replace("</head>", tag + "</head>", 1)
-    return tag + html
 
 
 def make_root_copy(src: Path, out: Path) -> dict:
@@ -69,7 +55,7 @@ def make_root_copy(src: Path, out: Path) -> dict:
         text = path.read_text(encoding="utf-8")
         new = rewrite_text(text)
         if path.suffix.lower() in {".html", ".htm"}:
-            new = canonical_for(new, rel)
+            new = canonical.fix_canonical(new, rel)
             counts["pages"] += 1
         if new != text:
             path.write_text(new, encoding="utf-8")
