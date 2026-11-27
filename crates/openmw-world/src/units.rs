@@ -1,4 +1,4 @@
-//! The units JSON of `razdor-units-json` (format `razdor-units-json`, version 1; written by
+//! The units JSON of `razdor-units-json` (format `razdor-units-json`, version 1 or 2; written by
 //! `razdor::dt::units_json`): the unit cards of the install, read for the real army stats (spec §3.8,
 //! Q3). The file is game data and is never committed; tests here use synthetic files only.
 //!
@@ -11,8 +11,11 @@ use std::collections::BTreeMap;
 
 /// The `format` the converter accepts.
 pub const FORMAT: &str = "razdor-units-json";
-/// The `version` the converter accepts.
-pub const VERSION: u32 = 1;
+/// The `version` the converter writes in its own tests. The reader takes [`VERSIONS`].
+pub const VERSION: u32 = 2;
+/// The versions the reader accepts: 1 (the units) and 2 (the units and the world spells; the spells
+/// are read by the spell writer, not here).
+pub const VERSIONS: [u32; 2] = [1, 2];
 
 #[derive(Debug, Deserialize)]
 struct File {
@@ -69,8 +72,8 @@ impl Units {
         if file.format != FORMAT {
             return Err(format!("the format is {}, not {FORMAT}", file.format));
         }
-        if file.version != VERSION {
-            return Err(format!("the units version is {}, the converter reads {VERSION}", file.version));
+        if !VERSIONS.contains(&file.version) {
+            return Err(format!("the units version is {}, the converter reads {VERSIONS:?}", file.version));
         }
         let mut by_id = BTreeMap::new();
         for u in file.units {
@@ -211,8 +214,10 @@ mod tests {
     fn a_wrong_format_or_version_is_refused() {
         let text = sample().replace(FORMAT, "other-format");
         assert!(Units::from_json(&text).unwrap_err().contains("format"));
-        let text = sample().replace("\"version\":1", "\"version\":2");
+        let text = sample().replace("\"version\":2", "\"version\":3");
         assert!(Units::from_json(&text).unwrap_err().contains("version"));
+        let text = sample().replace("\"version\":2", "\"version\":1");
+        assert!(Units::from_json(&text).is_ok(), "version 1 is still read");
         assert!(Units::from_json("{").is_err());
     }
 

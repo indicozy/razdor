@@ -1,4 +1,4 @@
-//! `razdor-units-json`: writes the install's unit cards as JSON (format `razdor-units-json`, version 1;
+//! `razdor-units-json`: writes the install's unit cards as JSON (format `razdor-units-json`, version 2;
 //! the layout is in `razdor::dt::units_json` and `docs/flows/testing-and-tools.md`).
 //!
 //! Usage: `razdor-units-json [-o <out.json>] [--compact] [--lang <prefix>]`. The install is
@@ -57,7 +57,7 @@ fn main() -> ExitCode {
     };
     let content = Content::from_dt_in(&dt, lang.as_deref());
     let language = lang.as_deref().unwrap_or("ru");
-    let json = match units_json::units_to_string(&content.units, language, !compact) {
+    let json = match units_json::export_to_string(&content.units, &content.spells, language, !compact) {
         Ok(json) => json,
         Err(e) => return fail(format!("cannot write the JSON: {e}")),
     };
@@ -66,7 +66,7 @@ fn main() -> ExitCode {
             if let Err(e) = std::fs::write(&path, format!("{json}\n")) {
                 return fail(format!("cannot write {}: {e}", path.display()));
             }
-            eprintln!("razdor-units-json: {} units to {}", content.units.len(), path.display());
+            eprintln!("razdor-units-json: {} units and {} spells to {}", content.units.len(), content.spells.len(), path.display());
         }
         None => println!("{json}"),
     }

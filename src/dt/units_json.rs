@@ -1,4 +1,7 @@
-//! JSON export of the unit cards: the `razdor-units-json` format, version 1 (`docs/flows/testing-and-tools.md`).
+//! JSON export of the unit cards and the world spells: the `razdor-units-json` format, version 2
+//! (`docs/flows/testing-and-tools.md`). Version 2 adds the top-level `spells` array; the units are
+//! unchanged. DT has no unit-to-spell table: units cast by school, direction and power (battle.md),
+//! and the AI never casts world spells, so a unit's casting data is its `magic*` fields.
 //!
 //! Meant for converters to other games (the OpenMW world reads it for real army stats), so the
 //! layout is stable and versioned. Numbers are the install's raw values, after the install's own
@@ -16,12 +19,12 @@
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-use super::data::{Bonus, MagicDirection, MagicSchool, Nature, Stat, UnitDef};
+use super::data::{Bonus, MagicDirection, MagicSchool, Nature, SpellDef, SpellTarget, Stat, StatMods, UnitDef};
 
 /// The `format` value of every export.
 pub const FORMAT: &str = "razdor-units-json";
 /// The `version` value of every export. Bumped on any change of the layout.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 #[derive(Serialize)]
 struct Export<'a> {
@@ -32,6 +35,45 @@ struct Export<'a> {
     /// How many units follow.
     count: usize,
     units: Vec<UnitOut<'a>>,
+    /// How many spells follow.
+    spell_count: usize,
+    /// The world spells (`Rus_Spells.ini`), in file order; ids are 1-based positions.
+    spells: Vec<SpellOut<'a>>,
+}
+
+/// One world spell. The numbers are the file's raw values; `kind` is a summary (see [`spell_kind`]).
+#[derive(Serialize)]
+struct SpellOut<'a> {
+    /// 1-based position in the file; the events and the map refer to spells by it.
+    id: u32,
+    name: &'a str,
+    /// Price to learn, in gold.
+    cost_gold: i32,
+    /// Mana to cast.
+    cost_mana: i32,
+    /// Magic school: `life`, `elemental` or `death`; `null` for none.
+    school: Option<&'static str>,
+    /// Whom it is cast on: `hero` (the player's own army), `enemy` (an enemy army) or `one_enemy`
+    /// (known to the exe, unused in the vanilla data); `null` when the file names none.
+    target: Option<&'static str>,
+    /// Casting time in game hours at caster level 0; `null` for none.
+    time_cast_hours: Option<i32>,
+    /// Duration in game hours at caster level 0; `null` = instant. 9999 is about permanent.
+    time_work_hours: Option<i32>,
+    /// Summary of the effect: `damage` (a negative instant change, a positive life drain or a
+    /// negative percent change), `heal` (a positive instant change), `modifier` (only stat changes
+    /// for the duration) or `none`. Checked in that order; the fields below carry every value.
+    kind: &'static str,
+    /// Instant change of hit points per unit (`DeltaFixedHits`; + heals, - wounds).
+    delta_fixed_hits: Option<i32>,
+    /// Instant percent change of hit points (`DeltaPercentHits`).
+    delta_percent_hits: Option<i32>,
+    /// Percent life drain (`p-LifeLose`).
+    life_lose_percent: Option<i32>,
+    /// Flat change of each stat while it lasts (`d-*`), keyed by the unit stat's snake_case name.
+    add: BTreeMap<&'static str, i32>,
+    /// Percent change of each stat while it lasts (`p-*`), keyed like `add`.
+    percent: BTreeMap<&'static str, i32>,
 }
 
 #[derive(Serialize)]
@@ -194,17 +236,65 @@ fn unit_out<'a>(u: &'a UnitDef) -> UnitOut<'a> {
 /// is the data language of the names (`ru` for the install's own). The units are written in the
 /// order given; the caller passes them in file order, so the output is the same on every run.
 pub fn units_to_string(units: &[UnitDef], language: &str, pretty: bool) -> serde_json::Result<String> {
+    export_to_string(units, &[], language, pretty)
+}
+
+/// The version-2 export: the units and the world spells. Same ordering and pretty rules as
+/// [`units_to_string`].
+pub fn export_to_string(units: &[UnitDef], spells: &[SpellDef], language: &str, pretty: bool) -> serde_json::Result<String> {
     let e = Export {
         format: FORMAT,
         version: VERSION,
         language,
         count: units.len(),
         units: units.iter().map(unit_out).collect(),
+        spell_count: spells.len(),
+        spells: spells.iter().map(spell_out).collect(),
     };
     if pretty {
         serde_json::to_string_pretty(&e)
     } else {
         serde_json::to_string(&e)
+    }
+}
+
+/// The summary `kind` of a spell (the first of the checks that holds).
+fn spell_kind(s: &SpellDef) -> &'static str {
+    let fixed = s.delta_fixed_hits.unwrap_or(0);
+    let percent = s.delta_percent_hits.unwrap_or(0);
+    let drain = s.life_lose_percent.unwrap_or(0);
+    if fixed < 0 || percent < 0 || drain != 0 {
+        "damage"
+    } else if fixed > 0 || percent > 0 {
+        "heal"
+    } else if !s.add.is_empty() || !s.percent.is_empty() {
+        "modifier"
+    } else {
+        "none"
+    }
+}
+
+fn spell_out(s: &SpellDef) -> SpellOut<'_> {
+    let keyed = |m: &StatMods| m.iter().map(|(&st, &v)| (stat_key(st), v)).collect();
+    SpellOut {
+        id: s.id,
+        name: &s.name,
+        cost_gold: s.cost_gold,
+        cost_mana: s.cost_mana,
+        school: s.school.map(magic_name),
+        target: s.target.map(|t| match t {
+            SpellTarget::Hero => "hero",
+            SpellTarget::Enemy => "enemy",
+            SpellTarget::OneEnemy => "one_enemy",
+        }),
+        time_cast_hours: s.time_cast,
+        time_work_hours: s.time_work,
+        kind: spell_kind(s),
+        delta_fixed_hits: s.delta_fixed_hits,
+        delta_percent_hits: s.delta_percent_hits,
+        life_lose_percent: s.life_lose_percent,
+        add: keyed(&s.add),
+        percent: keyed(&s.percent),
     }
 }
 
@@ -248,7 +338,7 @@ mod tests {
         u.level_multiplier = 150;
         u.level_up = [(Stat::Hits, 5), (Stat::ProtectLife, 2)].into_iter().collect();
         let v = parse(&[u]);
-        assert_eq!((v["format"].as_str(), v["version"].as_u64(), v["count"].as_u64()), (Some(FORMAT), Some(1), Some(1)));
+        assert_eq!((v["format"].as_str(), v["version"].as_u64(), v["count"].as_u64()), (Some(FORMAT), Some(2), Some(1)));
         assert_eq!(v["language"], "ru");
         let x = &v["units"][0];
         assert_eq!((x["id"].as_u64(), x["name"].as_str(), x["cost"].as_i64()), (Some(7), Some("Тестовый"), Some(120)));
@@ -294,16 +384,53 @@ mod tests {
     }
 
     #[test]
+    fn spells_export_their_raw_fields_and_a_summary_kind() {
+        use crate::rules::content::testkit::spell;
+        let mut hit = spell(1, 80);
+        hit.target = Some(SpellTarget::Enemy);
+        hit.delta_fixed_hits = Some(-8);
+        hit.time_work = None;
+        let mut heal = spell(2, 10);
+        heal.target = Some(SpellTarget::Hero);
+        heal.delta_fixed_hits = Some(15);
+        heal.time_work = None;
+        let mut rust = spell(3, 10);
+        rust.target = Some(SpellTarget::Enemy);
+        rust.delta_fixed_hits = None;
+        rust.time_work = Some(10);
+        rust.percent.insert(Stat::DefenceBlow, -30);
+        let mut plain = spell(4, 5);
+        plain.delta_fixed_hits = None;
+        plain.school = None;
+        plain.target = None;
+        let text = export_to_string(&[], &[hit, heal, rust, plain], "ru", false).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!((v["version"].as_u64(), v["spell_count"].as_u64()), (Some(2), Some(4)));
+        let s = v["spells"].as_array().unwrap();
+        assert_eq!((s[0]["id"].as_u64(), s[0]["kind"].as_str(), s[0]["target"].as_str()), (Some(1), Some("damage"), Some("enemy")));
+        assert_eq!((s[0]["delta_fixed_hits"].as_i64(), s[0]["time_work_hours"].is_null(), s[0]["school"].as_str()), (Some(-8), true, Some("life")));
+        assert_eq!((s[1]["kind"].as_str(), s[1]["target"].as_str()), (Some("heal"), Some("hero")));
+        assert_eq!((s[2]["kind"].as_str(), s[2]["percent"]["defence_blow"].as_i64(), s[2]["time_work_hours"].as_i64()), (Some("modifier"), Some(-30), Some(10)));
+        assert_eq!((s[3]["kind"].as_str(), s[3]["school"].is_null(), s[3]["target"].is_null()), (Some("none"), true, true));
+        let units_only: Value = serde_json::from_str(&units_to_string(&[], "ru", false).unwrap()).unwrap();
+        assert_eq!(units_only["spells"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
     fn real_units_export_as_valid_json_with_unique_ids() {
         let Some(dir) = std::env::var_os(crate::dt::install::ENV_VAR) else { return };
         let dt = crate::dt::install::DtInstall::load(std::path::Path::new(&dir)).expect("the install loads");
         let content = Content::from_dt_in(&dt, None);
         assert!(!content.units.is_empty(), "the install has units");
-        let text = units_to_string(&content.units, "ru", false).unwrap();
+        let text = export_to_string(&content.units, &content.spells, "ru", false).unwrap();
         let v: Value = serde_json::from_str(&text).expect("valid JSON");
         let units = v["units"].as_array().unwrap();
         assert_eq!(v["count"].as_u64(), Some(units.len() as u64));
         assert!(!units.is_empty());
+        let spells = v["spells"].as_array().unwrap();
+        assert_eq!(v["spell_count"].as_u64(), Some(spells.len() as u64));
+        assert!(spells.len() >= 30, "the install has its world spells");
+        assert!(spells.iter().all(|s| s["kind"].is_string() && s["name"].is_string()));
         let mut ids: Vec<u64> = units.iter().map(|u| u["id"].as_u64().unwrap()).collect();
         ids.sort_unstable();
         ids.dedup();
