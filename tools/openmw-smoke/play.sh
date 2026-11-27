@@ -4,7 +4,7 @@
 # standalone config -> an off-screen OpenMW run with a picture, PASS or FAIL.
 #
 #   play.sh <map.DTm | map.json> [--name <name>] [--archetype knight|archmage|ranger]
-#           [--units <units.json>] [--shot <png>] [--camera x,y,z,pitch,yaw] [--window]
+#           [--units <units.json>] [--shot <png>] [--camera x,y,z,pitch,yaw] [--probe x,y]... [--window]
 #
 #   --name       the run's folder under /mnt/ai_models/razdor-scratch/openmw/play/ (it must not exist).
 #                Default: play-<map name>-<time>.
@@ -15,6 +15,9 @@
 #   --shot       the picture (default: <run folder>/shot.png).
 #   --camera     the picture's camera (default: two tiles north-west of the hero's start, looking at
 #                the first building; see view.py).
+#   --probe      a world point x,y (units) the player is teleported to on the ground, up to four, one
+#                after another (run.sh --probe; each reading is a RAZDOR_PROBE line). Facing is not
+#                passed: run.sh has no option for it.
 #   --window     do not run anything: write the standalone config and print the command that starts
 #                OpenMW in a real window on the desktop, for the owner to play by hand.
 #
@@ -39,6 +42,7 @@ ARCH=""
 UNITS=""
 SHOT=""
 CAMERA=""
+PROBES=()
 WINDOW=0
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -53,6 +57,7 @@ while [ $# -gt 0 ]; do
         --units) UNITS=$2; shift 2 ;;
         --shot) SHOT=$2; shift 2 ;;
         --camera) CAMERA=$2; shift 2 ;;
+        --probe) PROBES+=("$2"); shift 2 ;;
         --window) WINDOW=1; shift ;;
         -h|--help) usage ;;
         *) echo "play.sh: unknown argument $1" >&2; usage ;;
@@ -125,8 +130,10 @@ if [ -z "$CAMERA" ]; then
 fi
 [ -n "$SHOT" ] || SHOT="$WORK/shot.png"
 # m5_auto answers the map's windows (the start message) so the picture is not covered by them.
+PROBE_ARGS=()
+for p in "${PROBES[@]+"${PROBES[@]}"}"; do PROBE_ARGS+=(--probe "$p"); done
 OPENMW_SMOKE_SCRATCH="$WORK" "$HERE/run.sh" "$WORK/out" --name smoke --camera "$CAMERA" --shot "$SHOT" \
-    --extra-data "$HERE/m5" --content m5_auto.omwscripts
+    --extra-data "$HERE/m5" --content m5_auto.omwscripts ${PROBE_ARGS[@]+"${PROBE_ARGS[@]}"}
 RC=$?
 echo "camera:      $CAMERA"
 echo "total:       $(( $(date +%s) - START_NS )) s"
