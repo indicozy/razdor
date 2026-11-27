@@ -2,7 +2,6 @@
 import { latest } from "../lib/changelog";
 import { catalog, counts, pictureUrl, type CatalogEntry } from "../lib/catalog";
 import { strings, href, hubLine, type Lang } from "../i18n";
-import Battle from "./Battle.astro";
 import { assetSizes, formatSize } from "../lib/release";
 
 interface Props {
@@ -21,13 +20,8 @@ const dateText = rel
   : "";
 // Russian lines only: the release notes are in Russian, so the English page links to them instead.
 const news = lang === "ru" && rel ? [...rel.fixed, ...rel.changed, ...rel.added].slice(0, 3) : [];
-// The Hub counts come from the community catalog at build time; without it the generic line stays.
-// The size line shows the Windows file: the default system of the page.
+// The size line shows the Windows file for the default system; the layout's script swaps it per visitor.
 const sizes = await assetSizes();
-const exeSize = sizes?.get("Razdor.exe");
-const sizeText = exeSize ? formatSize(exeSize, lang) : "";
-// The line under the download button follows the visitor's system (the layout's script picks the key): the
-// version, that system's file size and the other systems. Without JS the Windows line stays.
 const sysNames = { windows: "Windows", mac: "macOS", linux: "Linux", android: "Android", ios: "iOS" } as const;
 const sysFiles = { windows: "Razdor.exe", mac: "razdor-macos", linux: "razdor", android: "razdor.apk", ios: "razdor.ipa" } as const;
 const othersWord = L.meta.split(":")[0];
@@ -37,12 +31,11 @@ const metaFor = (k: keyof typeof sysNames) => {
   return [version, size ? formatSize(size, lang) : "", `${othersWord}: ${others.join(", ")}`].filter(Boolean).join(", ");
 };
 const metaBySystem = Object.fromEntries((Object.keys(sysNames) as (keyof typeof sysNames)[]).map((k) => [k, metaFor(k)]));
+// The Hub: the counts line from the community catalog at build time (the generic line without it), and three
+// entries as picture tiles. Entries a player would recognise come first: a known author, a real title and a
+// picture; mods, then campaigns, then maps. Placeholder authors and file-name titles («Name-Title-01») go last.
 const cat = await catalog();
 const hub = hubLine(lang, cat ? counts(cat) : null) ?? L.hubFallback;
-// The Hub block: the first three catalog entries (real title, author, kind, picture) as flags and a plain list.
-// No catalog (or an empty one): three flags with the generic words and no list.
-// Entries a player would recognise come first: a known author, a real title and a picture; mods, then campaigns,
-// then maps. Placeholder authors and file-name titles («Name-Title-01») go last.
 const known = (e: CatalogEntry) =>
   !!e.author?.trim() &&
   !/^(неизвестен|неизвестно|unknown|-|\?)$/i.test(e.author.trim()) &&
@@ -59,132 +52,113 @@ const ranked: CatalogEntry[] = cat
 const picks = [...new Set(ranked)].slice(0, 3);
 const pickText = (t?: { ru: string; en: string }) => (lang === "en" && t?.en ? t.en : t?.ru ?? "");
 const kindText = (k: string) => (k === "mod" ? L.hubKindMod : L.hubKindMap);
-// A title missing in both languages gets the kind's generic word, never the catalog id.
-// A title that is the catalog id, or a bare hash, is not a name: the generic word stands in.
+// A title missing in both languages gets the kind's generic word, never the catalog id or a bare hash.
 const entryTitle = (e: (typeof picks)[number]) => {
   const t = pickText(e.title);
   return t && t !== e.id && !/^[0-9a-f]{12,}$/i.test(t) ? t : kindText(e.kind);
 };
-const hubFlags = picks.length ? picks.map(entryTitle) : [L.hubFlagMaps, L.hubFlagMods, L.hubFlagHub];
-// Flags stay inside the map on a phone: the left edges leave room for a wrapped title.
-const flagPos = [
-  { left: "4%", top: "12%", pinLeft: "6%", pinTop: "40%" },
-  { left: "36%", top: "52%", pinLeft: "38%", pinTop: "76%" },
-  { left: "56%", top: "8%", pinLeft: "58%", pinTop: "36%" },
-];
 const art = (name: string) => `background-image:url('${B}art/${name}')`;
-const routeD = [
-  "M40 14 C160 80, 250 -6, 380 50 S 610 92, 700 34 S 820 50, 880 60",
-  "M60 40 C180 4, 260 96, 390 56 S 560 4, 640 60 S 760 90, 880 40",
-  "M40 50 C140 10, 220 88, 330 46 S 520 6, 600 52 S 760 92, 860 30",
-  "M60 30 C170 80, 240 -4, 370 40 S 590 90, 700 46 S 800 20, 880 56",
+const steps = [
+  { title: L.step1, line: L.step1Line },
+  { title: L.step2, line: L.step2Line },
+  { title: L.step3, line: L.step3Line },
 ];
 ---
 <div class="landing">
-  <section class="sec first content" data-stop="0" aria-labelledby="hero-title">
-    <h1 id="hero-title">{L.heroTitle}</h1>
-    <p class="lead">{L.lead}</p>
-    <div class="row">
-      <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
-      <a class="btn ghost" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a>
+  <section class="hero" aria-labelledby="hero-title" style={art("a-big.webp")}>
+    <div class="content hero-inner">
+      <h1 id="hero-title">{L.heroTitle}</h1>
+      <p class="lead">{L.lead}</p>
+      <div class="row">
+        <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
+        <a class="btn ghost" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a>
+      </div>
+      <p class="small muted" data-dl-meta={JSON.stringify(metaBySystem)}>{metaFor("windows")}</p>
+      <p class="small muted">{L.autoGame}</p>
     </div>
-    <p class="small muted" data-dl-meta={JSON.stringify(metaBySystem)}>{metaFor("windows")}</p>
-    <p class="small muted">{L.autoGame}</p>
-    <div class="pic fog crt shota" role="img" aria-label={L.heroAlt} style={art("a-big.webp")}></div>
   </section>
 
-  <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[0]} /></svg></div>
-
-  <section class="sec content" data-stop="1" aria-labelledby="campaign-title">
-    <div class="hd">
-      <h2 id="campaign-title">{L.campaignTitle}</h2>
-      <svg class="squig" viewBox="0 0 300 12" aria-hidden="true"><path d="M2 7 C40 2, 74 11, 112 6 S 180 2, 224 7 S 272 3, 298 6" fill="none" stroke="#f0c96a" stroke-width="2.5" /></svg>
-    </div>
-    <p>{L.campaignText}</p>
-    <div class="shots">
-      <div class="pic crt fog" role="img" aria-label={L.townAlt} style={art("b-town.webp")}></div>
-      <div class="pic crt fog" role="img" aria-label={L.battleAlt} style={art("b-battle.webp")}></div>
-      <div class="pic crt fog" role="img" aria-label={L.battleAlt2} style={art("b-battle-alt.webp")}></div>
+  <section class="sec content" aria-labelledby="campaign-title">
+    <h2 id="campaign-title">{L.campaignTitle}</h2>
+    <p class="intro">{L.campaignText}</p>
+    <div class="gallery">
+      <figure class="gallery-big">
+        <div class="pic" role="img" aria-label={L.battleAlt} style={art("b-battle.webp")}></div>
+        <figcaption>{L.battleAlt}</figcaption>
+      </figure>
+      <figure>
+        <div class="pic" role="img" aria-label={L.townAlt} style={art("b-town.webp")}></div>
+        <figcaption>{L.townAlt}</figcaption>
+      </figure>
+      <figure>
+        <div class="pic" role="img" aria-label={L.battleAlt2} style={art("b-battle-alt.webp")}></div>
+        <figcaption>{L.battleAlt2}</figcaption>
+      </figure>
     </div>
     <div class="linkrow"><a class="link" href={href(lang, "features/")}>{L.campaignLink}</a></div>
   </section>
 
-  <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[1]} /></svg></div>
+  <section class="sec content" aria-labelledby="why-title">
+    <h2 id="why-title">{L.whyTitle}</h2>
+    <ul class="why-list">
+      {L.whyItems.map((it) => (
+        <li>
+          <h3>{it.t}</h3>
+          <p>{it.d}</p>
+        </li>
+      ))}
+    </ul>
+    <div class="linkrow"><a class="link" href={href(lang, "features/")}>{L.whyLink}</a></div>
+  </section>
 
-  <section class="sec content" data-stop="2" aria-labelledby="devices-title">
-    <div class="hd">
-      <h2 id="devices-title">{L.devicesTitle}</h2>
-      <svg class="squig" viewBox="0 0 300 12" aria-hidden="true"><path d="M2 6 C50 11, 90 2, 140 7 S 220 11, 268 5 S 290 8, 298 6" fill="none" stroke="#f0c96a" stroke-width="2.5" /></svg>
-    </div>
-    <p>{L.devicesText}</p>
-    <div class="row" style="align-items:flex-end">
-      <div class="pic crt fog" role="img" aria-label={L.pcAlt} style={`width:min(480px, 100%); aspect-ratio:16/10; ${art("shot-game.webp")}`}></div>
-      <div class="pic crt fog" role="img" aria-label={L.phoneAlt} style={`width:150px; aspect-ratio:1/2; ${art("shot-devices.webp")}`}></div>
+  <section class="sec content" aria-labelledby="install-title">
+    <h2 id="install-title">{L.installTitle}</h2>
+    <ol class="steps">
+      {steps.map((s, i) => (
+        <li>
+          <span class="step-num" aria-hidden="true">{i + 1}</span>
+          <h3>{s.title}</h3>
+          <p>{s.line}</p>
+        </li>
+      ))}
+    </ol>
+    <div class="row">
+      <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
+      <a class="link" href={href(lang, "download/") + "#install"}>{S.common.detailedInstall}</a>
     </div>
   </section>
 
-  <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[2]} /></svg></div>
-
-  <section class="sec content" data-stop="3" aria-labelledby="hub-title">
-    <div class="hd">
-      <h2 id="hub-title">{L.hubTitle}</h2>
-      <svg class="squig" viewBox="0 0 300 12" aria-hidden="true"><path d="M2 6 C50 11, 90 2, 140 7 S 220 11, 268 5 S 290 8, 298 6" fill="none" stroke="#f0c96a" stroke-width="2.5" /></svg>
-    </div>
-    <p>{L.hubText}</p>
-    <div class="hubmap">
-      <div class="pic crt fog" role="img" aria-label={L.hubAlt} style={art("d-hub.webp")}></div>
-      {hubFlags.map((label, i) => (
-        <>
-          <span class="banner" style={`left:${flagPos[i].left}; top:${flagPos[i].top}`}>{label}</span>
-          <span class="pin" style={`left:${flagPos[i].pinLeft}; top:${flagPos[i].pinTop}`}></span>
-        </>
-      ))}
-    </div>
+  <section class="sec content" aria-labelledby="community-title">
+    <h2 id="community-title">{L.communityTitle}</h2>
+    <p class="intro">{hub}</p>
     {picks.length > 0 && (
-      <ul class="hub-list">
+      <ul class="hub-tiles">
         {picks.map((e) => {
           const thumb = pictureUrl(e);
           return (
-            <li class="hub-item">
-              {thumb && <img class="hub-thumb" src={thumb} alt="" width="96" height="60" loading="lazy" decoding="async" />}
-              <div>
-                <span class="hub-title">{entryTitle(e)}</span>
-                <p class="small">{kindText(e.kind)}, {L.hubAuthor}: {e.author}</p>
-              </div>
+            <li class="hub-tile">
+              {thumb ? (
+                <>
+                  <img class="pic-img" src={thumb} alt="" width="480" height="270" loading="lazy" decoding="async" />
+                  <h3 class="hub-title">{entryTitle(e)}</h3>
+                </>
+              ) : (
+                <div class="hub-nopic"><h3 class="hub-title">{entryTitle(e)}</h3></div>
+              )}
+              <p class="small">{kindText(e.kind)}, {L.hubAuthor}: {e.author}</p>
             </li>
           );
         })}
       </ul>
     )}
-    <div class="linkrow"><a class="link" href={href(lang, "community/")}>{L.hubAll}</a></div>
-  </section>
-
-  <div class="route-gap" aria-hidden="true"><svg viewBox="0 0 900 100" preserveAspectRatio="none"><path class="route" d={routeD[3]} /></svg></div>
-
-  <Battle lang={lang} />
-
-  <section class="sec content" id="path" data-stop="5" aria-labelledby="path-title">
-    <div class="hd">
-      <h2 id="path-title">{L.pathTitle}</h2>
-      <svg class="squig" viewBox="0 0 300 12" aria-hidden="true"><path d="M2 8 C60 3, 100 10, 150 6 S 240 2, 298 7" fill="none" stroke="#f0c96a" stroke-width="2.5" /></svg>
+    <div class="row">
+      <a class="btn" href="https://discord.gg/wmMksmWFDM">{S.common.discord}</a>
+      <a class="btn ghost" href={href(lang, "community/")}>{L.hubAll}</a>
     </div>
-    <p>{L.pathText}</p>
-    <ol class="steps">
-      {[L.step1, L.step2, L.step3].map((text, i) => (
-        <li><span class="step-digit">{i + 1}</span><p>{text}</p></li>
-      ))}
-    </ol>
-    <div class="row"><a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a></div>
-    <div class="linkrow"><a class="link" href={href(lang, "download/") + "#install"}>{S.common.detailedInstall}</a></div>
   </section>
 
-  <div class="sec-wide content two-col">
-    <section aria-labelledby="community-title">
-      <h2 id="community-title">{L.communityTitle}</h2>
-      <p>{hub}</p>
-      <a class="btn sm" href="https://discord.gg/wmMksmWFDM">{S.common.discord}</a>
-    </section>
-    <section aria-labelledby="news-title">
+  <section class="sec content split" aria-labelledby="news-title">
+    <div>
       <h2 id="news-title">{L.newsTitle} {version}</h2>
       <p class="news-date">{dateText}</p>
       {news.length > 0 && (
@@ -193,19 +167,12 @@ const routeD = [
         </ul>
       )}
       <a class="link" href={href(lang, "changes/")}>{L.allChanges}</a>
-    </section>
-  </div>
-
-  <section class="sec-wide content" id="trailer" aria-labelledby="thorny-title">
-    <div class="two-col" style="align-items:center">
-      <div class="pic" role="img" aria-label={L.thornyAlt} style={`width:min(462px,100%); aspect-ratio:462/174; ${art("thorny-capsule.webp")}`}></div>
-      <div>
-        <h3 id="thorny-title">{L.thornyTitle}</h3>
-        <p>{L.thornyText}</p>
-        <a class="btn ghost sm" href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{L.steam}</a>
-      </div>
+    </div>
+    <div class="thorny" id="trailer">
+      <div class="pic thorny-pic" role="img" aria-label={L.thornyAlt} style={art("thorny-capsule.webp")}></div>
+      <h3 id="thorny-title">{L.thornyTitle}</h3>
+      <p>{L.thornyText}</p>
+      <a class="btn ghost sm" href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{L.steam}</a>
     </div>
   </section>
 </div>
-
-

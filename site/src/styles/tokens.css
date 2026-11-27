@@ -1,31 +1,29 @@
-/* Razdor site tokens: DT's palette, fonts and type scale (from the approved mockup kit-dt.css). */
+/* Razdor site tokens: DT's palette, fonts and type scale (round 2 kit, kit-dt.css). */
 @font-face { font-family: "Becker"; src: url("/fonts/Becker-Medium.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Regular.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "PT Sans"; src: url("/fonts/PT_Sans-Bold.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Kurale"; src: url("/fonts/Kurale-Regular.woff2") format("woff2"); font-display: swap; }
 
 :root {
-  --ember: #1c0e06;        /* page ground: DT's burnt dark */
+  --ember: #1c0e06;        /* page ground */
   --ground-deep: #080604;
-  --box: #2e1a0c;          /* DT's brown text boxes */
+  --box: #2e1a0c;          /* panels: the highlighted platform, FAQ items */
   --box-line: #5a3a1e;
-  --marble: #24473b;       /* DT's green marble */
-  --marble-dark: #142b24;
-  --silver: #c7ccd0;       /* DT's silver frames */
+  --marble: #24473b;
+  --marble-dark: #142b24;  /* header and footer bands */
+  --silver: #c7ccd0;       /* frames, the header underline */
   --silver-dark: #5f686d;
-  --gold: #f0c96a;         /* DT's gold headings */
+  --gold: #f0c96a;         /* headings, links */
   --fire: #b8591c;         /* the primary button */
+  --fire-hi: #d8803e;
   --cream: #f1e6c9;        /* body text */
-  --muted: #b9a888;
+  --muted: #b9a888;        /* secondary text: 6.5:1 on --ember */
   --parchment: #dcb97c;
-  --ink: #2c1b0b;
-  --fog-ground: var(--ember);
 
   --font-body: "PT Sans", sans-serif;
   --font-head: "Becker", serif;
-  --font-legend: "Kurale", serif;
 
-  --col-max: 1000px;
-  --strip-w: 300px;
+  --content-max: 1120px;
+  --gutter: 24px;
+  --section-gap: 96px;
   --header-h: 64px;
 }

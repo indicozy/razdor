@@ -14,8 +14,8 @@ const shots = ["game", "devices", "extras", "langs"];
   <h1 id="features-title">{F.h1}</h1>
   <p class="lead">{F.intro}</p>
   {F.blocks.map((b, i) => (
-    <section class="feature two-col" aria-labelledby={`feature-${i}`}>
-      <div class="pic fog crt" role="img" aria-label={b.alt} style={`background-image:url('${B}art/shot-${shots[i]}.webp')`}></div>
+    <section class={i % 2 ? "feature alt" : "feature"} aria-labelledby={`feature-${i}`}>
+      <div class="pic" role="img" aria-label={b.alt} style={`background-image:url('${B}art/shot-${shots[i]}.webp')`}></div>
       <div>
         <h2 id={`feature-${i}`}>{b.title}</h2>
         <ul class="feature-lines">

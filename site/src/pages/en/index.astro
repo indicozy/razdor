@@ -1,11 +1,11 @@
 ---
 import Base from "../../layouts/Base.astro";
-import RoadStrip from "../../components/RoadStrip.astro";
+
 import Landing from "../../components/Landing.astro";
 import { strings } from "../../i18n";
 const m = strings("en").meta.home;
 ---
 <Base lang="en" path="/" title={m.title} description={m.description}>
-  <RoadStrip />
+
   <Landing lang="en" />
 </Base>
