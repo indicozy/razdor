@@ -239,6 +239,15 @@ if [ -n "$EXPECT" ]; then
     if [ -n "$WANT_VICTORY" ] && [ "$GOT_VICTORY" != "$WANT_VICTORY" ]; then
         FAILS+=("victory is [$GOT_VICTORY], expected [$WANT_VICTORY]")
     fi
+    # `contains <text>` lines: the log must hold that text (a tracked result, e.g. RAZDOR_PATROL 1 radius=2)
+    while IFS= read -r line; do
+        case "$line" in
+            "contains "*)
+                PAT=${line#contains }
+                grep -qF -- "$PAT" "$LOG" 2>/dev/null || FAILS+=("log has no [$PAT] ($EXPECT)")
+                ;;
+        esac
+    done < "$EXPECT"
 fi
 
 echo "run dir:    $RUN"

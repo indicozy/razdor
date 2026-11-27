@@ -90,6 +90,32 @@ def scenario():
         event(15, 2, "Поражение#DEFEAT", message="Отряд разбит."),
         # 16: meeting army 1: the leader within a tile of the player.
         event(16, 1, "Встреча", message="Встреча с отрядом.", cond={"meet_army": 1}),
+        # 17-26: the tracked results, each one after the one before (a chain of global messages). 17 finds
+        # artifact 7, 18 checks that the hero has it, 20 learns spell 3, 21 patrol army 1 by +2, 22 shows
+        # army 1, 23 moves army 1 next to the hero, 24 changes the hero's class to unit 3, 25 starts the
+        # battle with army 2 (hostile, next to the hero), 26 loses artifact 7, and 19 checks that it is gone.
+        event(17, 1, "Находка", message="Вы нашли артефакт.",
+              cond={"happened_yes_check": 1, "happened_yes": [7, 0]}, res={"artifacts_add": [7, 0, 0, 0]}),
+        event(18, 1, "Артефакт", message="Артефакт у вас.",
+              cond={"happened_yes_check": 1, "happened_yes": [17, 0], "artifacts_check": 1,
+                    "artifacts": [7, 0, 0], "artifacts_owner": [1, 0, 0]}),
+        event(19, 1, "Утрата", message="Артефакта больше нет.",
+              cond={"happened_yes_check": 1, "happened_yes": [26, 0], "artifacts_check": 1,
+                    "artifacts": [7, 0, 0], "artifacts_owner": [6, 0, 0]}),
+        event(20, 1, "Заклинание", message="Заклинание изучено.",
+              cond={"happened_yes_check": 1, "happened_yes": [18, 0]}, res={"spells_learned": [3, 0, 0, 0]}),
+        event(21, 1, "Дозор", message="Дозор расширен.",
+              cond={"happened_yes_check": 1, "happened_yes": [20, 0]}, res={"patrol_army": 1, "patrol_delta": 2}),
+        event(22, 1, "Смотр", message="Отряд на виду.",
+              cond={"happened_yes_check": 1, "happened_yes": [21, 0]}, res={"show_army": 1}),
+        event(23, 1, "К герою", message="Отряд подошёл.",
+              cond={"happened_yes_check": 1, "happened_yes": [22, 0]}, res={"move_to_hero": 1}),
+        event(24, 1, "Класс", message="Новый класс.",
+              cond={"happened_yes_check": 1, "happened_yes": [23, 0]}, res={"new_hero_class": 3}),
+        event(25, 1, "Бой", message="Бой начинается.",
+              cond={"happened_yes_check": 1, "happened_yes": [24, 0]}, res={"start_battle_with": 2}),
+        event(26, 1, "Потеря", message="Артефакт потерян.",
+              cond={"happened_yes_check": 1, "happened_yes": [25, 0]}, res={"artifacts_remove": [7, 0, 0, 0]}),
     ]
     return events
 

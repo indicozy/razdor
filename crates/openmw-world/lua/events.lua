@@ -54,6 +54,11 @@ function M.new_state()
         answer = {},     -- event id -> 0 (Yes or none) or 1 (No), cleared on opening
         once = {},       -- event id -> once override set by a Yes
         start = {},      -- event id -> start override (relative events)
+        radius = {},     -- army id -> patrol radius, once a patrol result changed it (tiles)
+        hostile = {},    -- army id -> true once a battle made it hostile (spec 3.8)
+        artifacts = {},  -- the hero's pack: artifact ids, one entry per copy (events.md 7.1)
+        spells = {},     -- spell ids the hero has learned (events.md 7.1)
+        class_unit = nil, -- the unit id the hero's class was changed to (events.md 7.2, 16)
         flags = ' ',     -- the flag string: names followed by a space (events.md §5)
         gold = 0,
         mana = 0,
@@ -168,6 +173,52 @@ local function party_count(s)
     return n
 end
 
+-- The artifacts condition (events.md §4, 14): each slot with an id looks in the tracked pack; a copy
+-- found is taken aside for the rest of the check. Code 1 needs it, 6 needs none. Codes 2-5 (the AI
+-- armies' worn items) and code 0 fail: those items are not tracked.
+local function artifacts_ok(s, c)
+    local taken = {}
+    for i = 1, 3 do
+        local id = num(c.artifacts[i])
+        if id ~= 0 then
+            local code = num(c.artifacts_owner[i])
+            local found = nil
+            for k, v in ipairs(s.artifacts) do
+                if v == id and not taken[k] then
+                    found = k
+                    break
+                end
+            end
+            if code == 1 then
+                if not found then
+                    return false
+                end
+                taken[found] = true
+            elseif code == 6 then
+                if found then
+                    return false
+                end
+            else
+                return false
+            end
+        end
+    end
+    return true
+end
+
+-- Whether an army is hostile now: the map's attitude, or a battle that made it so (spec 3.8).
+function M.is_hostile(s, a)
+    if s.hostile[a.id] then
+        return true
+    end
+    return a.hostile and true or false
+end
+
+-- An army's patrol radius now: the map's, or the one a patrol result set (events.md 7.2, 8).
+function M.patrol_radius(s, a)
+    return s.radius[a.id] or a.patrol_radius
+end
+
 -- The units condition of one slot (events.md §4, 13): code 1 needs the unit, 6 needs none, 2-5
 -- look in the armies of faction code - 1 (their start units). Code 0 fails.
 local function unit_slot_ok(s, c, i)
@@ -217,7 +268,8 @@ local function building_slot_ok(s, c, i)
 end
 
 -- The conditions of an event (events.md §4). `skip_meet` leaves out the meet-army test, for the
--- "meeting event waiting" mark (§9). Artifacts and the army strength are not tracked (v1).
+-- "meeting event waiting" mark (§9). The army strength is not tracked yet (the unit costs are not in
+-- the plugin's data); the artifacts are (the tracked pack).
 local function conditions_ok(env, s, ev, skip_meet)
     local c = ev.conditions or {}
     if not flag_test_ok(s, ev) then
@@ -289,6 +341,9 @@ local function conditions_ok(env, s, ev, skip_meet)
                 return false
             end
         end
+    end
+    if num(c.artifacts_check) ~= 0 and not artifacts_ok(s, c) then
+        return false
     end
     return true
 end
@@ -388,8 +443,33 @@ end
 
 -- The dialog-time results (events.md §7.1): the units added and removed. The artifacts and the
 -- spells are not played (v1).
+local function index_of(list, id)
+    for k, v in ipairs(list) do
+        if v == id then
+            return k
+        end
+    end
+    return nil
+end
+
 local function dialog_results(s, ev)
     local r = ev.results or {}
+    -- DT's order (events.md 7.1): artifacts gained, artifacts lost, units added, units removed, spells.
+    for i = 1, 4 do
+        local id = num(r.artifacts_add and r.artifacts_add[i])
+        if id ~= 0 then
+            table.insert(s.artifacts, id)
+            print('RAZDOR_HERO artifact+ ' .. id)
+        end
+    end
+    for i = 1, 4 do
+        local id = num(r.artifacts_remove and r.artifacts_remove[i])
+        local k = id ~= 0 and index_of(s.artifacts, id) or nil
+        if k then
+            table.remove(s.artifacts, k)
+            print('RAZDOR_HERO artifact- ' .. id)
+        end
+    end
     for i = 1, 4 do
         local unit = num(r.units_add and r.units_add[i])
         if unit ~= 0 then
@@ -415,12 +495,12 @@ local function dialog_results(s, ev)
     if removed then
         print('RAZDOR_UNIT_REMOVE ' .. ev.id)
     end
-    for _, key in ipairs({ 'artifacts_add', 'artifacts_remove', 'spells_learned' }) do
-        for i = 1, 4 do
-            if num(r[key] and r[key][i]) ~= 0 then
-                print('RAZDOR_NOTE ' .. ev.id .. ' ' .. key .. ' is not played')
-                break
-            end
+    -- Spells are learned once each (events.md 7.1: an already known one is not appended again).
+    for i = 1, 4 do
+        local id = num(r.spells_learned and r.spells_learned[i])
+        if id ~= 0 and not index_of(s.spells, id) then
+            table.insert(s.spells, id)
+            print('RAZDOR_HERO spell+ ' .. id)
         end
     end
 end
@@ -467,10 +547,24 @@ finish = function(env, s, ev)
     if num(r.deactivate_army) ~= 0 then
         env.deactivate(r.deactivate_army)
     end
-    for _, key in ipairs({ 'patrol_army', 'show_army', 'cast_spell', 'move_to_hero', 'new_hero_class', 'start_battle_with' }) do
-        if num(r[key]) ~= 0 then
-            print('RAZDOR_NOTE ' .. id .. ' ' .. key .. ' is not played')
-        end
+    if num(r.patrol_army) ~= 0 then
+        M.patrol(s, num(r.patrol_army), num(r.patrol_delta))
+    end
+    if num(r.show_army) ~= 0 then
+        env.show_army(num(r.show_army))
+    end
+    if num(r.move_to_hero) ~= 0 then
+        env.move_to_hero(num(r.move_to_hero))
+    end
+    if num(r.new_hero_class) ~= 0 then
+        s.class_unit = num(r.new_hero_class)
+        print('RAZDOR_HERO class unit=' .. s.class_unit)
+    end
+    if num(r.start_battle_with) ~= 0 then
+        M.battle(env, s, num(r.start_battle_with))
+    end
+    if num(r.cast_spell) ~= 0 then
+        print('RAZDOR_NOTE ' .. id .. ' cast_spell is not played')
     end
     if num(r.light_lanterns and r.light_lanterns[1]) ~= 0 then
         print('RAZDOR_NOTE ' .. id .. ' lanterns are not lit (Q7)')
@@ -618,10 +712,35 @@ local function meet_waiting(env, s, army)
     return false
 end
 
+-- A patrol result (events.md 7.2, 8): the radius changes by the delta, never below 0.
+function M.patrol(s, id, delta)
+    local a = army_by_id[id]
+    if not a then
+        return
+    end
+    local radius = math.max(0, M.patrol_radius(s, a) + delta)
+    s.radius[id] = radius
+    print(string.format('RAZDOR_PATROL %d radius=%d', id, radius))
+end
+
+-- A battle result (events.md 7.2, 15), played at once: the army is made hostile (saved), activated
+-- if it is off the map, and moved next to the hero. A waiting meet event still holds its fire at 0.
+function M.battle(env, s, id)
+    if not army_by_id[id] then
+        return
+    end
+    s.hostile[id] = true
+    print('RAZDOR_BATTLE ' .. id)
+    env.battle(id)
+    local held = meet_waiting(env, s, id)
+    s.held[id] = held or nil
+    env.fight(id, held and 0 or 100)
+end
+
 -- The hostile armies that a waiting meet event holds at fight 0 (spec 3.8, the held fire).
 function M.refresh_holds(env, s)
     for _, a in ipairs(map.armies) do
-        if a.hostile then
+        if M.is_hostile(s, a) then
             local held = meet_waiting(env, s, a.id)
             if held ~= (s.held[a.id] or false) then
                 s.held[a.id] = held or nil

@@ -102,7 +102,7 @@ end
 -- The AI fight value of an army's bodies: hostile armies attack on sight (spec 3.8). Friendly and
 -- neutral ones stay at 0. Only a body's own script may write it, so the value goes in its data.
 local function fight_of(a)
-    return a.hostile and FIGHT_HOSTILE or 0
+    return events.is_hostile(state.ev, a) and FIGHT_HOSTILE or 0
 end
 
 local function spawn_army(a)
@@ -142,7 +142,7 @@ local function spawn_army(a)
         end
     end
     st.n = total
-    print(string.format('RAZDOR_FIGHT %d hostile=%s fight=%d', a.id, tostring(a.hostile), fight_of(a)))
+    print(string.format('RAZDOR_FIGHT %d hostile=%s fight=%d', a.id, tostring(events.is_hostile(state.ev, a)), fight_of(a)))
     print(string.format('RAZDOR_ARMY_SPAWNED %d actors=%d', a.id, total))
     if a.ship then
         print(string.format('RAZDOR_SHIP %d z=%.0f', a.id, a.spawn.z))
@@ -195,7 +195,7 @@ end
 
 -- A random open tile within the patrol radius of the army's home tile, as a world point, or nil.
 local function pick_destination(a, b)
-    local r = a.patrol_radius
+    local r = events.patrol_radius(state.ev, a)
     if r <= 0 then
         return nil
     end
@@ -315,6 +315,71 @@ function env.fight(id, v)
         end
     end
     print(string.format('RAZDOR_HOLD %d fight=%d', id, v))
+end
+
+-- Moves a spawned army next to the hero (events.md 7.2, 14 and 15): the leader takes the first open
+-- tile around the hero (outside buildings), the other bodies the offsets around it. Ships are not
+-- moved. Returns whether it moved.
+local function move_next_to_hero(a)
+    local b = bodies[a.id]
+    local p = player()
+    if not b or not p or a.ship then
+        return false
+    end
+    local px, py, pz = p.position.x, p.position.y, p.position.z
+    local lx, ly = nil, nil
+    for i = 1, #OFFSETS do
+        local x, y = px + OFFSETS[i][1] * SPACING, py + OFFSETS[i][2] * SPACING
+        if common.is_open(x, y) and not common.in_building(x, y) then
+            lx, ly = x, y
+            break
+        end
+    end
+    if not lx then
+        return false
+    end
+    local spot = { spawn = { x = lx, y = ly, z = pz } }
+    local taken = {}
+    for k = 1, #b.actors do
+        local obj = b.actors[k]
+        if obj and obj:isValid() then
+            local x, y = lx, ly
+            if obj ~= b.leader then
+                x, y = body_point(spot, taken)
+            end
+            obj:teleport('', util.vector3(x, y, pz))
+        end
+    end
+    return true
+end
+
+-- The environment's results that move armies (events.lua, finish and battle).
+function env.show_army(id)
+    local a = by_id[id]
+    if not a then
+        return
+    end
+    if not army_state(id).spawned then
+        env.activate(id)
+    end
+    print(string.format('RAZDOR_SHOW_ARMY %d spawned=%s', id, tostring(army_state(id).spawned)))
+end
+
+function env.move_to_hero(id)
+    local a = by_id[id]
+    local moved = a ~= nil and army_state(id).spawned and move_next_to_hero(a) or false
+    print(string.format('RAZDOR_MOVE_TO_HERO %d moved=%s', id, tostring(moved)))
+end
+
+function env.battle(id)
+    local a = by_id[id]
+    if not a then
+        return
+    end
+    if not army_state(id).spawned then
+        env.activate(id)
+    end
+    move_next_to_hero(a)
 end
 
 local function start_game()

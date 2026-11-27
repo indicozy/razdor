@@ -1,5 +1,13 @@
 # Expected event order of the M5 synthetic run (make_m5_map.py, scripts/razdor_m5/player.lua).
-# Read by run.sh --expect: the log's RAZDOR_EVENT ids must equal the `events` line, in order, and the
-# last RAZDOR_VICTORY id must equal the `victory` line.
-events 1 2 5 6 7 3 4 16 12 13 8 10 11 14
+# Read by run.sh --expect: the log's RAZDOR_EVENT ids must equal the `events` line, in order; the last
+# RAZDOR_VICTORY id must equal the `victory` line; each `contains` line is a text the log must hold.
+events 1 2 5 6 7 17 18 20 21 22 23 24 25 26 19 16 3 4 12 13 8 10 11 14
 victory 14
+contains RAZDOR_HERO artifact+ 7
+contains RAZDOR_HERO spell+ 3
+contains RAZDOR_PATROL 1 radius=2
+contains RAZDOR_SHOW_ARMY 1 spawned=true
+contains RAZDOR_MOVE_TO_HERO 1 moved=true
+contains RAZDOR_HERO class unit=3
+contains RAZDOR_BATTLE 2
+contains RAZDOR_HERO artifact- 7
