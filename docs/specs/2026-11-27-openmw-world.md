@@ -2,8 +2,9 @@
 
 Status: M6 is done (2026-11-28): `tools/openmw-smoke/play.sh` runs the whole pipeline in one command, the
 event windows have a dark backdrop, and the docs are in `docs/flows/testing-and-tools.md`. M1 to M5 are
-built in `crates/openmw-world`. Next, not started: a units exporter (real stats), real art, rounder
-massifs, the hall list, ships that move, interiors. The owner's answers of 2026-11-27 are
+built in `crates/openmw-world`. The units exporter is done (2026-11-28): `razdor-units-json` writes the
+install's unit cards, and `razdor-openmw --units` gives the armies real stats and names (§3.8, "units
+notes"). Next, not started: real art, rounder massifs, the hall list, ships that move, interiors. The owner's answers of 2026-11-27 are
 in the last column of the §7 table and are applied in the sections they name. Owner decisions already made: the converter lives in this
 repo as its own workspace crate, it reads the JSON v1 of `razdor-dtm-json` (not `.DTm`), the target
 is OpenMW 0.51 on the public-domain OpenMW Game Template, and the player needs no Morrowind.
@@ -479,6 +480,24 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
   that is closed on foot (the sample has an inactive army on impassable swamp) or inside a building's box is
   spawned on the nearest open tile outside any box, searched in rings; ties go to the lower
   direction number of world.md §1. Its home stays the original tile for events.
+
+**Units notes (`--units`, the units exporter).** With `razdor-openmw … --units <units.json>` (the file of
+`razdor-units-json`, version 1; game data, never committed) every CREA takes the install's numbers at the
+troop's level. The map's troop level is 0-based, as the game reads it (`level + 1`, as hired = 1), so
+CREA level = `level + 1` and a gain per level applies `level` times. The mapping, one line per stat:
+- hit points → `health` (`hit_points`, plus its gain per level);
+- melee attack `blow` → attack pair 1 (min = half of it rounded down, at least 1; max = it), and strength;
+- ranged attack `shot` → attack pair 2 (same rule), and part of the combat skill (the larger of blow and shot);
+- magic power → attack pair 3, intelligence, `magicka` and the magic skill (0 for a unit without a school);
+- defence `blow` + `shot` → agility (capped at 100): in the Morrowind rules the target's agility lowers the hit chance [U];
+- the mean of the three protections (percent, grown by the game's rule) → willpower;
+- initiative × 3 → speed (10 to 100);
+- endurance, luck and personality 50; fatigue 100 (no unit value for them);
+- not mapped (no CREA field): regeneration, vampirism, actions, bonuses, evasion, mana drain, cost, nature.
+The name of a unit card is the unit's Russian name (cp1251 in the plugin); a leader's name is its army's
+`leader_name` (else the army's name, else the unit's). A unit missing from the file keeps the placeholder
+stats and the name `Unit <id>`. Without `--units` the formula above (M4) stays. Checked on RK1 (esmtool:
+`rz_u20_l0` = `Стрелок`, health 60, combat 30; leader `rz_army_1` = `Рыцарь Альберт фон Бонитур`).
 
 ### 3.9 The player
 

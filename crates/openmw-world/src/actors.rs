@@ -243,6 +243,7 @@ pub fn hostile(map: &Map, faction: i64) -> bool {
 /// takes its real name and stats at its level and a leader takes its unit's stats and the army
 /// leader's name (the army's name when the leader has none); a unit missing from the file keeps the
 /// placeholder stats and the name `Unit <id>`. Without `units` the placeholder formula is used (M4).
+#[allow(clippy::too_many_arguments)] // the plan's inputs are the map, its grid and the per-tile data (M4); units (M7) is the eighth
 pub fn plan_armies(
     map: &Map,
     grid: &Grid,

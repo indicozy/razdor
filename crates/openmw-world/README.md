@@ -35,8 +35,12 @@ Options: `--archetype knight|archmage|ranger` (default: the map's first hero), `
 ## Usage
 
 ```
-razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>]
+razdor-openmw <map.json> -o <out dir> [--name <id>] [--tile-units 512|1024|2048] [--template <path to template.omwgame>] [--debug-heightmap <pgm path>] [--units <units.json>]
 ```
+
+- `--units` reads the install's units JSON (`razdor-units-json`, version 1; game data, never committed):
+  the CREA stats and names are the install's, mapped as in spec 3.8 ("units notes"). Without it the
+  placeholder formula is used.
 
 - Writes `<out dir>/<name>.omwaddon` (default name `razdor_map`), `<out dir>/textures/razdor/surf_*.tga`
   and `<out dir>/meshes/razdor/*.dae`.
@@ -89,6 +93,8 @@ by the smoke test (milestone 4).
 
 ## Modules
 
+- `units`: the units JSON (format and version checked, by id). Stats at a 0-based level, and the
+  game's percent growth for the protections. The mapping to CREA stats is in `actors::real_stats`.
 - `input`: reads the JSON (format and version checked), the objects and buildings, and decodes the
   terrain (`hex-rows` or `numbers`). `kept_objects` applies DT's one-massif-and-one-plant-per-tile rule.
 - `grid`: tile, world, cell and vertex coordinates, footprints.

@@ -4,11 +4,14 @@
 # standalone config -> an off-screen OpenMW run with a picture, PASS or FAIL.
 #
 #   play.sh <map.DTm | map.json> [--name <name>] [--archetype knight|archmage|ranger]
-#           [--shot <png>] [--camera x,y,z,pitch,yaw] [--window]
+#           [--units <units.json>] [--shot <png>] [--camera x,y,z,pitch,yaw] [--window]
 #
 #   --name       the run's folder under /mnt/ai_models/razdor-scratch/openmw/play/ (it must not exist).
 #                Default: play-<map name>-<time>.
 #   --archetype  the hero the converter plays (default: the map's first hero).
+#   --units      the install's units JSON (razdor-units-json) for the real army stats and names. With a
+#                .DTm and no --units, the units are exported from RAZDOR_DT_DIR (set in .env) when it is
+#                set; without either, the converter keeps its placeholder stats.
 #   --shot       the picture (default: <run folder>/shot.png).
 #   --camera     the picture's camera (default: two tiles north-west of the hero's start, looking at
 #                the first building; see view.py).
@@ -33,6 +36,7 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/target}
 INPUT=""
 NAME=""
 ARCH=""
+UNITS=""
 SHOT=""
 CAMERA=""
 WINDOW=0
@@ -46,6 +50,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --name) NAME=$2; shift 2 ;;
         --archetype) ARCH=$2; shift 2 ;;
+        --units) UNITS=$2; shift 2 ;;
         --shot) SHOT=$2; shift 2 ;;
         --camera) CAMERA=$2; shift 2 ;;
         --window) WINDOW=1; shift ;;
@@ -77,10 +82,16 @@ START_NS=$(date +%s)
 
 # --- 1. the map as JSON (razdor-dtm-json reads only the .DTm file) ---
 if [ "$KIND" = dtm ]; then
-    ( cd "$REPO" && CARGO_BUILD_JOBS=12 $PREFIX cargo build --profile fasttest --bin razdor-dtm-json ) \
-        > "$WORK/build-dtm-json.log" 2>&1 || { echo "play.sh: building razdor-dtm-json failed (see $WORK/build-dtm-json.log)" >&2; exit 2; }
+    ( cd "$REPO" && CARGO_BUILD_JOBS=12 $PREFIX cargo build --profile fasttest --bin razdor-dtm-json --bin razdor-units-json ) \
+        > "$WORK/build-dtm-json.log" 2>&1 || { echo "play.sh: building the JSON exporters failed (see $WORK/build-dtm-json.log)" >&2; exit 2; }
     $PREFIX "$CARGO_TARGET_DIR/fasttest/razdor-dtm-json" "$INPUT" -o "$WORK/map.json" \
         || { echo "play.sh: razdor-dtm-json could not read $INPUT" >&2; exit 2; }
+    # The units of the install (game data, stays in the work folder): exported when RAZDOR_DT_DIR is set.
+    if [ -z "$UNITS" ] && [ -n "${RAZDOR_DT_DIR:-}" ]; then
+        ( cd "$REPO" && $PREFIX "$CARGO_TARGET_DIR/fasttest/razdor-units-json" -o "$WORK/units.json" ) \
+            || { echo "play.sh: razdor-units-json could not export the units (RAZDOR_DT_DIR)" >&2; exit 2; }
+        UNITS="$WORK/units.json"
+    fi
 else
     cp "$INPUT" "$WORK/map.json" || { echo "play.sh: cannot copy $INPUT" >&2; exit 2; }
 fi
@@ -90,6 +101,11 @@ fi
     > "$WORK/build-openmw.log" 2>&1 || { echo "play.sh: building razdor-openmw failed (see $WORK/build-openmw.log)" >&2; exit 2; }
 CONVERT=("$CARGO_TARGET_DIR/fasttest/razdor-openmw" "$WORK/map.json" -o "$WORK/out" --template "$TEMPLATE")
 [ -n "$ARCH" ] && CONVERT+=(--archetype "$ARCH")
+if [ -n "$UNITS" ]; then
+    [ -f "$UNITS" ] || { echo "play.sh: $UNITS is not a file" >&2; exit 2; }
+    CONVERT+=(--units "$UNITS")
+    echo "units:       $UNITS"
+fi
 $PREFIX "${CONVERT[@]}" > "$WORK/convert.log" 2>&1 || { echo "play.sh: the conversion failed (see $WORK/convert.log)" >&2; exit 2; }
 echo "converted:   $WORK/out ($(ls "$WORK/out" | wc -l) entries)"
 

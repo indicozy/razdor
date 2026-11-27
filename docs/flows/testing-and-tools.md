@@ -509,6 +509,30 @@ go to stderr with exit code 2.
 - Tests: `cargo test --profile fasttest --lib dt::dtm_json::`. The real-map test exports every
   map of the install (`RAZDOR_DT_DIR`) and skips without it.
 
+## The units exporter (`razdor-units-json`)
+
+`razdor-units-json [-o <out.json>] [--compact] [--lang <prefix>]` writes the install's unit cards (the
+army stats of the OpenMW converter, `--units`). The layout is in `src/dt/units_json.rs` (pure, serde DTOs
+kept private); the command is `src/bin/razdor-units-json.rs`. It loads the install named by `RAZDOR_DT_DIR`
+(`.env`) through `DtInstall::load` and `Content::from_dt_in`; without the variable it exits 2. The names are
+the install's Russian unless `--lang Eng` (or another data prefix) is given. Its output is game data: write
+it outside the repo (the OpenMW runs use `/mnt/ai_models/razdor-scratch/openmw/units.json`).
+
+- **Format `razdor-units-json`, version 1.** `format`, `version`, `language`, `count`, then `units`. One
+  entry per unit card in file order: `id` (`GlobalIndex`), `name`, `cost`, `hit_points`, `attack` and
+  `defence` (`blow`, `shot`), `magic_power`, `magic` (`life`, `elemental`, `death`, or null),
+  `magic_direction`, `protection` (percent, `life`/`death`/`elemental`), `initiative`, `actions`,
+  `regeneration`, `vampirism`, `ranged` and `flying` (derived), `nature`, `bonus` (the file's token),
+  `evasion`, `min_magic_power`, `mana_drain` (community fields, null when absent), `experience`
+  (`start`, `growth_percent`) and `level_up`, the gain per level above the first keyed by stat
+  (`hit_points`, `attack_blow`, `protect_life`, ...; a missing key is 0). Every field's meaning is in the
+  comments of `units_json.rs`.
+- Stats at level L (1 = as hired): a flat stat is `value + gain * (L - 1)`; a protection or regeneration
+  grows by `rules::experience::percent_stat`, the same as the game.
+- Tests: `cargo test --profile fasttest --lib dt::units_json::` (synthetic units; the real-install test
+  exports every unit of `RAZDOR_DT_DIR` and checks the ids are unique). The contract with the converter
+  is `tests/units_contract.rs`: the export reads in `razdor_openmw::units`.
+
 ## The OpenMW converter (`tools/openmw-smoke/play.sh`)
 
 **What it is.** A converter from a Discord Times map to an OpenMW world: OpenMW 0.51 on the public-domain
@@ -524,8 +548,16 @@ smoke test, in a window for play.
 **One command** (from a fresh folder, nothing reused):
 
 ```
-tools/openmw-smoke/play.sh <map.DTm | map.json> [--name N] [--archetype knight|archmage|ranger] [--shot png] [--camera x,y,z,pitch,yaw] [--window]
+tools/openmw-smoke/play.sh <map.DTm | map.json> [--name N] [--archetype knight|archmage|ranger] [--units units.json] [--shot png] [--camera x,y,z,pitch,yaw] [--window]
 ```
+
+With a `.DTm` and `RAZDOR_DT_DIR` set (`.env`), `play.sh` exports the units itself
+(`razdor-units-json` into the run's folder) and passes them on; `--units <json>` takes an existing file
+instead. Without units the converter keeps its placeholder formula.
+
+The converter also takes `--units <units.json>` directly (`razdor-openmw <map.json> -o <out> --units <file>`):
+the CREA records then carry the real stats and the Russian names (cp1251). The mapping is in the spec, 3.8
+("units notes"). A unit missing from the file keeps the placeholder and the name `Unit <id>`.
 
 Without `--window` it runs the smoke test and exits 0 for PASS: one picture of the start spot (two tiles
 north-west of the hero's start, looking at the map's first building), and the harness's checks (the
@@ -542,12 +574,14 @@ never committed. The play config is `<folder>/window/`.
 **What is placeholder.** The meshes are generated placeholder shapes (one colour per part; a figure that does
 not animate); the ground textures are one solid colour per surface; the buildings are blocks with a roof;
 the event windows are plain text on a dark backdrop (`textures/razdor/panel.tga`); the Lua UI has no menu
-frames. The stats are the placeholder formula, not the original's.
+frames. The stats are the placeholder formula unless `--units` is given; with `--units` they are the
+install's numbers mapped to OpenMW's (spec 3.8).
 
 **Limits (v1).** Events: the v1 column of spec 3.11 (messages, questions, flags, relative events, chains,
 an army activated and defeated, quests and the victory). No interiors: a building is one reference, no door.
-No ships moving: a ship army floats on the water and does not move. No animation. No units exporter yet, so
-the stats are the formula. No fog of war, no lanterns, no campaign (one map per run).
+No ships moving: a ship army floats on the water and does not move. No animation. Without `--units` the
+stats are the formula; the exporter is `razdor-units-json` (above). No fog of war, no lanterns, no campaign
+(one map per run).
 
 **Pointers.** Spec: `docs/specs/2026-11-27-openmw-world.md` (sections 2, 3, 5 and the milestones in 6).
 Crate: `crates/openmw-world/README.md`. Harness: `tools/openmw-smoke/README.md`. The `m5/` folder of the
