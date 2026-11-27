@@ -1,0 +1,3 @@
+# Test-only scripts for tools/openmw-smoke (never part of the converter's output).
+GLOBAL: scripts/razdor_smoke/global.lua
+PLAYER: scripts/razdor_smoke/player.lua
