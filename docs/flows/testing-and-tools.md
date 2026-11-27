@@ -509,6 +509,50 @@ go to stderr with exit code 2.
 - Tests: `cargo test --profile fasttest --lib dt::dtm_json::`. The real-map test exports every
   map of the install (`RAZDOR_DT_DIR`) and skips without it.
 
+## The OpenMW converter (`tools/openmw-smoke/play.sh`)
+
+**What it is.** A converter from a Discord Times map to an OpenMW world: OpenMW 0.51 on the public-domain
+OpenMW Game Template, with no Morrowind files. The converter is the workspace crate `crates/openmw-world`
+(binary `razdor-openmw`); the off-screen check is `tools/openmw-smoke/`. The design is in
+`docs/specs/2026-11-27-openmw-world.md`, the crate's notes in `crates/openmw-world/README.md`.
+
+**The pipeline.** The `.DTm` becomes JSON (`razdor-dtm-json`, the section above). `razdor-openmw` writes the
+plugin (`razdor_map.omwaddon`), the ground textures, the meshes and the Lua runtime. The standalone config
+lists the Template's data, the output and the Template's master. OpenMW then runs: off-screen for the
+smoke test, in a window for play.
+
+**One command** (from a fresh folder, nothing reused):
+
+```
+tools/openmw-smoke/play.sh <map.DTm | map.json> [--name N] [--archetype knight|archmage|ranger] [--shot png] [--camera x,y,z,pitch,yaw] [--window]
+```
+
+Without `--window` it runs the smoke test and exits 0 for PASS: one picture of the start spot (two tiles
+north-west of the hero's start, looking at the map's first building), and the harness's checks (the
+RAZDOR_SMOKE line, a picture that is not one colour, no Error line naming razdor files). With `--window` it
+runs nothing: it writes the play config and prints the command to start the game in a window on the
+desktop, `openmw --replace=config --config <folder>/window --skip-menu --start 0,0`. The owner runs that
+by hand. Smoke runs never open a window on the owner's display; they use their own Xvfb.
+
+**Where the output goes.** Each run has its own folder, `/mnt/ai_models/razdor-scratch/openmw/play/<name>/`:
+`map.json`, `out/` (the converter's files), `smoke/` (the run's `openmw.cfg`, `settings.cfg` and
+`openmw.log`), `shot.png`, the build logs. The folder is game content (the map's text and layout) and is
+never committed. The play config is `<folder>/window/`.
+
+**What is placeholder.** The meshes are generated placeholder shapes (one colour per part; a figure that does
+not animate); the ground textures are one solid colour per surface; the buildings are blocks with a roof;
+the event windows are plain text on a dark backdrop (`textures/razdor/panel.tga`); the Lua UI has no menu
+frames. The stats are the placeholder formula, not the original's.
+
+**Limits (v1).** Events: the v1 column of spec 3.11 (messages, questions, flags, relative events, chains,
+an army activated and defeated, quests and the victory). No interiors: a building is one reference, no door.
+No ships moving: a ship army floats on the water and does not move. No animation. No units exporter yet, so
+the stats are the formula. No fog of war, no lanterns, no campaign (one map per run).
+
+**Pointers.** Spec: `docs/specs/2026-11-27-openmw-world.md` (sections 2, 3, 5 and the milestones in 6).
+Crate: `crates/openmw-world/README.md`. Harness: `tools/openmw-smoke/README.md`. The `m5/` folder of the
+harness is a test driver; `play.sh` loads its auto-answer only so the start window does not cover the picture.
+
 ## The player's performance test (Settings → Other)
 
 «Тест производительности» (`src/ui/bench.rs`, the windows in `src/ui/bench_view.rs`, the owner's request 2026-11-12)

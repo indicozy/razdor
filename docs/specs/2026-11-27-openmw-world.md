@@ -1,6 +1,9 @@
 # A DT map as an OpenMW world: design spec (2026-11-27)
 
-Status: M1 and M2 are built in `crates/openmw-world`. The owner's answers of 2026-11-27 are
+Status: M6 is done (2026-11-28): `tools/openmw-smoke/play.sh` runs the whole pipeline in one command, the
+event windows have a dark backdrop, and the docs are in `docs/flows/testing-and-tools.md`. M1 to M5 are
+built in `crates/openmw-world`. Next, not started: a units exporter (real stats), real art, rounder
+massifs, the hall list, ships that move, interiors. The owner's answers of 2026-11-27 are
 in the last column of the §7 table and are applied in the sections they name. Owner decisions already made: the converter lives in this
 repo as its own workspace crate, it reads the JSON v1 of `razdor-dtm-json` (not `.DTm`), the target
 is OpenMW 0.51 on the public-domain OpenMW Game Template, and the player needs no Morrowind.
@@ -259,9 +262,11 @@ neither, the player is put at (4096, 4096, 0), which may be under our land. `<cx
 cell of the hero's start tile; the global script then moves the player to the exact tile (§3.9),
 so the design holds whichever way the game was started. The `sStartCell` setting is not used.
 
-Still **[U]**, for M6: the exact `replace=` set, and whether `data=…/vfs` and
-`content=builtin.omwscripts` must be listed when the global config is replaced. The global config
-also loads `vfs-mw` (Morrowind-specific built-in scripts); the standalone config leaves it out.
+Settled in M6 (smoke runs, 2026-11-28): `content=builtin.omwscripts` must **not** be listed (OpenMW
+aborts with "specified more than once"); `data=…/vfs` is listed and the runs work; `replace=data`
+keeps the global config's `vfs-mw` out (without it the Morrowind data folder is added and its meshes
+log errors). Not tested one by one: whether `replace=config` and `replace=content` are needed. They
+stay listed, as the runs were clean with them.
 
 Lua scripts are registered by the `.omwscripts` file, one line per script with its kind, as the
 built-in file does **[V]** (`resources/vfs/builtin.omwscripts`):
@@ -632,7 +637,7 @@ standalone config of §2.4 in the scratch folder, starts `Xvfb :<free display>` 
 `xwd -root` on that display (OpenMW has no script call for a screenshot **[R]**), waits for the
 exit, then stops Xvfb. Pass: the line's tile is the hero's start tile, the picture is not one
 flat colour, and the log has no `Error` line naming our files. OpenMW's CI runs under Xvfb
-**[R]**; llvmpipe on this machine is **[U]** until M4 runs it. If it is too slow, the RTX 4060 is used
+**[R]**; llvmpipe on this machine ran the smoke test in about 20 s (M4 and M6), so the RTX 4060 was not needed. If it is too slow, the RTX 4060 is used
 headless (EGL), as Q10 allows.
 
 **Machine rules** for every agent brief: heavy work runs as `CARGO_BUILD_JOBS=12
@@ -671,7 +676,7 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
 | Q6 | Building interiors: a window on the door, or real interior cells? | A window in v1 (events, quests, rumours). Hiring, markets and healing are not ported yet. No door window. Stepping into a building's footprint fires its events (§3.7, §3.11). |
 | Q7 | Fog of war: none, or a Lua overlay on the map? | None in v1; lanterns become beacons. No fog of war and no lanterns. Lantern beacons are not converted (§3.10); points stay for their events (an assumed reading). |
 | Q8 | Campaign: load the next map after a victory? | No in v1: one map per run, the end window names the next map. One map per run. |
-| Q9 | Russian text: do the fonts in use draw Cyrillic, and are the Template's `mygui` files needed? | Unknown until M6. If needed, the harness overlays them on a scratch copy of the resources folder and adds a free Cyrillic font there; nothing under `/usr/share` changes and the converter ships no font. OpenMW and its resources are not modified. Only investigate whether Cyrillic renders (§2.3, M6). |
+| Q9 | Russian text: do the fonts in use draw Cyrillic, and are the Template's `mygui` files needed? | Settled in M6: Cyrillic draws with the fonts OpenMW and the Template use (the RK1 event windows show it), so no `mygui` file and no font is needed. Had they been needed, the harness would overlay them on a scratch copy of the resources folder and add a free Cyrillic font there; nothing under `/usr/share` changes and the converter ships no font. OpenMW and its resources are not modified. Only investigate whether Cyrillic renders (§2.3, M6). |
 | Q10 | May the smoke test use the RTX 4060 (headless EGL) when llvmpipe is too slow? | Start with llvmpipe on CPUs 8–19; ask before using a GPU. The smoke test may use the RTX 4060 (headless EGL) when llvmpipe is too slow (§5). |
 | Q11 | The Template is cloned from GitLab at test time. Pin a commit? | Yes: the harness pins one commit id and keeps the clone in scratch. No pinned Template commit. Commit at every checkpoint and milestone (§6). |
 
