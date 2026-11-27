@@ -17,8 +17,9 @@ use std::collections::BTreeMap;
 pub const FIGURE_MODEL: &str = "razdor/figure.dae";
 /// The plan's mesh name of the ship raft (STAT `razdor_raft`).
 pub const RAFT_MESH: &str = "raft";
-/// The radius of an army's ring of bodies around its leader, in units (spec §3.8).
-pub const RING_UNITS: i64 = 160;
+/// The distance between an army's bodies, in units: they stand on a grid of this spacing around the
+/// leader, so a squad reads as several units (M4 follow-up, spec §3.8).
+pub const BODY_SPACING: i64 = 300;
 /// CREA flag "Walks" (0x40), as the landracer has it.
 pub const FLAG_WALKS: i32 = 0x40;
 
@@ -112,6 +113,8 @@ pub struct ArmyOut {
     pub name: String,
     pub faction: i64,
     pub relations: Vec<i64>,
+    /// Whether the army is hostile to the player: `info.relations[0][faction - 1] < 0` (spec §3.8).
+    pub hostile: bool,
     /// The home tile `(x, y)`, DT's coordinates (y from the north).
     pub tile: (i64, i64),
     /// Where the leader starts, world units. The home tile when it is open, else the nearest open
@@ -175,6 +178,16 @@ fn nearest_open(passable: &[u8], grid: &Grid, boxes: &[[i64; 4]], x: i64, y: i64
 /// Plans the armies of a map: the records, and for each army its tile, spawn point and units.
 /// `codes` and `passable` are the map's surface codes and on-foot values (row-major, row 0 north),
 /// `boxes` the building footprints from the placement plan, `model` the body mesh (`MODL`).
+/// The player is faction row 0 of `info.relations`; an army of faction `f` is hostile when the
+/// player's row holds a negative value in column `f - 1` (spec §3.8, the attitude rule).
+pub fn hostile(map: &Map, faction: i64) -> bool {
+    let column = usize::try_from(faction - 1).ok();
+    match (map.info.relations.first(), column) {
+        (Some(row), Some(c)) => row.get(c).is_some_and(|v| *v < 0),
+        _ => false,
+    }
+}
+
 pub fn plan_armies(
     map: &Map,
     grid: &Grid,
@@ -232,6 +245,7 @@ pub fn plan_armies(
             name: a.name.clone(),
             faction: a.faction,
             relations: a.relations.clone(),
+            hostile: hostile(map, a.faction),
             tile: (tx, ty),
             spawn,
             relocated,

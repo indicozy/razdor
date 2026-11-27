@@ -123,6 +123,9 @@ pub struct Info {
     pub generator_seed: u64,
     #[serde(default)]
     pub start_time: Option<i64>,
+    /// `info.relations`: rows and columns of factions 1-4 (row 0 is the player's, spec §3.8).
+    #[serde(default)]
+    pub relations: Vec<Vec<i64>>,
 }
 
 #[derive(Debug, Default, Deserialize)]

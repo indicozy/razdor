@@ -2,7 +2,7 @@
 //! table the runtime reads, the `<name>.omwscripts` that registers the runtime, and the copies of the
 //! fixed runtime scripts, which live in `crates/openmw-world/lua/` and are embedded with `include_str!`.
 
-use crate::actors::{ArmyOut, RING_UNITS};
+use crate::actors::{ArmyOut, BODY_SPACING};
 use std::fmt::Write;
 
 /// The fixed runtime, as (path under the output folder, text). The paths are the ones the
@@ -102,16 +102,17 @@ pub fn map_data(d: &MapData) -> String {
     }
     s.push_str("  },\n");
 
-    let _ = writeln!(s, "  ring_units = {},", RING_UNITS);
+    let _ = writeln!(s, "  spacing = {},", BODY_SPACING);
     s.push_str("  armies = {\n");
     for a in d.armies {
         let _ = writeln!(
             s,
-            "    {{ id = {}, name = {}, faction = {}, relations = {{{}}},",
+            "    {{ id = {}, name = {}, faction = {}, relations = {{{}}}, hostile = {},",
             a.id,
             string(&a.name),
             a.faction,
-            a.relations.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", ")
+            a.relations.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", "),
+            a.hostile
         );
         let _ = writeln!(
             s,
@@ -176,6 +177,7 @@ mod tests {
             name: "Отряд \"Раз\"\\".to_string(),
             faction: 2,
             relations: vec![-2, 0, 1, 3],
+            hostile: true,
             tile: (1, 0),
             spawn: [1536, 3584, 0],
             relocated: true,
@@ -208,7 +210,8 @@ mod tests {
         assert!(text.contains("\"01f\",\n    \"30f\""), "{text}");
         assert!(text.contains(r#"name = "Отряд \"Раз\"\\""#), "{text}");
         assert!(text.contains("{ record = \"rz_u4_l0\", count = 2, leader = false }"), "{text}");
-        assert!(text.contains("relations = {-2, 0, 1, 3}"), "{text}");
+        assert!(text.contains("relations = {-2, 0, 1, 3}, hostile = true,"), "{text}");
+        assert!(text.contains("spacing = 300,"), "{text}");
         assert!(text.contains("time_scale = 120, guard = true"), "{text}");
         assert!(text.contains("start = { archetype = \"knight\", tile = {1, 0}, z = 96 }"), "{text}");
         assert!(text.contains("{ x0 = 1, x1 = 2, y0 = 3, y1 = 4 }"), "{text}");
