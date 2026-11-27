@@ -25,16 +25,16 @@ body::before {
 }
 body > * { position: relative; z-index: 1; }
 
-/* the column: the title band, the menu, the page and the footer share one width and one ground */
+/* the column: the title band, the menu, the page and the footer share one width */
 .title-band, .menubar, .page, .site-footer {
   max-width: 820px;
   margin-left: auto;
   margin-right: auto;
-  background: var(--ground);
+  /* no ground of its own: the emerald marble shows through (the owner, 2026-11-27) */
+  background: none;
 }
-@media (min-width: 861px) {
-  .title-band, .menubar, .page, .site-footer { box-shadow: 0 0 40px rgba(0, 0, 0, 0.6); }
-}
+/* Text straight on the marble: a soft dark shadow keeps it readable on the bright veins. */
+.page, .title-band, .menubar, .site-footer { text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, 0.85); }
 /* the home page is wider: the main column and the right sidebar (P11) */
 body:has(.home) .title-band, body:has(.home) .menubar, body:has(.home) .page, body:has(.home) .site-footer { max-width: 1180px; }
 
