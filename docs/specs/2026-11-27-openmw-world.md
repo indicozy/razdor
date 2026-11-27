@@ -848,8 +848,11 @@ and one melee hit are logged, and one side is wholly dead within 120 s.
 
 The spike (2026-11-28, synthetic plugin, OpenMW 0.51) showed that OpenMW's own AI does not fight
 with the box figures: with a Combat package, bodies walk to about 120 units from each other and
-stop; casters never cast (magicka unchanged, no active spell). The likely cause is the missing
-animation groups (attack and spellcast text keys), not checked against an animated control. Damage
+stop; casters never cast (magicka unchanged, no active spell). A second spike (NPC_ records on the Template's
+animated player body, which has attack, bow and spellcast groups) showed swings and bow shots
+animating, but still no damage landed and casters still never cast. So the missing animation is
+not the cause for casting, and unproven for hits (targeting, hit chance or weapon damage may be).
+Hits stay in Lua either way: DT's damage rules (M9) can't come from the engine's rolls. Damage
 dealt from Lua works (`target:sendEvent` to the target's local script, which lowers its own health;
 a body may write its own magicka). The Template has the 143 MGEF records, no SPEL, no CREA and no
 bolt or hit meshes. So:
