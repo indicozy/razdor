@@ -45,7 +45,7 @@ export const en: typeof ru = {
     autoGame: "Razdor downloads the game for you",
     heroAlt: "World map in Razdor",
     campaignTitle: "The whole campaign of the original",
-    campaignText: "Every scenario and campaign from your game: «Ramensky Kingdom», «A Tale of Wanderings» and others. The rules work as they did in 2004, quirks included.",
+    campaignText: "Every scenario and campaign from your game: “The Ramen Kingdom”, “A Scary Story” and others. The rules work as they did in 2004, quirks included.",
     campaignLink: "How Razdor differs from the original",
     townAlt: "Town",
     battleAlt: "Battle",
@@ -66,11 +66,11 @@ export const en: typeof ru = {
     hubKindMap: "map",
     hubAuthor: "author",
     battleTitle: "Your turn",
-    battleText: "The royal valley is under siege. Baltazar von Morgen stands against you. Click an enemy.",
+    battleText: "The rebels besiege the Royal Valley. Balthasar von Morgen leads them. Click an enemy to attack.",
     battleStatus: "Your turn: choose whom to attack",
     battleSkip: "Skip the battle",
     pathTitle: "Your path starts here",
-    pathText: "A feast in the palace, Princess Eleanor, the Amber Island. Everything starts with three steps.",
+    pathText: "The road ends with a feast in the palace, Princess Eleonora and the Amber Island. Yours starts with three steps.",
     step1: "Download Razdor",
     step2: "Launch it",
     step3: "Play: Razdor downloads the game for you",
@@ -84,7 +84,7 @@ export const en: typeof ru = {
   },
   download: {
     h1: "Download Razdor",
-    intro: "Razdor is a program. The game Discord Times is needed separately: either your own copy, or Razdor downloads it for you.",
+    intro: "Razdor needs the game Discord Times. Use your own copy, or let Razdor download the game for you.",
     detectTitle: "Your system",
     detectNone: "Choose your system below.",
     detectLink: "Download for {platform}",
@@ -128,7 +128,7 @@ export const en: typeof ru = {
       {
         title: "The original game",
         lines: [
-          "Every scenario and campaign from the game folder: «Ramensky Kingdom», «A Tale of Wanderings» and the rest.",
+          "Every scenario and campaign from the game folder: “The Ramen Kingdom”, “A Scary Story” and the rest.",
           "The rules are restored from the original: 2×6 battles, initiative, ranks and magic, experience and upgrades.",
           "Razdor reads maps, texts, graphics and sounds from your installed copy and changes nothing in it.",
         ],
@@ -151,7 +151,7 @@ export const en: typeof ru = {
         title: "What Razdor adds",
         lines: [
           "The Hub: community maps and mods install with one click.",
-          "Cloud saves, and «Own battle» by a code you can share.",
+          "Cloud saves. «Own battle» with a code that you can share.",
           "The «Maximum» AI in battle, auto-updates on PC and Android, experimental rules behind a switch.",
         ],
         link: "The Hub, mods and tools in the wiki",
@@ -214,7 +214,7 @@ export const en: typeof ru = {
       },
       {
         q: "How do I install a mod?",
-        a: "In the «Sound, graphics and game settings» window, click «Update the game from an archive…» and choose a .zip or .7z archive. An archive with the whole game replaces it; an archive with some files is copied over it.",
+        a: "In the «Sound, graphics and game settings» window, click «Update the game from an archive…» and choose a .zip or .7z archive. An archive with the whole game replaces the game. An archive with some files is copied over it.",
         link: "Installing mods and patches",
         href: "wiki/mods/install-mod/",
       },
