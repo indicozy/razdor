@@ -37,5 +37,11 @@ jobs:
       - name: Tests
         run: cargo test --release --workspace
 
+      - name: OpenMW converter (razdor-openmw) tests
+        run: cargo test -p razdor-openmw
+
+      - name: OpenMW converter (razdor-openmw) clippy
+        run: cargo clippy -p razdor-openmw --all-targets -- -D warnings
+
       - name: Guard hook cases
         run: sh .claude/hooks/test-guard.sh
