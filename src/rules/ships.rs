@@ -305,7 +305,7 @@ impl Game {
 
     /// Ship_Remove (0x49704c): the ship is taken off the map (bought over, or dismissed by an
     /// event): the flag `EnterShipyard` goes and the ship's shipyard is forgotten.
-    fn ship_removed(&mut self) {
+    pub(super) fn ship_removed(&mut self) {
         self.set_flag("EnterShipyard", false);
         self.ship_yard = None;
     }

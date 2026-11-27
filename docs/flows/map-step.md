@@ -12,7 +12,9 @@ army, a guard, a building to take), moves the hero, and starts the step's game t
 → `begin_slice`: the clock moves, and the AI armies' moves begin, `ai_move_begin`). `ai_move_run`
 plays the armies' arrivals on in time order; then `slice_tail` moves the armies the AI does not
 steer, runs the scenario's event scan (`run_script`) and pays the hero's noon if the scan fired
-nothing (`new_day`). `walk_tail` then lets an AI army greet or attack him (`ai_contact` → `meet`),
+nothing (`new_day`); a noon held back for a contact the walk is about to meet waits for it. `walk_tail`
+then lets an AI army greet or attack him (`ai_contact` → `meet`; `meet_as` takes a due noon in that
+scan, `pay_noon_report`, and then no battle opens),
 and the route's end opens its building. A frame's budget (8 ms, `AI_FRAME_BUDGET` in
 `ui/world_view.rs`) can stop the arrivals of a step between two of them: the step waits (see *A
 paused step* below), and the screen keeps drawing. Anything that needs a window
@@ -41,7 +43,7 @@ ui/world_view.rs  click on the map
         run_pause()            the same frame, or a later one (the budget)
           ai_move_run()        AI steps, arrivals, midnight in between
           ai_move_end()        the clock back to the tick's end
-          slice_tail()         the gang armies; the noon; run_script → EventEngine::tick
+          slice_tail()         the gang armies; the noon (not while a contact waits); run_script → EventEngine::tick
                                (rules/events.rs) → script_events()
           walk_tail()          ai_contact → meet(); route's end: arrive_at_end → enter_building()
           or wait_tail()       ai_contact → meet() while he waits
@@ -99,7 +101,10 @@ is asked again on the next visit. A question blocks the engine until answered. R
 the army recount it and mark the hero's AI pairs dirty (`script_events`). An event that starts a
 battle reports `Event::Encounter` after all its effects. A battle-only event ends the scan the way a
 message does (`battle_queued`, 2026-11-08): the events after it run in the scan that `resolve_battle`
-starts after the battle. Text placeholders: only `#HERONAME`
+starts after the battle. A lantern, a shown army or a spell also ends the scan: the chain callback
+(`EventEngine::run`, `animation`) runs the chained event as it is, and no scan follows a chain; a
+delay ends it until the next tick (`delay_queued`). Finishes outside the scan go through `resume`
+(events.md §2, §8). Text placeholders: only `#HERONAME`
 (`Game::fill_text`).
 
 **Clock and daily moments** (world.md §6). `Clock::advance` reports `Tick::Midnight` and
@@ -114,13 +119,15 @@ event's dialog.
 
 **AI armies on the map** (`src/rules/ai.rs`, ai.md §2–§15). Armies bank the hero's minutes and step
 when they cover the cell's cost × speed (×1.5 diagonally). Every step is an arrival: talk counters
-grow, the army may re-plan (`ai_plan`: one flood seeded with every target, with repulsion cones),
-then its arrival rules run (`ai_arrive`). Wander points: `ai_wander`. Respawns: `ai_respawns`. Noon
+grow, the army may re-plan (`ai_plan`: one flood seeded with every target, with repulsion cones;
+it closes only the buildings of negative score, so an army walks through the others, ai.md §7.3),
+then its arrival rules run (`ai_arrive`): an arrival in a hostile building is an assault (§9.1). Wander points: `ai_wander`. Respawns: `ai_respawns`. Noon
 per army at its first arrival after 12:00 (`ai_noon`). Attitude between sides: `relation`,
 `player_attitude_to` (`src/rules/world.rs`); a merchant ship keeps its file attitude (b3e247f).
 The army's own attitude to the player (its file byte +0x16af, `Army::own_attitude`) is what the
 friendly tests read: the minimap's ally colour, the hostile tooltip, the building guard, the
 friendly question mark and the curse refusal; `Army::attitude` (the relation) is only hostility.
+The hero's step onto an army standing in a building (`Game::step_contact`) reads the same own attitude: an army well disposed to him (above 0) in a non-bridge building is let pass, and a market, church, town, tavern, smithy, shipyard or altar shelters any army standing in it (the guide p. 30, the owner's decision 2026-11-26; a dungeon entrance does not).
 
 **Battles between map parties** (Razdor's, not a rule). When the AI resolves a fight between an
 army and an army or a garrison (`ai_battle`, `rules/ai.rs`), with one

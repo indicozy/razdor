@@ -2232,8 +2232,10 @@ impl App {
             }
         }
         // The session slot (`session`): kept fresh while the game is played; no game on screen
-        // (the main menu, the editor) ends the session.
-        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor) && !self.game.as_ref().is_some_and(|g| g.ai_pending());
+        // (the main menu, the editor) ends the session. Razdor's own: a lost game is never kept, so
+        // no state is taken while a battle's defeat report is queued or shown (a surrender loses with
+        // the army alive; its report is `Dialog::defeat`).
+        let session_ok = quick_save_ok && !self.test_play && !matches!(self.screen, Screen::Battle(_) | Screen::CustomBattle(_) | Screen::Editor) && !self.game.as_ref().is_some_and(|g| g.ai_pending()) && !self.dialogs.iter().any(|d| d.defeat);
         // Not during a performance test: its game is not the player's, so the session slot keeps the player's.
         if !bench::running() {
             razdor::frame_probe::time(razdor::frame_probe::Stage::Session, || self.session.tick(self.game.as_ref(), session_ok, crate::ui::clock::now()));

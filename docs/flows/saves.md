@@ -170,6 +170,12 @@ decision, 2026-10-29; `ui::session`, `save::SESSION`):
   offers to continue; SIGINT is left alone). Windows: nothing extra, since the focus loss already
   writes and miniquad does not deliver the logoff or shutdown messages. The frame loop does not run
   in the background, so these hooks are the only writes at the moment of leaving.
+- A lost game is never written: `look` and `save_now` skip it (`keepable`, Razdor's own rule),
+  so the slot keeps the last living state written before the loss, and the marker is left as it
+  was. Three cases count as lost: the hero's army has fallen (`Game::army_fallen`); the map's
+  defeat event has ended the game (`Game::script_end` is `ScriptEnd::Defeat`); a battle lost by
+  surrender (the army lives, but the defeat report `Dialog::defeat` is queued or shown, so
+  `session_ok` in `ui::mod` is false while one is in `self.dialogs`).
 - Locks: `WRITE_LOCK` is held around every write of the slot and every removal of the marker (the
   writer thread and the hooks), and taken before `LATEST` and `WRITTEN`. `WRITTEN` is the hash on
   disk, so a state already written is not written again. When the session ends (the game is left,

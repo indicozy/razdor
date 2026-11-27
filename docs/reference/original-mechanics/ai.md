@@ -312,11 +312,13 @@ On a per-plan multiplier map (all 1 to start):
 The effective cost of a cell is `cost × multiplier`; 0 is impassable. Seeds on a closed cell
 still count (an army can target a stationary guard).
 
-*Razdor:* it also closes the footprints of buildings the army may not walk through
-(`bars_army`: castles and forts not its own or a friend's, ruins not its own, buildings it
-would assault) with a score of 0, except the one it stands in, so AI armies keep to the
-hero's roads as they did before the parity pass. The original walks them through any
-building of score 0 or more.
+*Razdor:* the same. Until 2026-11-26 Razdor also closed the score-0 castles, forts and ruins it
+may not walk through, and the buildings it would assault, so AI armies kept to the hero's roads.
+Only the negative-score footprints are
+closed now; an army walks through any other building, and the arrival in a hostile one is the
+assault of §9.1. The loop is in the planner, 0x4a2d88. The demo's gangs (`Game::move_armies`,
+no arrival rules) still route round the buildings `bars_army` names (Razdor's choice, a route
+for an unmanaged army only).
 
 ### 7.4 Repulsion cone
 For strength S and slope f around cell (x, y): every scanned cell whose value
@@ -580,6 +582,7 @@ footprints). The ship type byte only picks its picture. Ships have no AI of thei
 targets on cells the SHIP map closes (land) are dropped, so ships go for other ships, the
 player at sea, and buildings (footprints are open). Repulsion only acts between armies on the
 same medium; contacts (§8) do not check the medium.
+A ship's coastal step (5 min) is shorter than a coarse frame, so at a frame pace below six frames a tick the original's ships make one step per frame (3 frames: 6 cells an hour, 5 frames: 10); Razdor plays the unlimited pace: 12 cells an hour on cost-1 water (report 1082, 2026-11-26; the test `rules::ai::` ship rate).
 
 ## 14. Noon and midnight for the AI
 
@@ -634,12 +637,14 @@ after the parity pass.
 | Danger | Two repulsion cones per danger on the multiplier map (`repulsion`, the original's box), ×5 slope for guards, same medium only | Repulsion cones around losing matchups (§7.4), ×5 slope for guards | Matches |
 | Peasants | Score armies and buildings (no assault, villages ×3), talk and wander | Peasants score armies, buildings (no assault, ×3 villages), talk and wander like others (§6, §7) | Matches |
 | Building score | The four parts of §6 (`Game::building_score`); −1 forbids and closes the footprint | The four parts of §6, smallest positive wins; −1 forbids and blocks the footprint | Matches |
+| AI path through buildings | Only footprints of negative score are closed (0x4a2d88, §7.3); any other building is walked through, and an arrival in a hostile one is an assault (§9.1) | Same: only negative-score footprints are closed; a hostile building on the way is walked into and assaulted (§9.1); the demo gangs' routes alone keep off castles, forts and ruins not theirs | Matches |
 | Healing | The heal seed lowers the stored scores of friendly service buildings; heals priced by the current HP, `HealingTime` busy from the last; the dead raised dearest first in towns and churches | Heal seed lowers existing scores only (§7.2); heal cost uses current HP; busy `HealingTime` once (§9.4) | Matches |
 | Village gold | Feudal, any village it stands on, its mana thrown away; the village part for villages and its own buildings with stock | Feudal, any village it stands on (§9.2); score part for villages and own buildings with stock | Matches |
 | Shopping | Sells the pack at half, then buys by tactical gain above 5 while the spare gold covers it, the buyer's values worked out again after each buy, a good of negative price at its absolute price; markets and churches, or altars for an undead leader | Sell the pack at half, then buy by tactical-cost gain > 5 (§9.3); markets/churches or altars by leader nature; values not recomputed, so a good bought for a unit that can no longer wear it is paid and lost (bug) | Matches; Razdor fixes the original's bug (the values) |
 | Hiring | Role order by tactical sums, leader's Nature (unit 74 any non-undead), the six barracks slots scanned with their empty ones, the cap of 8 set on entering the third role (also by a hire from the last slot of the second) and tested only before a pass; kind 1 at home, 2 abroad; hire XP level by level | Role balancing, leader-Nature match (unit 74 exception), third role caps at 8 (§9.5); kind 1/2 by ownership | Matches |
 | Garrison | Buying while the spare gold is above a third of the starting gold (the price simply deducted), then the quota reshuffle by byte 82 and the defence | Buying and the quota reshuffle of §9.6, driven by byte 82 and the defence | Matches |
 | Contact | At every arrival: a hostile neighbour in no building, on a bridge or in its own is attacked when the cached score is positive and it is not ignored; in someone else's building both scores are tripled (cap 10000) | On arrival, hostile neighbour with a positive cached score, not ignored; no fight inside someone else's building (§8) | Matches |
+| Bridge army and a party afloat | An army on a bridge does not attack a ship or the hero aboard; a ship attacks the bridge army (the guide, p. 208, the owner's decision 2026-11-26; the exe's contact 0x4a548c has no medium test found) | `bridge_bars_ship` in the arrival contact (`ai_arrive_rules`): no attack from a bridge on a party afloat; the attack on the bridge is as before | Guide wins (the exe not confirmed) |
 | Greeting / talk | Talk counters per pair (+1 per arrival at a distance, + relation + 1 when friendly), −500 on both sides after a greeting, talk seed `800 − c + Talking`, `c div 100` below 1 | Talk counters (+1 per arrival, + relation + 1), −500 after a greeting, talk seed `800 − c + Talking` (§7.2, §8) | Matches |
 | Messenger | Falls out of the seed rule (a 0 for the player becomes 1) and the greeting | Falls out of the seed rule (value 0 → 1) and the greeting (§7.2) | Matches |
 | AI vs AI loot | Asymmetric: `MinVictoryGold` only when the attacker loses, wage bills by style, a garrison's gold; worn items pooled and handed out by tactical gain to the side with more HP, the rest packed dearest first | Asymmetric (§10): MinVictoryGold only when the attacker loses; wage totals; pooled items to the side with more HP, best-gain wearing | Matches |
