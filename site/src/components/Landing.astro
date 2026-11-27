@@ -80,8 +80,7 @@ const features = [
   { href: href(lang, "wiki/start/language-fonts/"), ...L.feat[4] },
 ];
 const relDate = rel ? dotted(rel.date) : "";
-// The sidebar: three screenshots as frames (the gallery opens from them) and the download line per system.
-const sideShots = ["b-battle", "b-town", "a-big"] as const;
+// The sidebar: the download line per system.
 const lineFor = (k: keyof typeof sysNames) => {
   const size = sizes?.get(sysFiles[k]);
   return [version, size ? formatSize(size, lang) : ""].filter(Boolean).join(", ");
@@ -201,18 +200,6 @@ const lineBySystem = Object.fromEntries((Object.keys(sysNames) as (keyof typeof 
         <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
         <p class="small" data-dl-meta={JSON.stringify(lineBySystem)}>{lineFor("windows")}</p>
         <p class="small"><a class="link" href={href(lang, "download/")}>{R.allSystems}</a></p>
-      </div>
-    </section>
-
-    <section class="win" id="side-shots" aria-labelledby="side-shots-title">
-      <h2 id="side-shots-title">{R.shots}</h2>
-      <div class="win-body shot-stack">
-        {sideShots.map((f) => (
-          <a class="shot frame" href={href(lang, "screenshots/")}>
-            <img src={`${B}art/${f}.webp`} alt={R.shotCaps[f]} width="640" height="400" loading="lazy" decoding="async" />
-          </a>
-        ))}
-        <p class="small"><a class="link" href={href(lang, "screenshots/")}>{R.shotsAll}</a></p>
       </div>
     </section>
 
