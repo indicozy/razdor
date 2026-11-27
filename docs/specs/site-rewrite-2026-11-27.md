@@ -3,6 +3,20 @@
 The owner's decisions from the grilling of 2026-11-27. Branch `site-rewrite-2026-11-27`.
 The current site is hand-written HTML on `gh-pages` (index, en, install, a hand-copied changelog).
 
+## Round 2 changes (the owner, 2026-11-27, after the first low-fi mockups)
+
+- The journey is not a big stage. Desktop: a narrow road strip on the left, about 25 % of the width, fixed,
+  fading into the content (no hard edge); the whole landing's sections (first screen to the final download) are
+  its stops, and the hero walks down it as the page scrolls. The battle is a section in the content column; the
+  strip shows the two armies meeting. Phone: the road is a muted background behind the content, the hero in the
+  gaps between sections, never under text.
+- Look: a modern layout in 2000s PC-game dress with DT's colours and fonts: green marble, silver bevelled frames,
+  gold Becker headings, brown text boxes, fire-orange raised buttons, DT-like title strips on cards, crisp
+  (pixelated) sprites, a light CRT touch (scanlines, vignette) on pictures and the strip only, never on text.
+  No DT window art as borders (colours, fonts and shapes only).
+- Fire: DT's own animated fire effect (S-Fire) on torches, the burning village and the battle, at pixel size;
+  not realistic video flames.
+
 ## Audience and look
 
 - For DT veterans first (download right away), newcomers second (scroll to see the game).
