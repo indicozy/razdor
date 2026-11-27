@@ -3,7 +3,7 @@
 # Test only: not part of cargo test. Everything it writes goes under the scratch folder.
 #
 #   run.sh <converter out dir> [--name <run name>] [--cell cx,cy] [--seconds N] [--shot <png>]
-#          [--probe x,y]... [--camera x,y,z,pitch,yaw]
+#          [--probe x,y]... [--camera x,y,z,pitch,yaw] [--extra-data <dir>]...
 #
 #   --cell     exterior cell the game starts in (openmw --start). Default 0,0.
 #   --seconds  when the RAZDOR_SMOKE line is printed (after the start). Default 10.
@@ -11,6 +11,8 @@
 #              (2 s each); the z read after each is printed as RAZDOR_PROBE. Up to four.
 #   --camera   static camera position and angles (radians) for the picture; default: the player's view.
 #   --shot     where the PNG goes. Default: <run dir>/shot.png.
+#   --extra-data  a folder added to the data path (e.g. the Template's example_animated_creature/data
+#              for meshes/land_racer.dae). Repeatable.
 #
 # Exit 0 = PASS, 1 = FAIL, 2 = bad usage or setup. Override the Template folder with OPENMW_EXAMPLE.
 set -u
@@ -27,8 +29,9 @@ SECS=10
 SHOT=""
 CAMERA=""
 PROBES=()
+EXTRA_DATA=()
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 [ $# -ge 1 ] || usage
 OUT=$1
@@ -41,6 +44,7 @@ while [ $# -gt 0 ]; do
         --shot) SHOT=$2; shift 2 ;;
         --camera) CAMERA=$2; shift 2 ;;
         --probe) PROBES+=("$2"); shift 2 ;;
+        --extra-data) EXTRA_DATA+=("$2"); shift 2 ;;
         -h|--help) usage ;;
         *) echo "run.sh: unknown argument $1" >&2; usage ;;
     esac
@@ -71,12 +75,19 @@ data=$EXAMPLE/game_template/data
 data=$OUT
 data=$HERE/smoke
 data=$RUN/smokedata
-# OpenMW 0.51 loads builtin.omwscripts itself; listing it again aborts ("specified more than once").
-content=template.omwgame
-content=razdor_map.omwaddon
-content=smoke.omwscripts
-encoding=win1251
 EOF
+for d in "${EXTRA_DATA[@]+"${EXTRA_DATA[@]}"}"; do
+    echo "data=$(cd "$d" && pwd)" >> "$RUN/openmw.cfg"
+done
+# OpenMW 0.51 loads builtin.omwscripts itself; listing it again aborts ("specified more than once").
+{
+    echo "content=template.omwgame"
+    echo "content=razdor_map.omwaddon"
+    # The converter's Lua runtime (M4+): only when the converter wrote it.
+    [ -f "$OUT/razdor_map.omwscripts" ] && echo "content=razdor_map.omwscripts"
+    echo "content=smoke.omwscripts"
+    echo "encoding=win1251"
+} >> "$RUN/openmw.cfg"
 
 # The Template's own settings (its [Models] and [Game] lines), plus a small windowed screen.
 cp "$EXAMPLE/settings.cfg" "$RUN/settings.cfg"
@@ -188,7 +199,11 @@ echo "run dir:    $RUN"
 echo "display:    :$D  (Xvfb pid $XPID, cleaned up on exit)"
 echo "openmw:     $EXIT_CODE"
 [ -n "$LOG" ] && echo "log:        $LOG"
-grep -h 'RAZDOR_SMOKE\|RAZDOR_PROBE' "$RUN/openmw.stdout" ${LOG:+"$LOG"} 2>/dev/null | sort -u | sed 's/^/  /'
+# The converter's lines (RAZDOR_START, ARMY_*, CHECK*, GUARD, ...) come in log order; the
+# harness's own lines are listed as before.
+{ grep -h 'RAZDOR_\(START\|CLOCK\|ARMY_\|SHIP\|CHECK\|GUARD\|TILE\)' ${LOG:+"$LOG"} 2>/dev/null
+  grep -h 'RAZDOR_SMOKE\|RAZDOR_PROBE' "$RUN/openmw.stdout" ${LOG:+"$LOG"} 2>/dev/null | sort -u
+} | sed 's/^/  /'
 [ "$SHOT_OK" = 1 ] && echo "picture:    $SHOT"
 echo "time:       $(( $(date +%s) - START_NS )) s"
 if [ "${#FAILS[@]}" -eq 0 ]; then

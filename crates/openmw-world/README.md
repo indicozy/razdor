@@ -16,7 +16,21 @@ tile with one of two shapes each; a stone sits on its massif's centre; a mountai
 its foot. A building is one reference whose mesh holds all its parts: a castle is a curtain wall
 with a gate, four corner towers and a keep; a town or village is 5 to 9 or 3 to 5 houses on a fixed
 slot grid, so they never overlap. A bridge is one deck slab at the deck height. There are still no
-scripts, no ACTI or LIGH records and no doors (M4 and later, spec §3.10, Q6, Q7).
+ACTI or LIGH records and no doors (later, spec §3.10, Q6, Q7).
+
+Milestone 4 adds the armies and the Lua runtime (spec §3.5, §3.8, §3.9, §4). Every unit card and every
+leader of every army (active or not) is a CREA record: a leader is `rz_army_<id>` (named after the army),
+a unit card `rz_u<unit>_l<level>`, shared between armies. The stats are the spec's placeholder formula
+(`actors::stats`). The body model is the generated `meshes/razdor/figure.dae` (a box figure that does
+not animate); `--template-assets` uses `land_racer.dae` instead (the Template's example folder must be
+on the data path). A ship army's raft is a STAT reference in its cell, at z = 0.
+The converter writes `scripts/razdor/map_data.lua` (the map, the passability rows, the buildings' boxes,
+the start and the armies with their units), `<name>.omwscripts` and the runtime copied from `lua/`:
+`common.lua` (tiles, RNG), `global.lua` (start, clock, spawn, checks, deaths, respawn, the guard's
+teleport), `player.lua` (passability guard), `army.lua` (leader patrols, followers on AI Follow).
+
+Options: `--archetype knight|archmage|ranger` (default: the map's first hero), `--time-scale N` (120),
+`--no-guard`, `--template-assets`.
 
 ## Usage
 
@@ -96,6 +110,20 @@ by the smoke test (milestone 4).
 - `tes3`: the TES3 writer and reader for the records of M1 and M2, and the Windows-1251 strings.
 - `convert`: the map to plugin, textures and meshes; one CELL and one LAND for every cell of the map
   and of the margin ring, the CELLs of the references too, and one STAT per mesh (after LTEX).
+
+## Milestone 4 counts on the RK1 sample (game-derived; not committed)
+
+`esmtool dump -C` on the converted sample: 23 STAT (21 scenery and building meshes, the figure and the
+raft), 81 LAND, 81 CELL, 18 LTEX, 30 CREA (15 army leaders and 15 unit cards) and 1127 references (the M3
+1126 and the ship's raft). Armies: 15 in the map, 2 active (army 1 on land, army 9 a ship on the shallows,
+no patrol); the rest are skipped as inactive. Army 15 starts on a closed tile and is moved to the nearest
+open tile outside the boxes. Two runs give byte-identical files (48 files, SHA-256 compared).
+
+Smoke run (`tools/openmw-smoke/run.sh`): `RAZDOR_START tile=39,43` and the harness's `RAZDOR_SMOKE` at
+the same tile; `RAZDOR_ARMY_SPAWNED 1 actors=4` (leader + 3 unit bodies) and `RAZDOR_ARMY_SPAWNED 9
+actors=2`; the skips for armies 2 to 8 and 10 to 15; `RAZDOR_CHECK` finds no body in a building box or on a
+closed tile. A probe onto a water tile is undone by the guard in about a quarter of a second
+(`RAZDOR_GUARD`, back to the start tile).
 
 ## Milestone 3 counts on the RK1 sample (the sample file is game-derived and not committed)
 

@@ -166,7 +166,7 @@ subrecord `name[4] size u32`) **[V]** unless marked:
 | ACTI | `NAME`, `MODL`, `FNAM` display name |
 | LIGH | `NAME`, `MODL`, `FNAM`, `LHDT` 24 B: weight f32, value i32, time i32, radius i32, colour rgb0, flags i32 |
 | MISC | `NAME`, `MODL`, `FNAM`, `MCDT` 12 B |
-| CREA | `NAME`, `MODL`, `FNAM`, `NPDT` 96 B (type, level, 8 attributes, health, mana, fatigue, soul, combat, magic, stealth, 3 attack min/max pairs, gold; all i32), `FLAG` i32, `AIDT` 12 B **[U]** |
+| CREA | `NAME`, `MODL`, `FNAM`, `NPDT` 96 B (type, level, 8 attributes, health, mana, fatigue, soul, combat, magic, stealth, 3 attack min/max pairs, gold; all i32), `FLAG` i32 (0x40 Walks), `AIDT` 12 B (M4: hello i16 at 0, fight, flee, alarm u8 at 2–4, services i32 at 8; read from OpenMW's `landracer.omwaddon`) |
 | DIAL | `NAME` id, `DATA` 1 B type (4 = journal **[U]**) |
 | INFO | `INAM` id, `PNAM` previous id, `NNAM` next id, `DATA` 12 B (the journal index is the second i32 **[U]**), `NAME` text, optional `QSTN`/`QSTF` 1 B |
 
@@ -480,9 +480,9 @@ inside OpenMW's 0.5–2.0 clamp. Sprite ids pick nothing in v1 beyond the massif
 - `--archetype knight|archmage|ranger`; the default is the first preset whose start x or y is
   non-zero. The choice is written into `map_data.lua`; it gates events and the start tile.
 - At the first start the global script teleports the player to the start tile's centre, on the
-  ground. The handlers `onNewGame` and `onPlayerAdded` exist **[R]**; which of them fires under
-  `--skip-menu` without `--new-game` is **[U]** (M4). The script keeps a saved "started" flag, so
-  either may do it.
+  ground. The handlers `onNewGame` and `onPlayerAdded` exist **[R]**. M4 settled it without them: the global
+  script starts the game on the first `onUpdate` in which `world.players[1]` exists (once; the saved
+  `started` flag keeps a reload from repeating it).
 - Gold: the preset's gold as `gold_001` items in the inventory (§2.3). Mana, experience, artifacts and
   spells: Lua counters and lists in v1.
 - The party is a Lua list of `(unit, level, count, named)` from the preset's squads. Each entry
@@ -674,3 +674,39 @@ start-and-log part may move from M6 into M4; M6 then adds the screenshot and the
 | Q9 | Russian text: do the fonts in use draw Cyrillic, and are the Template's `mygui` files needed? | Unknown until M6. If needed, the harness overlays them on a scratch copy of the resources folder and adds a free Cyrillic font there; nothing under `/usr/share` changes and the converter ships no font. OpenMW and its resources are not modified. Only investigate whether Cyrillic renders (§2.3, M6). |
 | Q10 | May the smoke test use the RTX 4060 (headless EGL) when llvmpipe is too slow? | Start with llvmpipe on CPUs 8–19; ask before using a GPU. The smoke test may use the RTX 4060 (headless EGL) when llvmpipe is too slow (§5). |
 | Q11 | The Template is cloned from GitLab at test time. Pin a commit? | Yes: the harness pins one commit id and keeps the clone in scratch. No pinned Template commit. Commit at every checkpoint and milestone (§6). |
+
+## M4 notes (as built)
+
+- Files: `crates/openmw-world/src/actors.rs` (CREA, stats, army plan), `lua.rs` (map_data, escaper,
+  `.omwscripts`, the runtime embedded), `lua/{common,global,player,army}.lua`. The smoke harness takes
+  `--extra-data` and loads `razdor_map.omwscripts` when the converter wrote it.
+- CREA layout checked against OpenMW's own `landracer.omwaddon` with `esmtool` (NPDT 96 B, FLAG, AIDT 12 B).
+- Deviations from §3.8:
+  - Health is `30 + 20·level` per body (count 1). Each unit card is N bodies (Q5), so the squad's `sqrt(count)`
+    is not used in the records; `actors::health` keeps the formula for tests.
+  - Every army has its own leader record (`rz_army_<id>`, named after the army). Unit cards are shared
+    records `rz_u<unit>_l<level>`.
+  - Attitude is not applied: every body has fight 0. `info.relations` and the army's own `relations` are
+    written raw. Which index is the player is still open (`docs/OPEN_QUESTIONS.md` if the owner wants it).
+  - Garrisons are not spawned (only armies); the party and gold are not in M4.
+  - Blocked tiles: the nearest open tile outside every box, searched in square rings in the scan order
+    (dy, then dx). The tie-break of world.md §1 is not used yet.
+  - Ship armies: the raft is a STAT reference at z = 0 written by the converter; their bodies stand on the
+    water tile (z = 0) and are exempt from the post-spawn check. They do not patrol, even with `patrols = 1`.
+  - Patrols and Follow run only while the cell is loaded (local scripts). A leader asks the global script
+    for its next tile (`RazdorArmyNext`), so patrols do not run for an army whose cell is unloaded.
+  - Deaths are read with `types.Actor.isDead` from the global script once a second. A body whose cell is
+    not loaded counts as alive. After a save is reloaded the bodies are not tracked again (a spawn is
+    never repeated, but a defeat cannot be seen): M5 needs an object-id lookup.
+  - Respawn (`respawn_days`) is by game time (one DT day = 86400 game seconds); not exercised by the smoke run.
+- Armies activate through the event `RazdorActivateArmy {id = n}` (the `razdor_activate_army(id)` of M5).
+- Measured: the game time scale is set (`RAZDOR_CLOCK scale=120 ok=true`). The cost of a tile at a run
+  (§3.11, `[U]`) is not measured yet.
+- Guard: a probe onto water (RK1 tile 1,48) was returned to the start tile 0.25 s after the probe (log
+  timestamps); no false positive on land (the squad probe on tile 10,7 logged none).
+- Smoke harness: `xwd` is missing here, so `run.sh` takes the picture with `import`, as it did already. The
+  static `--camera` showed only sky and water at the squad spot (camera position over the land), so the
+  army picture is the player's view from that spot (`m4-shots/army1-squad.png`, one body in frame: the other
+  bodies stand within 160 units of the leader, about 2 tiles away, and overlap in the picture).
+- Not verified: that followers actually walk after the leader (no position log; the scripts raise no error).
+
