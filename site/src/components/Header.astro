@@ -7,35 +7,29 @@ interface Props {
 }
 const { lang, path } = Astro.props;
 const S = strings(lang);
-const B = import.meta.env.BASE_URL;
-// The same page in the other language: "/" -> "en/", "/download/" -> "en/download/".
-const rel = path.replace(/^\//, "");
-const switchHref = lang === "ru" ? `${B}en/${rel}` : `${B}${rel}`;
-const nav = [
-  { href: "download/", label: S.nav.download },
-  { href: "features/", label: S.nav.features },
-  { href: "community/", label: S.nav.community },
-  { href: "changes/", label: S.nav.changes },
-  { href: "faq/", label: S.nav.faq },
-  { href: "wiki/", label: S.nav.wiki },
-];
 const other = lang === "ru" ? "en" : "ru";
+const switchHref = lang === "ru" ? `${import.meta.env.BASE_URL}en/` : `${import.meta.env.BASE_URL}`;
+// The menu bar of the 2003 site: the current page is lit in fire orange.
+const here = (p: string) => (p === "/" ? "/" : p) === path || (p !== "/" && path.startsWith(p));
+const nav = [
+  { href: "", label: S.nav.home, on: path === "/" },
+  { href: "download/", label: S.nav.download, on: here("/download/") },
+  { href: "screenshots/", label: S.nav.shots, on: here("/screenshots/") },
+  { href: "community/", label: S.nav.community, on: here("/community/") },
+  { href: "changes/", label: S.nav.changes, on: here("/changes/") },
+  { href: "faq/", label: S.nav.faq, on: here("/faq/") },
+];
 ---
-<header class="site-header">
-  <a class="brand" href={href(lang, "")}>Razdor</a>
-  <nav class="nav" aria-label={S.common.mainNav}>
-    {nav.map((n) => <a href={href(lang, n.href)}>{n.label}</a>)}
-  </nav>
-  <span class="header-spacer"></span>
-  <a class="lang-link" href={switchHref} hreflang={other} lang={other} data-set-lang={other} aria-label={S.header.langLabel}>{S.header.langLink}</a>
-  <a class="btn sm" href={href(lang, "download/")} style="white-space:nowrap">{S.common.download}</a>
-  <details class="menu">
-    <summary aria-label={S.common.menu}>☰</summary>
-    <nav class="menu-panel" aria-label={S.common.menuLabel}>
-      {nav.map((n) => <a href={href(lang, n.href)}>{n.label}</a>)}
-    </nav>
-  </details>
-</header>
+<nav class="menubar" aria-label={S.common.mainNav}>
+  <ul>
+    {nav.map((n) => (
+      <li><a href={href(lang, n.href)} class:list={[{ on: n.on }]} aria-current={n.on ? "page" : undefined}>{n.label}</a></li>
+    ))}
+    <li><a href="https://discord.gg/wmMksmWFDM" target="_blank" rel="noopener">{S.nav.guest}</a></li>
+    <li><a href={href(lang, "wiki/")}>{S.nav.wiki}</a></li>
+    <li><a class="lang-link" href={switchHref} hreflang={other} lang={other} data-set-lang={other} aria-label={S.header.langLabel}>{S.header.langLink}</a></li>
+  </ul>
+</nav>
 <script is:inline>
   // The language link remembers the choice (cookie lang) for the bare / redirect; the link works without JS.
   document.addEventListener("click", function (event) {

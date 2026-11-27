@@ -1,0 +1,48 @@
+---
+import { strings, type Lang } from "../../i18n";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const R = strings(lang).retro;
+const B = import.meta.env.BASE_URL;
+const files = ["a-big", "b-battle", "b-battle-alt", "b-town", "d-hub", "shot-game", "shot-devices", "shot-extras", "shot-langs"] as const;
+---
+<section class="win" aria-labelledby="shots-title">
+  <h1 id="shots-title">{R.shotsTitle}</h1>
+  <div class="win-body">
+    <p class="lead">{R.shotsLead}</p>
+    <ul class="shot-grid">
+      {files.map((f) => (
+        <li>
+          <a class="shot" href={`${B}art/${f}.webp`} target="_blank" rel="noopener">
+            <img src={`${B}art/${f}.webp`} alt={R.shotCaps[f]} width="640" height="400" loading="lazy" decoding="async" />
+          </a>
+          <p class="cap">{R.shotCaps[f]}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
+<dialog class="shot-dialog" id="shot-dialog">
+  <img id="shot-full" alt="" />
+  <form method="dialog"><button class="btn sm" type="submit">{R.shotsClose}</button></form>
+</dialog>
+<script>
+  // Opens a screenshot in the dialog; without JS the link opens the picture in a new tab.
+  const dialog = document.getElementById("shot-dialog") as HTMLDialogElement | null;
+  const full = document.getElementById("shot-full") as HTMLImageElement | null;
+  if (dialog && full && typeof dialog.showModal === "function") {
+    document.querySelectorAll<HTMLAnchorElement>("a.shot").forEach((a) => {
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const img = a.querySelector("img");
+        full.src = a.href;
+        full.alt = img?.alt ?? "";
+        dialog.showModal();
+      });
+    });
+    dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+  }
+</script>

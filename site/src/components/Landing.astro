@@ -1,8 +1,8 @@
 ---
-import { latest } from "../lib/changelog";
+import { latest, versions, versionId } from "../lib/changelog";
 import { catalog, counts, pictureUrl, type CatalogEntry } from "../lib/catalog";
 import { strings, href, hubLine, type Lang } from "../i18n";
-import { assetSizes, formatSize } from "../lib/release";
+import { assetSizes, downloadTotal, formatSize } from "../lib/release";
 
 interface Props {
   lang: Lang;
@@ -10,16 +10,10 @@ interface Props {
 const { lang } = Astro.props;
 const S = strings(lang);
 const L = S.landing;
+const R = S.retro;
 const B = import.meta.env.BASE_URL;
 const rel = latest();
 const version = rel?.version ?? "";
-const dateText = rel
-  ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "en-US", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })
-      .format(new Date(rel.date + "T12:00:00Z"))
-      .replace(" г.", "")
-  : "";
-// Russian lines only: the release notes are in Russian, so the English page links to them instead.
-const news = lang === "ru" && rel ? [...rel.fixed, ...rel.changed, ...rel.added].slice(0, 3) : [];
 // The size line shows the Windows file for the default system; the layout's script swaps it per visitor.
 const sizes = await assetSizes();
 const sysNames = { windows: "Windows", mac: "macOS", linux: "Linux", android: "Android", ios: "iOS" } as const;
@@ -31,9 +25,9 @@ const metaFor = (k: keyof typeof sysNames) => {
   return [version, size ? formatSize(size, lang) : "", `${othersWord}: ${others.join(", ")}`].filter(Boolean).join(", ");
 };
 const metaBySystem = Object.fromEntries((Object.keys(sysNames) as (keyof typeof sysNames)[]).map((k) => [k, metaFor(k)]));
-// The Hub: the counts line from the community catalog at build time (the generic line without it), and three
-// entries as picture tiles. Entries a player would recognise come first: a known author, a real title and a
-// picture; mods, then campaigns, then maps. Placeholder authors and file-name titles («Name-Title-01») go last.
+// The Hub: the counts line from the community catalog at build time and three entries as picture tiles.
+// Entries a player would recognise come first: a known author, a real title and a picture; mods, then
+// campaigns, then maps. Placeholder authors and file-name titles («Name-Title-01») go last.
 const cat = await catalog();
 const hub = hubLine(lang, cat ? counts(cat) : null) ?? L.hubFallback;
 const known = (e: CatalogEntry) =>
@@ -57,122 +51,138 @@ const entryTitle = (e: (typeof picks)[number]) => {
   const t = pickText(e.title);
   return t && t !== e.id && !/^[0-9a-f]{12,}$/i.test(t) ? t : kindText(e.kind);
 };
+// The news: the latest five releases, newest first. The notes are in Russian: the English page gives the version and date only.
+const DAY = 86400000;
+const postDate = (iso: string) => {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+};
+const isNew = (iso: string) => Date.now() - Date.parse(iso + "T12:00:00Z") < 14 * DAY;
+const news = versions().slice(0, 5).map((r) => ({
+  id: versionId(r.version),
+  version: r.version,
+  date: postDate(r.date),
+  fresh: isNew(r.date),
+  lines: lang === "ru" ? [...r.fixed, ...r.changed, ...r.added].slice(0, 2) : [],
+}));
+// The downloads counter: the total of all releases, or no counter when the API cannot be read.
+const total = await downloadTotal();
+const counter = total === null ? null : String(total).padStart(7, "0");
 const art = (name: string) => `background-image:url('${B}art/${name}')`;
 const steps = [
   { title: L.step1, line: L.step1Line },
   { title: L.step2, line: L.step2Line },
   { title: L.step3, line: L.step3Line },
 ];
+const shots = [
+  { file: "a-big.webp", alt: R.shotCaps["a-big"] },
+  { file: "b-battle.webp", alt: R.shotCaps["b-battle"] },
+  { file: "b-town.webp", alt: R.shotCaps["b-town"] },
+];
 ---
-<div class="landing">
-  <section class="hero" aria-labelledby="hero-title" style={art("a-big.webp")}>
-    <div class="content hero-inner">
-      <h1 id="hero-title">{L.heroTitle}</h1>
-      <p class="lead">{L.lead}</p>
-      <div class="row">
-        <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
-        <a class="btn ghost" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a>
+<div class="home">
+  <div class="home-main">
+    <section class="win" aria-labelledby="welcome-title">
+      <h2 id="welcome-title">{R.welcome}</h2>
+      <div class="win-body">
+        <p class="lead">{L.lead}</p>
+        <p class="dl-line">
+          <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
+          <span class="small" data-dl-meta={JSON.stringify(metaBySystem)}>{metaFor("windows")}</span>
+        </p>
+        <p class="small"><a class="link" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a> · {L.autoGame}</p>
       </div>
-      <p class="small muted" data-dl-meta={JSON.stringify(metaBySystem)}>{metaFor("windows")}</p>
-      <p class="small muted">{L.autoGame}</p>
-    </div>
-  </section>
+    </section>
 
-  <section class="sec content" aria-labelledby="campaign-title">
-    <h2 id="campaign-title">{L.campaignTitle}</h2>
-    <p class="intro">{L.campaignText}</p>
-    <div class="gallery">
-      <figure class="gallery-big">
-        <div class="pic" role="img" aria-label={L.battleAlt} style={art("b-battle.webp")}></div>
-        <figcaption>{L.battleAlt}</figcaption>
-      </figure>
-      <figure>
-        <div class="pic" role="img" aria-label={L.townAlt} style={art("b-town.webp")}></div>
-        <figcaption>{L.townAlt}</figcaption>
-      </figure>
-      <figure>
-        <div class="pic" role="img" aria-label={L.battleAlt2} style={art("b-battle-alt.webp")}></div>
-        <figcaption>{L.battleAlt2}</figcaption>
-      </figure>
-    </div>
-    <div class="linkrow"><a class="link" href={href(lang, "features/")}>{L.campaignLink}</a></div>
-  </section>
+    <section class="win" aria-labelledby="news-title">
+      <h2 id="news-title">{R.news}</h2>
+      <div class="win-body">
+        {news.map((n) => (
+          <article class="post">
+            <p class="post-head"><b>{n.date}</b>{n.fresh && <span class="new">{R.newBadge}</span>} {lang === "ru" ? `Вышел Razdor ${n.version}.` : `Razdor ${n.version} is out.`}</p>
+            {n.lines.length > 0 && (
+              <ul class="post-lines">
+                {n.lines.map((line) => <li>{line}</li>)}
+              </ul>
+            )}
+            <a class="link small" href={href(lang, "changes/") + `#${n.id}`}>{R.newsMore}</a>
+          </article>
+        ))}
+      </div>
+    </section>
 
-  <section class="sec content" aria-labelledby="why-title">
-    <h2 id="why-title">{L.whyTitle}</h2>
-    <ul class="why-list">
-      {L.whyItems.map((it) => (
-        <li>
-          <h3>{it.t}</h3>
-          <p>{it.d}</p>
-        </li>
-      ))}
-    </ul>
-    <div class="linkrow"><a class="link" href={href(lang, "features/")}>{L.whyLink}</a></div>
-  </section>
-
-  <section class="sec content" aria-labelledby="install-title">
-    <h2 id="install-title">{L.installTitle}</h2>
-    <ol class="steps">
-      {steps.map((s, i) => (
-        <li>
-          <span class="step-num" aria-hidden="true">{i + 1}</span>
-          <h3>{s.title}</h3>
-          <p>{s.line}</p>
-        </li>
-      ))}
-    </ol>
-    <div class="row">
-      <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
-      <a class="link" href={href(lang, "download/") + "#install"}>{S.common.detailedInstall}</a>
-    </div>
-  </section>
-
-  <section class="sec content" aria-labelledby="community-title">
-    <h2 id="community-title">{L.communityTitle}</h2>
-    <p class="intro">{hub}</p>
-    {picks.length > 0 && (
-      <ul class="hub-tiles">
-        {picks.map((e) => {
-          const thumb = pictureUrl(e);
-          return (
-            <li class="hub-tile">
-              {thumb ? (
-                <>
-                  <img class="pic-img" src={thumb} alt="" width="480" height="270" loading="lazy" decoding="async" />
-                  <h3 class="hub-title">{entryTitle(e)}</h3>
-                </>
-              ) : (
-                <div class="hub-nopic"><h3 class="hub-title">{entryTitle(e)}</h3></div>
-              )}
-              <p class="small">{kindText(e.kind)}, {L.hubAuthor}: {e.author}</p>
-            </li>
-          );
-        })}
-      </ul>
-    )}
-    <div class="row">
-      <a class="btn" href="https://discord.gg/wmMksmWFDM">{S.common.discord}</a>
-      <a class="btn ghost" href={href(lang, "community/")}>{L.hubAll}</a>
-    </div>
-  </section>
-
-  <section class="sec content split" aria-labelledby="news-title">
-    <div>
-      <h2 id="news-title">{L.newsTitle} {version}</h2>
-      <p class="news-date">{dateText}</p>
-      {news.length > 0 && (
-        <ul class="news-list">
-          {news.map((line) => <li>{line}</li>)}
+    <section class="win" aria-labelledby="what-title">
+      <h2 id="what-title">{R.whatTitle}</h2>
+      <div class="win-body">
+        <ul class="bullets">
+          {L.whyItems.map((it) => (
+            <li><b>{it.t}.</b> {it.d}</li>
+          ))}
         </ul>
-      )}
-      <a class="link" href={href(lang, "changes/")}>{L.allChanges}</a>
-    </div>
-    <div class="thorny" id="trailer">
-      <div class="pic thorny-pic" role="img" aria-label={L.thornyAlt} style={art("thorny-capsule.webp")}></div>
-      <h3 id="thorny-title">{L.thornyTitle}</h3>
-      <p>{L.thornyText}</p>
-      <a class="btn ghost sm" href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{L.steam}</a>
-    </div>
-  </section>
+        <p class="small"><a class="link" href={href(lang, "download/") + "#install"}>{S.common.detailedInstall}</a> · <a class="link" href={href(lang, "download/")}>{S.common.download}</a></p>
+        <ol class="steps">
+          {steps.map((s, i) => (
+            <li><span class="step-num" aria-hidden="true">{i + 1}</span> <b>{s.title}.</b> {s.line}</li>
+          ))}
+        </ol>
+      </div>
+    </section>
+  </div>
+
+  <aside class="home-side">
+    <section class="win" aria-labelledby="shots-title">
+      <h2 id="shots-title">{R.shots}</h2>
+      <div class="win-body shot-thumbs">
+        {shots.map((s) => (
+          <a class="shot-link" href={href(lang, "screenshots/")} aria-label={s.alt}>
+            <span class="pic" role="img" aria-label={s.alt} style={art(s.file)}></span>
+          </a>
+        ))}
+        <p class="small"><a class="link" href={href(lang, "screenshots/")}>{R.shotsAll}</a></p>
+      </div>
+    </section>
+
+    {counter && (
+      <section class="win" aria-labelledby="counter-title">
+        <h2 id="counter-title">{R.counterTitle}</h2>
+        <div class="win-body">
+          <p>{R.counter} <span class="counter" aria-label={String(total)}>{counter}</span></p>
+        </div>
+      </section>
+    )}
+
+    <section class="win" aria-labelledby="maps-title">
+      <h2 id="maps-title">{R.maps}</h2>
+      <div class="win-body">
+        <p class="small">{hub}</p>
+        {picks.length > 0 && (
+          <ul class="hub-tiles">
+            {picks.map((e) => {
+              const thumb = pictureUrl(e);
+              return (
+                <li class="hub-tile">
+                  {thumb ? <img class="pic-img" src={thumb} alt="" width="480" height="270" loading="lazy" decoding="async" /> : null}
+                  <span class="hub-title">{entryTitle(e)}</span>
+                  <span class="small">{kindText(e.kind)}, {L.hubAuthor}: {e.author}</span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p class="small"><a class="link" href={href(lang, "community/")}>{R.mapsAll}</a></p>
+      </div>
+    </section>
+
+    <section class="win" aria-labelledby="links-title">
+      <h2 id="links-title">{R.links}</h2>
+      <div class="win-body">
+        <ul class="bullets">
+          <li><a class="link" href="https://discord.gg/wmMksmWFDM">{R.linkDiscord}</a></li>
+          <li><a class="link" href="https://github.com/indicozy/razdor">{R.linkGithub}</a></li>
+          <li><a class="link" href={href(lang, "wiki/")}>{R.linkWiki}</a></li>
+          <li><a class="link" href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{R.linkThorny}</a></li>
+        </ul>
+      </div>
+    </section>
+  </aside>
 </div>

@@ -37,7 +37,7 @@ const groups = ["added", "changed", "fixed"] as const;
     <p class="small"><a class="link" href={`${B}changes/rss.xml`}>{K.rss}</a></p>
     {all.map((r) => (
       <section class="release" id={versionId(r.version)} aria-labelledby={`${versionId(r.version)}-h`}>
-        <h2 id={`${versionId(r.version)}-h`}>{r.version}</h2>
+        <h2 id={`${versionId(r.version)}-h`}>{r.date.split("-").reverse().join(".")} — {lang === "ru" ? "Вышел Razdor" : "Razdor is out"} {r.version}{Date.now() - Date.parse(r.date + "T12:00:00Z") < 14 * 86400000 && <span class="new">{S.retro.newBadge}</span>}</h2>
         <p class="news-date">{longDate(lang, r.date)}</p>
         {groups.map((g) =>
           r[g].length > 0 && (

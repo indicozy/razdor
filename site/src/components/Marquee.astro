@@ -1,0 +1,33 @@
+---
+// The black ticker under the menu: the latest release, the Hub's counts and the downloads total.
+import { latest } from "../lib/changelog";
+import { catalog, counts } from "../lib/catalog";
+import { strings, type Lang } from "../i18n";
+import { fill } from "../lib/i18n";
+import { downloadTotal } from "../lib/release";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const R = strings(lang).retro;
+const rel = latest();
+const line = lang === "ru" && rel ? ([...rel.fixed, ...rel.changed, ...rel.added][0] ?? "") : "";
+const cat = await catalog();
+const c = cat ? counts(cat) : null;
+const total = await downloadTotal();
+const parts = [
+  rel ? fill(R.marqueeRelease, { version: rel.version }) + (line ? " " + line : "") : "",
+  c ? fill(R.marqueeHub, { maps: c.maps, mods: c.mods }) : "",
+  total !== null ? fill(R.marqueeDownloads, { total }) : "",
+].filter(Boolean);
+const text = parts.map((p) => `*** ${p} `).join("") + "***";
+---
+{parts.length > 0 && (
+  <div class="marquee" aria-label={text}>
+    <div class="marquee-track" aria-hidden="true">
+      <span>{text}</span>
+      <span>{text}</span>
+    </div>
+  </div>
+)}

@@ -1,0 +1,9 @@
+---
+import Base from "../../../layouts/Base.astro";
+import Screenshots from "../../../components/pages/Screenshots.astro";
+import { strings } from "../../../i18n";
+const m = strings("en").meta.screenshots;
+---
+<Base lang="en" path="/screenshots/" title={m.title} description={m.description}>
+  <Screenshots lang="en" />
+</Base>

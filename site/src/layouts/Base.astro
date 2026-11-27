@@ -3,6 +3,8 @@ import "../styles/tokens.css";
 import "../styles/site.css";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import Marquee from "../components/Marquee.astro";
+import ThornyPopup from "../components/ThornyPopup.astro";
 import { strings, type Lang } from "../i18n";
 import { fill } from "../lib/i18n";
 import { latest } from "../lib/changelog";
@@ -15,9 +17,12 @@ interface Props {
   path: string;
   /** Adds the RSS link of the changes page. */
   rss?: boolean;
+  /** A page that only moves: the meta refresh goes to this path (of the same language). */
+  redirect?: string;
 }
-const { lang, title, description, path, rss = false } = Astro.props;
+const { lang, title, description, path, rss = false, redirect } = Astro.props;
 const S = strings(lang);
+const R = S.retro;
 const site = "https://razdor.indicozy.dev";
 const ruUrl = site + path;
 const enUrl = site + "/en" + path;
@@ -35,6 +40,8 @@ const labels = {
 };
 const releases = "https://github.com/indicozy/razdor/releases/latest";
 const version = latest()?.version ?? "";
+const altTitle = lang === "ru" ? "Времена раздора" : "Discord Times";
+const redirectTo = redirect !== undefined ? (lang === "en" ? `${B}en/${redirect}` : `${B}${redirect}`) : null;
 ---
 <!doctype html>
 <html lang={lang}>
@@ -48,19 +55,31 @@ const version = latest()?.version ?? "";
     <link rel="alternate" hreflang="en" href={enUrl} />
     <link rel="alternate" hreflang="x-default" href={ruUrl} />
     {rss && <link rel="alternate" type="application/rss+xml" title="Razdor: изменения" href={`${site}/changes/rss.xml`} />}
+    {redirectTo && <meta http-equiv="refresh" content={`0; url=${redirectTo}`} />}
     <link rel="icon" href={`${B}favicon.ico`} sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href={`${B}favicon-32.png`} />
     <link rel="icon" type="image/png" sizes="192x192" href={`${B}icon-192.png`} />
     <link rel="apple-touch-icon" href={`${B}apple-touch-icon.png`} />
     <meta name="theme-color" content="#142b24" />
   </head>
-  <body>
+  <body style={`--marble: url('${B}art/marble.webp')`}>
     <a class="skip" href="#main">{S.common.skip}</a>
+    <header class="title-band">
+      <button type="button" class="music-btn" id="music-btn" aria-pressed="false" data-on={R.musicOff} data-off={R.musicOn}>{R.musicOn}</button>
+      <picture>
+        <source media="(prefers-reduced-motion: reduce)" srcset={`${B}art/title-still.webp`} />
+        <img class="title-img" src={`${B}art/title-burning.webp`} alt={altTitle} width="720" height="180" fetchpriority="high" />
+      </picture>
+      <p class="tagline">{R.tagline}</p>
+      <audio id="menu-theme" src={`${B}art/menu-theme.ogg`} loop preload="none"></audio>
+    </header>
     <Header lang={lang} path={path} />
+    <Marquee lang={lang} />
     <main id="main" class="page">
       <slot />
     </main>
     <Footer lang={lang} />
+    <ThornyPopup lang={lang} />
     <script define:vars={{ labels, releases }}>
       // Download buttons: the label and link follow the visitor's platform (JS only; without it the
       // buttons say «Скачать» and link to the download page).
@@ -79,6 +98,28 @@ const version = latest()?.version ?? "";
         a.textContent = text;
         a.href = releases;
       });
+    </script>
+    <script>
+      // «♪ Музыка»: the menu theme loops at half volume while on. Never autoplays.
+      const btn = document.getElementById("music-btn");
+      const audio = document.getElementById("menu-theme") as HTMLAudioElement | null;
+      if (btn && audio) {
+        audio.volume = 0.5;
+        btn.addEventListener("click", () => {
+          const playing = !audio.paused;
+          if (playing) {
+            audio.pause();
+          } else {
+            audio.play().catch(() => {});
+          }
+          const on = !playing;
+          btn.setAttribute("aria-pressed", String(on));
+          btn.textContent = on ? btn.dataset.on || "" : btn.dataset.off || "";
+        });
+      }
+    </script>
+    <script>
+      import "../scripts/sparkles";
     </script>
   </body>
 </html>

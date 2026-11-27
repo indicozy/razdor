@@ -75,3 +75,27 @@ a {
 	outline: 2px solid var(--sl-color-accent-high);
 	outline-offset: 3px;
 }
+
+/* The site's 2003 look: the marble ground behind the pages, the content in a silver-framed window,
+   Becker gold headings. The marble is the site's own picture (/art, outside git); without it the green shows. */
+html, body {
+	background: linear-gradient(rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.45)), url("/art/marble.webp") repeat, #142b24;
+}
+.main-frame {
+	background: rgba(20, 43, 36, 0.88);
+	border: 2px solid;
+	border-color: #eef1f3 #5f686d #3d4447 #c7ccd0;
+	border-radius: 0;
+}
+.sl-markdown-content h1, .sl-markdown-content h2, .sl-markdown-content h3 {
+	font-family: "Becker", "PT Sans", serif;
+	font-weight: 400;
+	color: #f0c96a;
+}
+.sl-markdown-content a { color: #9fd3ff; }
+.sl-markdown-content a:visited { color: #c9a6ff; }
+.sl-markdown-content .sl-link-card, .sl-markdown-content aside {
+	border-radius: 0;
+	background: rgba(0, 0, 0, 0.25);
+	border: 2px solid #5f686d;
+}

@@ -1,9 +1,12 @@
 ---
 import Base from "../../layouts/Base.astro";
-import Features from "../../components/pages/Features.astro";
-import { strings } from "../../i18n";
-const m = strings("ru").meta.features;
+import { strings, href } from "../../i18n";
+const m = strings("ru").meta.home;
+const R = strings("ru").retro;
 ---
-<Base lang="ru" path="/features/" title={m.title} description={m.description}>
-  <Features lang="ru" />
+<Base lang="ru" path="/features/" title={m.title} description={m.description} redirect="">
+  <section class="win">
+    <h1>{R.moved}</h1>
+    <div class="win-body"><p><a class="link" href={href("ru", "")}>{R.movedLink}</a></p></div>
+  </section>
 </Base>

@@ -1,0 +1,41 @@
+---
+// The Windows XP popup for Thorny Times. Shown on every page; × hides it for 7 days (localStorage, try/catch).
+// On phones (under 700 px) the CSS turns it into a slim bar at the bottom.
+import { strings, type Lang } from "../i18n";
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const R = strings(lang).retro;
+const L = strings(lang).landing;
+const B = import.meta.env.BASE_URL;
+---
+<aside class="xp-popup" id="xp-popup" aria-label={R.popupTitle}>
+  <div class="xp-title">
+    <span>{R.popupTitle}</span>
+    <button type="button" class="xp-close" data-xp-close aria-label={R.popupClose} hidden>×</button>
+  </div>
+  <div class="xp-body">
+    <img class="xp-thumb" src={`${B}art/thorny-capsule.webp`} alt={L.thornyAlt} width="226" height="110" loading="lazy" />
+    <p class="xp-text">{R.popupText} <a href="https://store.steampowered.com/app/2182610/" target="_blank" rel="noopener">{R.popupSteam}</a></p>
+  </div>
+</aside>
+<script>
+  // Without JS the popup stays visible and has no ×. With JS, × hides it for 7 days.
+  const box = document.getElementById("xp-popup");
+  const KEY = "xp-hidden-until";
+  const btn = box?.querySelector<HTMLButtonElement>("[data-xp-close]");
+  let hidden = false;
+  try {
+    hidden = Number(localStorage.getItem(KEY) || 0) > Date.now();
+  } catch (e) {}
+  if (box && btn) {
+    btn.hidden = false;
+    if (hidden) box.hidden = true;
+    btn.addEventListener("click", () => {
+      box.hidden = true;
+      try { localStorage.setItem(KEY, String(Date.now() + 7 * 86400000)); } catch (e) {}
+    });
+  }
+</script>
