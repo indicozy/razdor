@@ -150,7 +150,8 @@ fn runtime(
     }
 
     let (hx, hy) = grid.tile_centre(hero_x, hero_y);
-    let fragment = crate::events::fragment(map, hero);
+    let costs = crate::events::unit_costs(map, opts.units.as_ref());
+    let fragment = crate::events::fragment(map, hero, &costs);
     let data = lua::MapData {
         width: grid.width,
         height: grid.height,

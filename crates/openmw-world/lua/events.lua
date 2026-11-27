@@ -45,6 +45,37 @@ local function num(v)
     return v or 0
 end
 
+-- The unit costs of map_data (the install's price, or the placeholder; events.rs unit_costs).
+local costs = map.costs or {}
+
+-- A unit's cost in the army-strength test (events.md §4 condition 11): a unit with no cost counts 1.
+local function unit_cost(unit)
+    return costs[unit] or 1
+end
+
+-- The strength of an army: the cost of every record it lists, the leader and the units, the dead
+-- included (experience.md §1, the sum over every record). Fixed by the army's units, as the game's sum is.
+local function army_strength(id)
+    local u = map.army_units and map.army_units[id]
+    if not u then
+        return 0
+    end
+    local total = unit_cost(u.leader)
+    for i, unit in ipairs(u.units) do
+        total = total + unit_cost(unit) * num(u.counts[i])
+    end
+    return total
+end
+
+-- The strength of the player's party (the hero's units, not the hero): the same sum over the party.
+local function party_strength(s)
+    local total = 0
+    for _, u in ipairs(s.party) do
+        total = total + unit_cost(u.unit) * num(u.count)
+    end
+    return total
+end
+
 -- The saved state of the engine, set up once when the game starts (M.init).
 function M.new_state()
     return {
@@ -87,11 +118,30 @@ function M.init(s, now)
     local h = map.hero
     s.gold = h.gold
     s.mana = h.mana
+    -- The start kit of the chosen hero (the preset's artifacts and spells, events.rs hero writer).
+    for _, id in ipairs(h.artifacts or {}) do
+        table.insert(s.artifacts, id)
+    end
+    for _, id in ipairs(h.spells or {}) do
+        local known = false
+        for _, k in ipairs(s.spells) do
+            known = known or k == id
+        end
+        if not known then
+            table.insert(s.spells, id)
+        end
+    end
+    print(string.format('RAZDOR_HERO start archetype=%s gold=%d mana=%d artifacts=%d spells=%d',
+        tostring(h.archetype), s.gold, s.mana, #s.artifacts, #s.spells))
     for _, u in ipairs(h.party) do
         table.insert(s.party, { unit = u.unit, level = u.level, count = u.count, named = u.named })
     end
     if h.start_building ~= 0 then
         s.owner[h.start_building] = 'player'
+    end
+    print(string.format('RAZDOR_STRENGTH party=%d', party_strength(s)))
+    for _, a in ipairs(map.armies) do
+        print(string.format('RAZDOR_STRENGTH army=%d n=%d', a.id, army_strength(a.id)))
     end
     s.next_scan = math.floor(now / 30) * 30 + 30
 end
@@ -324,7 +374,8 @@ local function conditions_ok(env, s, ev, skip_meet)
     end
     if num(c.stats_check) ~= 0 then
         if not signed_ok(num(c.level), s.level) or not signed_ok(num(c.gold), s.gold)
-            or not signed_ok(num(c.holiness_mana), s.mana) or not signed_ok(num(c.squad_count), party_count(s)) then
+            or not signed_ok(num(c.holiness_mana), s.mana) or not signed_ok(num(c.squad_count), party_count(s))
+            or not signed_ok(num(c.army_strength), party_strength(s)) then
             return false
         end
     end

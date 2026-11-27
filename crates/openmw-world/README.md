@@ -148,8 +148,7 @@ by the smoke test (milestone 4).
   show army, move to hero, battle, artifacts, spells and class change
   are played since the follow-up below.
 - Deviations: no frame (the Template has no menu textures, so the windows use a plain backdrop instead,
-  see M6 below); `Герой` stands in for the hero's name; the army-strength condition passes (not tracked);
-  a unit's `named` test reads the party's names only.
+  see M6 below); `Герой` stands in for the hero's name; a unit's `named` test reads the party's names only.
 
 ## Pause and tracked results (M5 follow-up)
 
@@ -172,8 +171,7 @@ by the smoke test (milestone 4).
     (`RAZDOR_HERO spell+ <id>`, once each), `new_hero_class` (`RAZDOR_HERO class unit=<id>`; only the unit id is
     kept, the archetype tests still use the start class: open).
   - The artifacts condition reads the pack; codes 2-5 (the AI armies' worn items) and code 0 fail, since the
-    worn items are not tracked. The hero's start artifacts and spells are not in the plugin's data (empty).
-  - Not tracked yet: the army-strength condition (the unit costs are not written into `map_data.lua`).
+    worn items are not tracked. The hero's start artifacts and spells are seeded (M7 notes).
 - The M5 synthetic scenario has events 17-26 for these results; `tools/openmw-smoke/m5/EXPECTED.txt` lists the
   order and the log lines they must leave (`run.sh --expect`).
 
@@ -197,3 +195,22 @@ closed tile. A probe onto a water tile is undone by the guard in about a quarter
 (645 trees, 52 dead trees, 368 thickets, 21 stones, 28 mountain rocks, 4 villages, 2 castles, 1
 tavern, 1 church, 2 ruins, 2 bridge decks). The kept-object count of the sample is 1201, the same
 as its raw count. Two runs give byte-identical plugins and meshes.
+
+## Milestone 7 notes (hall list, army strength, hero kit)
+
+- Hall: an ordinary building (not a village or shipyard) that fires nothing on the step opens its hall: the
+  quests (kind 3) and rumours (kind 4) that pass the full check, as buttons («Взять», «Слух»), then Close.
+  `RAZDOR_HALL <zone> quests=n rumours=m`, and `RAZDOR_HALL take <id>` when one is picked (the event's own
+  `RAZDOR_EVENT` follows). Spec 3.11 "Hall" and events.md §10.
+- Army strength (events.md §4 condition 11, experience.md §1): `stats_check` gates the `army_strength` test
+  (signed, as the others). The strength is the sum of the unit costs of every record, the dead included, so
+  it is fixed by the army's units. The party is the hero's units (not the hero). The costs are in
+  `map_data.lua` (`costs`, from `events::unit_costs`): the install's `cost` from `--units` (at least 1), else
+  the placeholder 50 per unit. `army_units[id]` holds the leader and each troop line's count. The log at start:
+  `RAZDOR_STRENGTH party=n` and `RAZDOR_STRENGTH army=<id> n=<n>`.
+  Deviation: units.json's `cost` is the price, not DT's tactical cost (experience.md §1 needs the full stat
+  block and the cost multiplier, which the file does not carry). The unit's level is not in its cost. Both are
+  open (spec Q-list); the test runs on these numbers.
+- Hero start kit: the chosen hero's `artifacts` and `spells` (JSON `heroes`, one entry per copy) are written
+  into `hero` and seeded into the tracked pack and spells at start: `RAZDOR_HERO start archetype=… gold=…
+  mana=… artifacts=n spells=n`.

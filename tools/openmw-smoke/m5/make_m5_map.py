@@ -120,6 +120,12 @@ def scenario():
         # the hall window (the driver picks it); 28 is a rumour, listed too, and is not taken here.
         event(27, 3, "Тайна замка", message="Ключ спрятан в башне."),
         event(28, 4, "Слух о казне", message="Говорят, в замке есть казна."),
+        # 29 and 30: the army-strength test after 24. The party is one unit 4 (cost 50 without --units),
+        # so 29 needs at least 40 and fires; 30 needs at least 60 and must not fire.
+        event(29, 1, "Сила отряда", message="Отряд достаточно силён.",
+              cond={"stats_check": 1, "army_strength": 40, "happened_yes_check": 1, "happened_yes": [24, 0]}),
+        event(30, 1, "Слабый отряд", message="Отряд слишком слаб.",
+              cond={"stats_check": 1, "army_strength": 60, "happened_yes_check": 1, "happened_yes": [24, 0]}),
     ]
     return events
 
@@ -140,7 +146,7 @@ def build():
         },
         "heroes": [{
             "archetype": "knight", "gold": 100, "mana": 150, "start_building": 1, "x": 2, "y": 13,
-            "troops": [{"unit": 4, "level": 0, "count": 1}], "artifacts": [], "spells": [],
+            "troops": [{"unit": 4, "level": 0, "count": 1}], "artifacts": [3], "spells": [2],
         }],
         "legend": {"surfaces": [{"code": 5, "name": "grass_lowland"}]},
         "terrain": {"encoding": "hex-rows", "rows": rows},

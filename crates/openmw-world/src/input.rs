@@ -48,6 +48,11 @@ pub struct Hero {
     /// The unit cards the hero starts with (`heroes[].troops`).
     #[serde(default)]
     pub troops: Vec<Troop>,
+    /// The start kit (`heroes[].artifacts`, `heroes[].spells`): artifact and spell ids, one entry per copy.
+    #[serde(default)]
+    pub artifacts: Vec<i64>,
+    #[serde(default)]
+    pub spells: Vec<i64>,
     #[serde(default)]
     pub gold: i64,
     #[serde(default)]

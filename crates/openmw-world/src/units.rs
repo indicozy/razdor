@@ -27,6 +27,9 @@ struct File {
 pub struct Unit {
     pub id: i64,
     pub name: String,
+    /// The install's price (`cost`). The army-strength test (events.lua) takes it as the unit's cost; 0 when absent.
+    #[serde(default)]
+    pub cost: i64,
     pub hit_points: i64,
     pub attack: Pair,
     pub defence: Pair,

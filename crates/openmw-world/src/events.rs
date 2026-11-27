@@ -9,8 +9,37 @@ use crate::grid::Grid;
 use crate::input::{Hero, Map};
 use crate::lua::string;
 use crate::tes3::{zstring, Record};
+use crate::units::Units;
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fmt::Write;
+
+/// The placeholder cost of a unit without the install's numbers (the M4 formula's level-0 body:
+/// `30 + 20 · level`, with level 1 for a level-0 unit).
+const PLACEHOLDER_COST: i64 = 50;
+
+/// The cost of every unit the map's armies and hero use (spec 3.8, events.lua army strength): the
+/// install's `cost` (at least 1, as the game's hook keeps a tactical cost positive), else the placeholder.
+pub fn unit_costs(map: &Map, units: Option<&Units>) -> BTreeMap<i64, i64> {
+    let mut ids = Vec::new();
+    for a in &map.armies {
+        ids.push(a.leader_unit);
+        ids.extend(a.troops.iter().map(|t| t.unit));
+    }
+    for h in &map.heroes {
+        ids.extend(h.troops.iter().map(|t| t.unit));
+    }
+    ids.into_iter()
+        .map(|id| {
+            let cost = match units.and_then(|us| us.get(id)) {
+                Some(u) if u.cost > 0 => u.cost,
+                Some(_) => 1,
+                None => PLACEHOLDER_COST,
+            };
+            (id, cost)
+        })
+        .collect()
+}
 
 /// Lua keywords: a JSON key with one of these names is written in brackets.
 const LUA_KEYWORDS: [&str; 22] = [
@@ -93,7 +122,7 @@ fn is_bridge(kind: i64) -> bool {
 
 /// The Lua fragment of `map_data.lua` for the scenario: `info`, `hero`, `events`, `points`, `zones`
 /// and `army_units`. Deterministic: lists keep the file's order.
-pub fn fragment(map: &Map, hero: Option<&Hero>) -> String {
+pub fn fragment(map: &Map, hero: Option<&Hero>, costs: &BTreeMap<i64, i64>) -> String {
     let mut s = String::new();
     let start_time = map.info.start_time.unwrap_or(0);
     let _ = writeln!(
@@ -122,11 +151,25 @@ pub fn fragment(map: &Map, hero: Option<&Hero>) -> String {
                 }
                 let _ = write!(s, "{{ unit = {}, level = {}, count = {}, named = 0 }}", t.unit, t.level, t.count);
             }
-            s.push_str("} },\n");
+            let list = |ids: &[i64]| ids.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
+            let _ = writeln!(
+                s,
+                "}}, artifacts = {{{}}}, spells = {{{}}} }},",
+                list(&h.artifacts),
+                list(&h.spells)
+            );
         }
-        None => s.push_str("  hero = { archetype = \"\", class = 0, gold = 0, mana = 0, start_building = 0, party = {} },\n"),
+        None => s.push_str("  hero = { archetype = \"\", class = 0, gold = 0, mana = 0, start_building = 0, party = {}, artifacts = {}, spells = {} },\n"),
     }
 
+    s.push_str("  costs = {");
+    for (i, (unit, cost)) in costs.iter().enumerate() {
+        if i > 0 {
+            s.push_str(", ");
+        }
+        let _ = write!(s, "[{unit}] = {cost}");
+    }
+    s.push_str("},\n");
     s.push_str("  events = {\n");
     for ev in &map.events {
         s.push_str("    ");
@@ -170,11 +213,21 @@ pub fn fragment(map: &Map, hero: Option<&Hero>) -> String {
     }
     s.push_str("  },\n");
 
-    // The army units by army id, for the conditions that test a faction's units (codes 2-5).
+    // The army units by army id, for the conditions that test a faction's units (codes 2-5), and the
+    // leader's unit with each troop line's count, for the army-strength test (events.lua).
     s.push_str("  army_units = {\n");
     for a in &map.armies {
         let units: Vec<String> = a.troops.iter().map(|t| t.unit.to_string()).collect();
-        let _ = writeln!(s, "    [{}] = {{ faction = {}, units = {{{}}} }},", a.id, a.faction, units.join(", "));
+        let counts: Vec<String> = a.troops.iter().map(|t| t.count.to_string()).collect();
+        let _ = writeln!(
+            s,
+            "    [{}] = {{ faction = {}, units = {{{}}}, counts = {{{}}}, leader = {} }},",
+            a.id,
+            a.faction,
+            units.join(", "),
+            counts.join(", "),
+            a.leader_unit
+        );
     }
     s.push_str("  },\n");
     s
@@ -274,7 +327,7 @@ mod tests {
     #[test]
     fn the_fragment_has_the_events_with_their_json_names_and_utf8_text() {
         let map = scenario();
-        let text = fragment(&map, map.heroes.first());
+        let text = fragment(&map, map.heroes.first(), &unit_costs(&map, None));
         assert!(text.contains("[\"repeat\"] = 1440"), "{text}");
         assert!(text.contains("title = \"Начало%+A\""), "{text}");
         assert!(text.contains("flags = {raw = \"+A\", set = \"A\"}"), "{text}");
@@ -285,14 +338,19 @@ mod tests {
         assert!(text.contains("{ index = 1, kind = 3, faction = 1, tiles = {{1, 1}, {2, 1}, {1, 2}, {2, 2}}, events = {5} },"), "{text}");
         assert!(!text.contains("index = 2"), "a bridge is not a zone: {text}");
         assert!(text.contains("points = {\n    {"), "{text}");
-        assert!(text.contains("[4] = { faction = 4, units = {9} }") || text.contains("[1] = { faction = 4, units = {9} }"), "{text}");
+        assert!(text.contains("] = { faction = 4, units = {9}, counts = {") || text.contains("units = {9}, counts = {"), "{text}");
+        // Without --units every unit of the map costs the placeholder; the table is written in the fragment.
+        let costs = unit_costs(&map, None);
+        assert!(!costs.is_empty() && costs.values().all(|&c| c == PLACEHOLDER_COST), "{costs:?}");
+        assert!(text.contains("costs = {[") && text.contains("[9] = 50"), "{text}");
         assert!(text.contains("victory = 3, defeat = 4"), "{text}");
     }
 
     #[test]
     fn the_fragment_is_the_same_on_every_run() {
         let map = scenario();
-        assert_eq!(fragment(&map, map.heroes.first()), fragment(&map, map.heroes.first()));
+        let costs = unit_costs(&map, None);
+        assert_eq!(fragment(&map, map.heroes.first(), &costs), fragment(&map, map.heroes.first(), &costs));
     }
 
     #[test]
