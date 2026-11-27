@@ -214,3 +214,21 @@ as its raw count. Two runs give byte-identical plugins and meshes.
 - Hero start kit: the chosen hero's `artifacts` and `spells` (JSON `heroes`, one entry per copy) are written
   into `hero` and seeded into the tracked pack and spells at start: `RAZDOR_HERO start archetype=… gold=…
   mana=… artifacts=n spells=n`.
+
+## Spells and combat data (M8)
+
+`src/spells.rs` writes the SPEL records and `actors.rs` the NPCS lists; `lua.rs` writes
+`scripts/razdor/combat_data.lua`. All of it needs `--units` (the version 2 units JSON); without it the
+plugin has no spells and the combat table uses the placeholder melee pair only.
+
+- Unit casts (`rz_strike_u<unit>_l<level>`, `rz_heal_…`, `rz_bless_…`, `rz_shot_…`) are built per unit
+  card and level from its school, direction and magic power, by the table in the spec's M8 section. Cost 1,
+  flags "always succeeds". A caster CREA lists them as NPCS after AIDT, and has at least 500 magicka.
+- World spells (`rz_spell_<id>`) come from the units JSON `spells` array: cost = `cost_mana`, duration =
+  `time_work_hours` of game time at the converter's `--time-scale`, capped at one game day. The hero's
+  damage spells on the hero are event spells (menu flag false in the table).
+- `combat_data.lua` returns one entry per CREA id (sorted) and a `spells` table, mapping each world spell
+  id to its record and its magic-menu flag. Example entry: `["rz_army_3"] = { strike = {school="elemental",
+  mag=15}, interval = 2.5 }`; nil fields are left out.
+- Effect ids are OpenMW's (`ESM::MagicEffect`), checked against the Game Template's MGEF indices and by
+  `esmtool dump` on the RK1 sample (the effect names resolve as intended).

@@ -885,6 +885,15 @@ bolt or hit meshes. So:
   armies get their packages and fight values back and the clock runs again.
 - Logged as `RAZDOR_FIGHT_START army=<id>` and `RAZDOR_FIGHT_END winner=player|army reason=wipe|surrender|time`.
 
+### Rust side as built (M8)
+
+- Decided differently: the duration uses the converter's `--time-scale` (default 120, the clock the game
+  runs at), not 30 as written above, so one game day is 86400 / scale real seconds (720 s at 120); the cap
+  follows the clock. Also: instant effects (heal, damage) have duration 0; a body's magicka is at least 500
+  when it has any spell; effects on an enemy target are only the negative ones (attack, defence, hit points,
+  magic power, actions and vampirism have no MW effect and are left out); a unit with power 0, or a magnitude
+  of 0, casts nothing of that kind.
+
 ## M9: DT's battle rules around the real-time fight (the owner, 2026-11-28)
 
 The owner: "make sure that it replicates overall DT rules so any map will work". Only the tactical
