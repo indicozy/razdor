@@ -1,0 +1,2 @@
+# Test-only (tools/openmw-smoke/m8): the M8 driver. Never part of the converter output.
+PLAYER: scripts/razdor_m8/player.lua

@@ -95,3 +95,19 @@ converter plugin (`patch`). It needs no game files.
   the victory (`victory` line) and each `contains` line of EXPECTED.txt, which must appear in the log.
 - Event windows pause the world, so the driver's answers and the smoke script's delays run on real time
   (`--seconds` is real seconds in every run).
+
+## m8: the 4 vs 4 fight (M8)
+
+`m8/run_m8.sh` runs the synthetic fight end to end: `make_m8_map.py` writes a 12 x 12 grass map (no
+events) and a units version 2 file (three made-up units: a melee, a shooter, a caster). The converter
+runs with `--tile-units 512 --units`, so the armies stand 3 tiles apart (1536 units), both hostile to
+the player (faction 4). Each army is a leader plus three troops (melee, shooter, caster). The test
+driver `scripts/razdor_m8/player.lua` turns the player off as a target (side 0 is not built yet: the
+smoke is army against army) and logs its health each second (`RAZDOR_FIGHT player hp=…`).
+
+`run.sh` runs 120 real seconds. The checks are in `run_m8.sh` (not `--expect`, which needs the event
+ids): PASS when the log holds a `kind=melee`, a `kind=shot` and a `kind=strike` hit, and a
+`RAZDOR_FIGHT_END` within 120 s of the first health line. A second run stops at 20 s for the
+mid-fight picture (`mid.png`); the end picture is `fight.png`. Both go to the scratch folder
+`/mnt/ai_models/razdor-scratch/openmw/m8-lua/<name>/`. Heal and bless are not in the synthetic units,
+so the check does not cover them.
