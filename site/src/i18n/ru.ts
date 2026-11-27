@@ -216,6 +216,8 @@ export const ru = {
     marqueeHub: "В хабе {maps} карт и {mods} модов",
     marqueeDownloads: "Скачиваний: {total}",
     welcome: "Добро пожаловать!",
+    trailerTitle: "Трейлер",
+    trailerPlay: "Смотреть трейлер Razdor",
     news: "Новости",
     newsMore: "подробнее…",
     newsDate: "{date} — Вышел Razdor {version}",

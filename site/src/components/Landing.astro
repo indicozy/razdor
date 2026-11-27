@@ -90,7 +90,19 @@ const shots = [
           <a class="btn" href={href(lang, "download/")} data-dl>{S.common.download}</a>
           <span class="small" data-dl-meta={JSON.stringify(metaBySystem)}>{metaFor("windows")}</span>
         </p>
-        <p class="small"><a class="link" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener">{L.trailer}</a> · {L.autoGame}</p>
+        <p class="small">{L.autoGame}</p>
+      </div>
+    </section>
+
+    <section class="win" aria-labelledby="trailer-title">
+      <h2 id="trailer-title">{R.trailerTitle}</h2>
+      <div class="win-body">
+        <!-- Click to load: nothing from YouTube loads until the visitor presses play (privacy); without JS the link opens YouTube. -->
+        <a class="yt" href="https://www.youtube.com/watch?v=kHvM7Yv-2_4" target="_blank" rel="noopener" data-yt="kHvM7Yv-2_4" aria-label={R.trailerPlay}>
+          <img src={`${B}art/a-big.webp`} alt="" loading="lazy" decoding="async" />
+          <span class="yt-play" aria-hidden="true">&#9658;</span>
+          <span class="yt-cap">{R.trailerPlay}</span>
+        </a>
       </div>
     </section>
 
@@ -186,3 +198,19 @@ const shots = [
     </section>
   </aside>
 </div>
+
+<script>
+  // The trailer: the YouTube player replaces the poster only after a click (youtube-nocookie, autoplay).
+  document.querySelectorAll<HTMLAnchorElement>("a.yt[data-yt]").forEach((a) => {
+    a.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const f = document.createElement("iframe");
+      f.src = `https://www.youtube-nocookie.com/embed/${a.dataset.yt}?autoplay=1&rel=0`;
+      f.title = a.getAttribute("aria-label") || "Trailer";
+      f.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen";
+      f.allowFullscreen = true;
+      f.className = "yt-frame";
+      a.replaceWith(f);
+    });
+  });
+</script>

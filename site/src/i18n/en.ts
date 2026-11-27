@@ -218,6 +218,8 @@ export const en: typeof ru = {
     marqueeHub: "The Hub has {maps} maps and {mods} mods",
     marqueeDownloads: "Downloads: {total}",
     welcome: "Welcome!",
+    trailerTitle: "Trailer",
+    trailerPlay: "Watch the Razdor trailer",
     news: "News",
     newsMore: "more…",
     newsDate: "{date} — Razdor {version} is out",

@@ -331,3 +331,10 @@ button { font: inherit; }
   .marquee-track, .new { animation: none; }
   .spark { display: none; }
 }
+
+/* The trailer window: a framed poster with a 2003-style play button, swapped for YouTube's player on click. */
+.yt, .yt-frame { display: block; position: relative; width: 100%; aspect-ratio: 16 / 9; border: 2px solid var(--silver, #c7ccd0); background: #000; }
+.yt img { width: 100%; height: 100%; object-fit: cover; display: block; filter: brightness(.7); }
+.yt-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 84px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 30px; color: #fff; background: #b8591c; border: 3px solid; border-color: #f2b27a #7a3510 #5a250a #d8803e; }
+.yt:hover .yt-play, .yt:focus-visible .yt-play { background: #d06a24; }
+.yt-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; background: rgba(0,0,0,.65); color: #ffdd55; font: bold 14px Verdana, Tahoma, "PT Sans", sans-serif; text-decoration: underline; }
