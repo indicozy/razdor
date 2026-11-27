@@ -1,3 +1,5 @@
-# Expected RAZDOR_EVENT order of the M5 synthetic run (make_m5_map.py, scripts/razdor_m5/player.lua).
-# The run passes when these ids appear in this order and RAZDOR_VICTORY 14 is logged.
-1 2 5 6 7 3 4 16 12 13 8 10 11 14
+# Expected event order of the M5 synthetic run (make_m5_map.py, scripts/razdor_m5/player.lua).
+# Read by run.sh --expect: the log's RAZDOR_EVENT ids must equal the `events` line, in order, and the
+# last RAZDOR_VICTORY id must equal the `victory` line.
+events 1 2 5 6 7 3 4 16 12 13 8 10 11 14
+victory 14

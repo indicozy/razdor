@@ -16,6 +16,8 @@
 #   --play-config    write the standalone config for a window (no smoke scripts, no run), print it, exit 0.
 #   --extra-data  a folder added to the data path (e.g. the Template's example_animated_creature/data
 #              for meshes/land_racer.dae). Repeatable.
+#   --expect   an expected-events file (m5/EXPECTED.txt): the log's RAZDOR_EVENT ids must equal its
+#              `events` line in order, and the last RAZDOR_VICTORY id its `victory` line. Optional.
 #
 # Exit 0 = PASS, 1 = FAIL, 2 = bad usage or setup. Override the Template folder with OPENMW_EXAMPLE.
 set -u
@@ -36,6 +38,7 @@ EXTRA_DATA=()
 CONTENT=()
 CYRILLIC=0
 PLAY_CONFIG=0
+EXPECT=""
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
@@ -54,6 +57,7 @@ while [ $# -gt 0 ]; do
         --content) CONTENT+=("$2"); shift 2 ;;
         --cyrillic-test) CYRILLIC=1; shift ;;
         --play-config) PLAY_CONFIG=1; shift ;;
+        --expect) EXPECT=$2; shift 2 ;;
         -h|--help) usage ;;
         *) echo "run.sh: unknown argument $1" >&2; usage ;;
     esac
@@ -221,6 +225,22 @@ for f in "$RUN/openmw.stdout" "$LOG"; do
     [ -n "$f" ] && [ -f "$f" ] && grep -i 'error' "$f" | grep -i 'razdor' | head -3 | sed 's/^/  log: /'
 done
 
+# --- the expected event order (--expect): PASS only when the log's events match the file ---
+EVENTS_SEEN=""
+if [ -n "$EXPECT" ]; then
+    [ -f "$EXPECT" ] || { echo "run.sh: $EXPECT is not a file" >&2; exit 2; }
+    WANT=$(awk '$1=="events"{for(i=2;i<=NF;i++) printf "%s ", $i}' "$EXPECT" | sed 's/ *$//')
+    WANT_VICTORY=$(awk '$1=="victory"{print $2}' "$EXPECT")
+    [ -n "$WANT" ] || { echo "run.sh: $EXPECT has no events line" >&2; exit 2; }
+    GOT=$(grep -o 'RAZDOR_EVENT [0-9]\+' "$LOG" 2>/dev/null | awk '{printf "%s ", $2}' | sed 's/ *$//')
+    GOT_VICTORY=$(grep -o 'RAZDOR_VICTORY [0-9]\+' "$LOG" 2>/dev/null | awk '{print $2}' | tail -1)
+    EVENTS_SEEN="$GOT"
+    [ "$GOT" = "$WANT" ] || FAILS+=("event order is [$GOT], expected [$WANT] ($EXPECT)")
+    if [ -n "$WANT_VICTORY" ] && [ "$GOT_VICTORY" != "$WANT_VICTORY" ]; then
+        FAILS+=("victory is [$GOT_VICTORY], expected [$WANT_VICTORY]")
+    fi
+fi
+
 echo "run dir:    $RUN"
 echo "display:    :$D  (Xvfb pid $XPID, cleaned up on exit)"
 echo "openmw:     $EXIT_CODE"
@@ -231,6 +251,7 @@ echo "openmw:     $EXIT_CODE"
   grep -h 'RAZDOR_SMOKE\|RAZDOR_PROBE' "$RUN/openmw.stdout" ${LOG:+"$LOG"} 2>/dev/null | sort -u
 } | sed 's/^/  /'
 [ "$SHOT_OK" = 1 ] && echo "picture:    $SHOT"
+[ -n "$EXPECT" ] && echo "events:     $EVENTS_SEEN"
 echo "time:       $(( $(date +%s) - START_NS )) s"
 if [ "${#FAILS[@]}" -eq 0 ]; then
     echo "RESULT: PASS"
