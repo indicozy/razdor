@@ -1,6 +1,6 @@
 ---
 import { latest } from "../lib/changelog";
-import { catalog, counts, pictureUrl } from "../lib/catalog";
+import { catalog, counts, pictureUrl, type CatalogEntry } from "../lib/catalog";
 import { strings, href, hubLine, type Lang } from "../i18n";
 import Battle from "./Battle.astro";
 import { assetSizes, formatSize } from "../lib/release";
@@ -30,7 +30,22 @@ const cat = await catalog();
 const hub = hubLine(lang, cat ? counts(cat) : null) ?? L.hubFallback;
 // The Hub block: the first three catalog entries (real title, author, kind, picture) as flags and a plain list.
 // No catalog (or an empty one): three flags with the generic words and no list.
-const picks = cat ? cat.entries.slice(0, 3) : [];
+// Entries a player would recognise come first: a known author, a real title and a picture; mods, then campaigns,
+// then maps. Placeholder authors and file-name titles («Name-Title-01») go last.
+const known = (e: CatalogEntry) =>
+  !!e.author?.trim() &&
+  !/^(неизвестен|неизвестно|unknown|-|\?)$/i.test(e.author.trim()) &&
+  !/-\d+$/.test((e.title?.ru || e.title?.en || "").trim());
+const ranked: CatalogEntry[] = cat
+  ? [
+      ...(["mod", "campaign", "map"] as const).flatMap((k) =>
+        cat.entries.filter((e) => e.kind === k && known(e) && pictureUrl(e)),
+      ),
+      ...cat.entries.filter(known),
+      ...cat.entries,
+    ]
+  : [];
+const picks = [...new Set(ranked)].slice(0, 3);
 const pickText = (t?: { ru: string; en: string }) => (lang === "en" && t?.en ? t.en : t?.ru ?? "");
 const kindText = (k: string) => (k === "mod" ? L.hubKindMod : L.hubKindMap);
 // A title missing in both languages gets the kind's generic word, never the catalog id.
