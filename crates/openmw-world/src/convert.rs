@@ -148,6 +148,7 @@ fn runtime(
     }
 
     let (hx, hy) = grid.tile_centre(hero_x, hero_y);
+    let fragment = crate::events::fragment(map, hero);
     let data = lua::MapData {
         width: grid.width,
         height: grid.height,
@@ -160,6 +161,7 @@ fn runtime(
         hero_z: placement::ground(heights, hx, hy),
         time_scale: opts.time_scale,
         guard: opts.guard,
+        fragment: &fragment,
     };
     let mut scripts = vec![
         (lua::MAP_DATA_PATH.to_string(), lua::map_data(&data).into_bytes()),
@@ -168,7 +170,8 @@ fn runtime(
     for (path, text) in lua::RUNTIME {
         scripts.push((path.to_string(), text.as_bytes().to_vec()));
     }
-    let records = armies.records.into_iter().collect();
+    let mut records: Vec<Record> = armies.records.into_iter().collect();
+    records.extend(crate::events::journal_records(map));
     Ok(Extras { records, scripts })
 }
 

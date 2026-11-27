@@ -33,11 +33,27 @@ pub struct Map {
     pub heroes: Vec<Hero>,
     #[serde(default)]
     pub armies: Vec<Army>,
+    /// The scenario's events (`events[]`, the exporter's layout; kept as JSON, the Lua side reads
+    /// them as they are). Ids are 1-based: event `id` is at position `id - 1`.
+    #[serde(default)]
+    pub events: Vec<serde_json::Value>,
+    /// The event points (`points[]`): `x`, `y` tile, `events` the ids they offer.
+    #[serde(default)]
+    pub points: Vec<serde_json::Value>,
 }
 
 /// A hero of the preset list: `archetype` is `knight`, `archmage` or `ranger`; `(x, y)` his start tile.
 #[derive(Debug, Deserialize)]
 pub struct Hero {
+    /// The unit cards the hero starts with (`heroes[].troops`).
+    #[serde(default)]
+    pub troops: Vec<Troop>,
+    #[serde(default)]
+    pub gold: i64,
+    #[serde(default)]
+    pub mana: i64,
+    #[serde(default)]
+    pub start_building: i64,
     #[serde(default)]
     pub archetype: String,
     pub x: i64,
@@ -110,6 +126,15 @@ pub struct MapObject {
 /// it (`docs/flows/testing-and-tools.md`, "The map exporter"). Kinds 13 and 14 are bridges.
 #[derive(Debug, Deserialize)]
 pub struct Building {
+    /// 1-based building index, the id the events and the victory fields use.
+    #[serde(default)]
+    pub index: i64,
+    /// The owning faction (1 is the player's on the sample map); events test it.
+    #[serde(default)]
+    pub faction: i64,
+    /// The events the building offers (`buildings[].events`).
+    #[serde(default)]
+    pub events: Vec<i64>,
     pub x: i64,
     pub y: i64,
     pub size_x: i64,
@@ -119,6 +144,16 @@ pub struct Building {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct Info {
+    #[serde(default)]
+    pub title: String,
+    /// The victory and defeat event ids (1-based), 0 or absent when the map has none.
+    #[serde(default)]
+    pub victory_event: i64,
+    #[serde(default)]
+    pub defeat_event: i64,
+    /// The next campaign map's file name (empty: none).
+    #[serde(default)]
+    pub next_map: String,
     #[serde(default)]
     pub generator_seed: u64,
     #[serde(default)]

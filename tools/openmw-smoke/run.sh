@@ -11,6 +11,7 @@
 #              (2 s each); the z read after each is printed as RAZDOR_PROBE. Up to four.
 #   --camera   static camera position and angles (radians) for the picture; default: the player's view.
 #   --shot     where the PNG goes. Default: <run dir>/shot.png.
+#   --content     an .omwscripts name, found in an --extra-data folder, loaded as content (test drivers).
 #   --extra-data  a folder added to the data path (e.g. the Template's example_animated_creature/data
 #              for meshes/land_racer.dae). Repeatable.
 #
@@ -30,6 +31,7 @@ SHOT=""
 CAMERA=""
 PROBES=()
 EXTRA_DATA=()
+CONTENT=()
 
 usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
@@ -45,6 +47,7 @@ while [ $# -gt 0 ]; do
         --camera) CAMERA=$2; shift 2 ;;
         --probe) PROBES+=("$2"); shift 2 ;;
         --extra-data) EXTRA_DATA+=("$2"); shift 2 ;;
+        --content) CONTENT+=("$2"); shift 2 ;;
         -h|--help) usage ;;
         *) echo "run.sh: unknown argument $1" >&2; usage ;;
     esac
@@ -86,6 +89,7 @@ done
     # The converter's Lua runtime (M4+): only when the converter wrote it.
     [ -f "$OUT/razdor_map.omwscripts" ] && echo "content=razdor_map.omwscripts"
     echo "content=smoke.omwscripts"
+    for c in "${CONTENT[@]+"${CONTENT[@]}"}"; do echo "content=$c"; done
     echo "encoding=win1251"
 } >> "$RUN/openmw.cfg"
 

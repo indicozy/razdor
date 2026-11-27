@@ -1,0 +1,3 @@
+# Test-only (tools/openmw-smoke/m5): the M5 driver. Never part of the converter output.
+PLAYER: scripts/razdor_m5/player.lua
+CREATURE: scripts/razdor_m5/body.lua

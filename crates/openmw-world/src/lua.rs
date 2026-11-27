@@ -7,11 +7,13 @@ use std::fmt::Write;
 
 /// The fixed runtime, as (path under the output folder, text). The paths are the ones the
 /// `.omwscripts` names.
-pub const RUNTIME: [(&str, &str); 4] = [
+pub const RUNTIME: [(&str, &str); 6] = [
     ("scripts/razdor/common.lua", include_str!("../lua/common.lua")),
+    ("scripts/razdor/events.lua", include_str!("../lua/events.lua")),
     ("scripts/razdor/global.lua", include_str!("../lua/global.lua")),
     ("scripts/razdor/player.lua", include_str!("../lua/player.lua")),
     ("scripts/razdor/army.lua", include_str!("../lua/army.lua")),
+    ("scripts/razdor/menu.lua", include_str!("../lua/menu.lua")),
 ];
 
 /// The path of the generated table, relative to the output folder.
@@ -44,7 +46,8 @@ pub fn omwscripts() -> String {
     "# Written by razdor-openmw: the Lua runtime of the converted map (spec 2.4).\n\
      GLOBAL: scripts/razdor/global.lua\n\
      PLAYER: scripts/razdor/player.lua\n\
-     CUSTOM: scripts/razdor/army.lua\n"
+     CUSTOM: scripts/razdor/army.lua\n\
+     MENU: scripts/razdor/menu.lua\n"
         .to_string()
 }
 
@@ -66,6 +69,8 @@ pub struct MapData<'a> {
     pub time_scale: i64,
     /// Whether the passability guard runs (`--no-guard` turns it off).
     pub guard: bool,
+    /// The scenario's Lua fragment (`events::fragment`): info, hero, events, points, zones.
+    pub fragment: &'a str,
 }
 
 /// The `map_data.lua` text (deterministic: no tables are iterated in hash order).
@@ -133,7 +138,9 @@ pub fn map_data(d: &MapData) -> String {
         }
         s.push_str("} },\n");
     }
-    s.push_str("  },\n}\n");
+    s.push_str("  },\n");
+    s.push_str(d.fragment);
+    s.push_str("}\n");
     s
 }
 
@@ -164,6 +171,7 @@ mod tests {
             assert!(!text.is_empty(), "{path} is empty");
         }
         // common.lua is a module that the three scripts require; only the scripts are registered.
+        assert!(script.contains("MENU: scripts/razdor/menu.lua"));
         for path in ["scripts/razdor/global.lua", "scripts/razdor/player.lua", "scripts/razdor/army.lua"] {
             assert!(script.contains(path), "{path} is not in the .omwscripts");
         }
@@ -205,6 +213,7 @@ mod tests {
             hero_z: 96,
             time_scale: 120,
             guard: true,
+            fragment: "  info = {},\n",
         };
         let text = map_data(&d);
         assert!(text.contains("\"01f\",\n    \"30f\""), "{text}");
@@ -215,5 +224,6 @@ mod tests {
         assert!(text.contains("time_scale = 120, guard = true"), "{text}");
         assert!(text.contains("start = { archetype = \"knight\", tile = {1, 0}, z = 96 }"), "{text}");
         assert!(text.contains("{ x0 = 1, x1 = 2, y0 = 3, y1 = 4 }"), "{text}");
+        assert!(text.ends_with("  info = {},\n}\n"), "{text}");
     }
 }

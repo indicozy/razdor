@@ -7,6 +7,7 @@ pub mod actors;
 pub mod convert;
 pub mod mesh;
 pub mod placement;
+pub mod events;
 pub mod grid;
 pub mod heightmap;
 pub mod input;
