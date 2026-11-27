@@ -933,3 +933,18 @@ function names the Rust function and the original's address it mirrors.
   Surrender > 0 units gives up after the first hit and pays mana), the turn limit, a garrison
   capture, a friendly army on open ground engaged, and the XP given after a win matching the Rust
   reference for the same inputs.
+
+### Lua fight as built (M8)
+
+- `lua/fight.lua` drives the hits (spec "M8 spike result"): `M.hit` is the one place that computes
+  damage; each hostile army body runs a combat tick on its interval and the receiver lowers its own
+  health. Movement stays OpenMW's: a ranged body within 3000 units holds (a Travel to its own place),
+  everyone else gets a Combat package.
+- Decided differently: a body's first action waits one interval (the sides reach it from the global
+  script first); the body id is `<recordId>#<army>.<k>` (k alone repeats across armies); a body's side
+  is its army id; the player is side 0 and targetable by default (the smoke turns it off with
+  `RazdorFightConfig`). Reach 180 melee, 3000 strike and shot; no line of sight yet.
+- The smoke (`tools/openmw-smoke/m8`): two hostile armies of four, 1536 units apart, PASS on a melee,
+  a shot and a strike hit and `RAZDOR_FIGHT_END` within 120 s. Heal and bless are not exercised.
+- Not built: the freeze of the other armies and the closed sides (the owner's rule above), defence
+  and protections (M9), the hero's party as side 0.

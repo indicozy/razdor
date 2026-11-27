@@ -10,6 +10,7 @@ local nearby = require('openmw.nearby')
 local types = require('openmw.types')
 local interfaces = require('openmw.interfaces')
 local util = require('openmw.util')
+local fight = require('scripts.razdor.fight')
 
 local role = nil
 local requested = false
@@ -43,9 +44,11 @@ return {
     engineHandlers = {
         onInit = function(data)
             role = data
+            fight.set_role(role)
         end,
         onLoad = function(data)
             role = data
+            fight.set_role(role)
             announced = false
         end,
         onSave = function()
@@ -58,10 +61,12 @@ return {
             if not announced then
                 announced = true
                 setFight(role.fight)
-                core.sendGlobalEvent('RazdorBodyReady', { army = role.army, k = role.k, gen = role.gen, actor = self })
+                core.sendGlobalEvent('RazdorBodyReady', { army = role.army, k = role.k, gen = role.gen, actor = self,
+                    hostile = (role.fight or 0) > 0 })
             end
             if not reported and types.Actor.isDead(self) then
                 reported = true
+                fight.dead()
                 core.sendGlobalEvent('RazdorBodyDead', { army = role.army, k = role.k, gen = role.gen })
                 return
             end
@@ -69,12 +74,13 @@ return {
                 return
             end
             local ai = interfaces.AI
+            fight.tick()
             if role.leader then
                 if role.patrols and not requested and ai.getActivePackage() == nil then
                     requested = true
                     core.sendGlobalEvent('RazdorArmyNext', { army = role.army, actor = self })
                 end
-            elseif ai.getActivePackage() == nil then
+            elseif ai.getActivePackage() == nil and not fight.busy() then
                 local leader = find_leader(role.leader_record)
                 if leader then
                     ai.startPackage({ type = 'Follow', target = leader, cancelOther = true })
@@ -83,6 +89,8 @@ return {
         end,
     },
     eventHandlers = {
+        RazdorHit = fight.on_hit,
+        RazdorFightSides = fight.set_sides,
         RazdorFight = function(d)
             setFight(d.v)
         end,

@@ -15,6 +15,7 @@ local async = require('openmw.async')
 local util = require('openmw.util')
 local common = require('scripts.razdor.common')
 local map = require('scripts.razdor.map_data')
+local fight = require('scripts.razdor.fight')
 
 local PERIOD = 0.2
 local COOLDOWN = 0.5
@@ -207,5 +208,7 @@ return {
                 close_window()
             end
         end,
+        -- A fighting army body hits the player (fight.lua): the player lowers its own health.
+        RazdorHit = fight.on_hit,
     },
 }

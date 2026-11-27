@@ -13,12 +13,13 @@ pub const COMBAT_PATH: &str = "scripts/razdor/combat_data.lua";
 
 /// The fixed runtime, as (path under the output folder, text). The paths are the ones the
 /// `.omwscripts` names.
-pub const RUNTIME: [(&str, &str); 6] = [
+pub const RUNTIME: [(&str, &str); 7] = [
     ("scripts/razdor/common.lua", include_str!("../lua/common.lua")),
     ("scripts/razdor/events.lua", include_str!("../lua/events.lua")),
     ("scripts/razdor/global.lua", include_str!("../lua/global.lua")),
     ("scripts/razdor/player.lua", include_str!("../lua/player.lua")),
     ("scripts/razdor/army.lua", include_str!("../lua/army.lua")),
+    ("scripts/razdor/fight.lua", include_str!("../lua/fight.lua")),
     ("scripts/razdor/menu.lua", include_str!("../lua/menu.lua")),
 ];
 
@@ -245,6 +246,8 @@ mod tests {
             assert!(script.contains(path), "{path} is not in the .omwscripts");
         }
         assert!(!script.contains("common.lua"));
+        // fight.lua is a module too: army.lua requires it.
+        assert!(!script.contains("fight.lua"));
     }
 
     #[test]

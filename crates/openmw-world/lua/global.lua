@@ -28,6 +28,12 @@ local state = { started = false, armies = {}, ev = events.new_state(), t0 = 0 }
 -- themselves again on every load (RazdorBodyReady), so this table is rebuilt after a reload.
 local bodies = {}
 local contact = {} -- army id -> true while the player is within a tile of its leader
+-- The real-time fight driver (M8, fight.lua): the sides of the bodies by object id, the test flags
+-- (player = false: the player is no target, RazdorFightConfig from the smoke) and the end, logged once.
+-- Runtime only: a reload rebuilds the sides from the bodies' ready events.
+local fight_sides = {}
+local fight_cfg = { player = true }
+local fight_ended = false
 
 local by_id = {}
 for _, a in ipairs(map.armies) do
@@ -103,6 +109,41 @@ end
 -- neutral ones stay at 0. Only a body's own script may write it, so the value goes in its data.
 local function fight_of(a)
     return events.is_hostile(state.ev, a) and FIGHT_HOSTILE or 0
+end
+
+-- Sends every body the sides of all bodies and the test flags (fight.lua targets by them).
+local function broadcast_fight()
+    for _, b in pairs(bodies) do
+        for _, obj in pairs(b.actors) do
+            pcall(function()
+                obj:sendEvent('RazdorFightSides', { sides = fight_sides, player = fight_cfg.player })
+            end)
+        end
+    end
+end
+
+local function dead_count(id)
+    local n = 0
+    for _ in pairs(state.armies[id].dead) do
+        n = n + 1
+    end
+    return n
+end
+
+-- The fight ends when an army is wholly dead and another army still has a living body (the other
+-- side wins; the player is not a side yet, so no army left means no line).
+local function check_fight_end(id)
+    local st = state.armies[id]
+    if fight_ended or not st or not st.n or dead_count(id) < st.n then
+        return
+    end
+    for oid, ost in pairs(state.armies) do
+        if oid ~= id and ost.spawned and ost.n and dead_count(oid) < ost.n then
+            fight_ended = true
+            print(string.format('RAZDOR_FIGHT_END winner=%d reason=wipe t=%.0f', oid, core.getRealTime()))
+            return
+        end
+    end
 end
 
 local function spawn_army(a)
@@ -522,6 +563,8 @@ return {
             if d.k == 1 then
                 ensure_bodies(d.army).leader = d.actor
             end
+            fight_sides[d.actor.id] = { side = d.army, hostile = d.hostile and true or false }
+            broadcast_fight()
         end,
         -- A body reports its death once (army.lua).
         RazdorBodyDead = function(d)
@@ -531,6 +574,14 @@ return {
             end
             st.dead[d.k] = true
             print(string.format('RAZDOR_BODY_DEAD %d k=%d', d.army, d.k))
+            check_fight_end(d.army)
+        end,
+        -- The test flags of the fight (tools/openmw-smoke/m8): the player is no target.
+        RazdorFightConfig = function(d)
+            if d.player ~= nil then
+                fight_cfg.player = d.player and true or false
+            end
+            broadcast_fight()
         end,
         -- A patrolling leader asks for its next destination (sent by its own script).
         RazdorArmyNext = function(d)

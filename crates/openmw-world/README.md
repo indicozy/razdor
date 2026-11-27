@@ -232,3 +232,30 @@ plugin has no spells and the combat table uses the placeholder melee pair only.
   mag=15}, interval = 2.5 }`; nil fields are left out.
 - Effect ids are OpenMW's (`ESM::MagicEffect`), checked against the Game Template's MGEF indices and by
   `esmtool dump` on the RK1 sample (the effect names resolve as intended).
+
+## The fight driver (M8)
+
+`lua/fight.lua` is required by `army.lua` (every army body) and by `player.lua` (the `RazdorHit`
+receiver only). It is the one place that computes a hit, and the receiver applies it.
+
+- `M.hit(attacker, target_entry, kind)` returns the amount: melee and shot a random value in the
+  entry's pair, strike its `mag`, heal its `heal`, bless 0 (logged only). The target's entry is passed
+  in for M9 (defence, protections, surrender); nothing uses it yet.
+- `M.tick()` runs each frame of a hostile body and acts on the entry's `interval` (real seconds). The
+  first action comes one interval after the body is ready. The target is the nearest living actor of
+  another side that is hostile (army bodies) or the player (`player_target`). A ranged body (shot or
+  strike) within 3000 units holds its place (a Travel to its own position); anyone else gets a Combat
+  package on the target. One action per tick: heal below 70% health, else strike or shot in 3000 units,
+  else melee in 180 units. Bless is logged once at first contact.
+- The receiver (`M.on_hit`, the `RazdorHit` event) lowers its own health and logs
+  `RAZDOR_FIGHT hit from=<id> to=<id> kind=… amount=… hp=…`. Ids are `<recordId>#<army>.<k>` (the
+  army's number and the body's k), or `player`. Deaths are logged by `M.dead` as
+  `RAZDOR_FIGHT_DEAD id=…`.
+- Sides: the global script assigns each body its army id as its side, and every body learns the sides
+  of all bodies by the `RazdorFightSides` event (sent on every ready and on a change). The player is
+  side 0 and targetable unless the test flag `RazdorFightConfig {player = false}` is sent (the smoke
+  only).
+- `army.lua` does not send a fighting body back to its leader (`M.busy`).
+- Global: `RAZDOR_FIGHT_END winner=<army id> reason=wipe t=<real seconds>` once, when an army is wholly
+  dead and another army still has a living body.
+- Not yet: the freeze of the other armies, closed sides, line of sight, defence (M9), the party.
