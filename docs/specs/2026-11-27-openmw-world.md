@@ -500,7 +500,7 @@ CREA level = `level + 1` and a gain per level applies `level` times. The mapping
 The name of a unit card is the unit's Russian name (cp1251 in the plugin); a leader's name is its army's
 `leader_name` (else the army's name, else the unit's). A unit missing from the file keeps the placeholder
 stats and the name `Unit <id>`. Without `--units` the formula above (M4) stays. Checked on RK1 (esmtool:
-`rz_u20_l0` = `Стрелок`, health 60, combat 30; leader `rz_army_1` = `Рыцарь Альберт фон Бонитур`).
+`rz_u20_l0` took its unit's name, health 60, combat 30; leader `rz_army_1` its army's leader name).
 
 ### 3.9 The player
 
