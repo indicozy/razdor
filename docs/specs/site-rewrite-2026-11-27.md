@@ -17,6 +17,15 @@ The current site is hand-written HTML on `gh-pages` (index, en, install, a hand-
 - Fire: DT's own animated fire effect (S-Fire) on torches, the burning village and the battle, at pixel size;
   not realistic video flames.
 
+## Round 3–4 changes (the owner, 2026-11-27)
+
+- Desktop: the content is a centred column (~1000 px); the road strip is in the RIGHT margin, fading leftwards
+  into the content. Below ~1300 px viewport width the road becomes the muted background, as on phones.
+- Direction C «Карта» picked (over «Летопись» and «Геральдика»): no frames or panels. Pictures dissolve into the
+  page through fog-of-war masks (a DT mechanic), text sits on the dark map ground, headings in Becker with a
+  hand-drawn gold underline, a dashed gold route line links the sections, map-legend captions in Kurale italic,
+  Hub items as banner flags pinned on a fogged map. The game-UI square-corner rule does not apply to the site.
+
 ## Audience and look
 
 - For DT veterans first (download right away), newcomers second (scroll to see the game).
