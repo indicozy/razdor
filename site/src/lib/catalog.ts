@@ -85,3 +85,27 @@ export function pictureUrl(e: CatalogEntry): string | null {
   const f = e.picture ?? e.preview;
   return f?.path ? ASSETS + f.path : null;
 }
+
+export interface TitlePair {
+  ru: string;
+  en: string;
+}
+
+// The original campaign's maps: their ids are their names (the file names without .DTm).
+const CAMPAIGN_IDS = [
+  "РК1-Начало пути",
+  "РК2-Дикие пустоши",
+  "РК3-Столица",
+  "РК4-Восточная провинция",
+  "РК5-Столица в огне",
+  "РК6-Северная битва",
+  "РК7-Конец",
+];
+
+/** id → title (ru, en) of the original campaign's maps and of every catalog entry: the site's stats block reads them. */
+export function titlesById(c: Catalog | null): Record<string, TitlePair> {
+  const out: Record<string, TitlePair> = {};
+  for (const id of CAMPAIGN_IDS) out[id] = { ru: id, en: id };
+  for (const e of c?.entries ?? []) out[e.id] = { ru: e.title?.ru ?? "", en: e.title?.en ?? "" };
+  return out;
+}

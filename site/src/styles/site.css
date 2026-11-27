@@ -338,3 +338,13 @@ button { font: inherit; }
 .yt-play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 84px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 30px; color: #fff; background: #b8591c; border: 3px solid; border-color: #f2b27a #7a3510 #5a250a #d8803e; }
 .yt:hover .yt-play, .yt:focus-visible .yt-play { background: #d06a24; }
 .yt-cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 6px 10px; background: rgba(0,0,0,.65); color: #ffdd55; font: bold 14px Verdana, Tahoma, "PT Sans", sans-serif; text-decoration: underline; }
+
+/* The counter's play stats: 2003-style tables inside the counter window (hidden until the data loads). */
+.play-stats { margin-top: 12px; }
+.play-stats[hidden], .play-stats table[hidden] { display: none; }
+.play-stats table { width: 100%; border-collapse: collapse; font: 13px/1.3 Verdana, Tahoma, sans-serif; margin-bottom: 10px; }
+.play-stats caption { text-align: left; font-weight: bold; color: var(--gold); padding: 2px 0 4px; }
+.play-stats th, .play-stats td { border: 1px solid var(--silver-dark); padding: 2px 5px; text-align: left; color: var(--cream); }
+.play-stats th { background: var(--marble); font-weight: normal; }
+.play-stats tbody tr:nth-child(even) td { background: rgba(0, 0, 0, 0.25); }
+.play-stats .n { text-align: right; white-space: nowrap; }

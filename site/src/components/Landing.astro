@@ -1,6 +1,6 @@
 ---
 import { latest, versions, versionId } from "../lib/changelog";
-import { catalog, counts, pictureUrl, type CatalogEntry } from "../lib/catalog";
+import { catalog, counts, pictureUrl, titlesById, type CatalogEntry } from "../lib/catalog";
 import { strings, href, hubLine, type Lang } from "../i18n";
 import { assetSizes, downloadTotal, formatSize } from "../lib/release";
 
@@ -30,6 +30,8 @@ const metaBySystem = Object.fromEntries((Object.keys(sysNames) as (keyof typeof 
 // campaigns, then maps. Placeholder authors and file-name titles («Name-Title-01») go last.
 const cat = await catalog();
 const hub = hubLine(lang, cat ? counts(cat) : null) ?? L.hubFallback;
+// Ids and titles only, for the play-stats tables of the counter (filled by scripts/stats.ts).
+const mapNames = titlesById(cat);
 const known = (e: CatalogEntry) =>
   !!e.author?.trim() &&
   !/^(неизвестен|неизвестно|unknown|-|\?)$/i.test(e.author.trim()) &&
@@ -159,6 +161,24 @@ const shots = [
         <h2 id="counter-title">{R.counterTitle}</h2>
         <div class="win-body">
           <p>{R.counter} <span class="counter" aria-label={String(total)}>{counter}</span></p>
+          <div class="play-stats" id="play-stats" data-lang={lang} data-wins={R.statsWins} data-original={R.statsOriginal} hidden>
+            <table data-board="top-maps" hidden>
+              <caption>{R.statsTop}</caption>
+              <thead><tr><th>{R.statsMap}</th><th class="n">{R.statsCount}</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <table data-board="hard-maps" hidden>
+              <caption>{R.statsHard}</caption>
+              <thead><tr><th>{R.statsMap}</th><th class="n">{R.statsRate}</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <table data-board="games" hidden>
+              <caption>{R.statsGames}</caption>
+              <thead><tr><th>{R.statsGame}</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <script is:inline type="application/json" id="map-names" set:html={JSON.stringify(mapNames).replace(/</g, "\\u003c")}></script>
         </div>
       </section>
     )}
@@ -198,6 +218,10 @@ const shots = [
     </section>
   </aside>
 </div>
+
+<script>
+  import "../scripts/stats.ts";
+</script>
 
 <script>
   // The trailer: the YouTube player replaces the poster only after a click (youtube-nocookie, autoplay).
