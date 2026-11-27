@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 pub const FORMAT: &str = "razdor-units-json";
 /// The `version` the converter writes in its own tests. The reader takes [`VERSIONS`].
 pub const VERSION: u32 = 2;
-/// The versions the reader accepts: 1 (the units) and 2 (the units and the world spells; the spells
-/// are read by the spell writer, not here).
+/// The versions the reader accepts: 1 (the units) and 2 (the units and the world spells). A
+/// version 1 file loads with no spells.
 pub const VERSIONS: [u32; 2] = [1, 2];
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +23,36 @@ struct File {
     version: u32,
     #[serde(default)]
     units: Vec<Unit>,
+    #[serde(default)]
+    spells: Vec<WorldSpell>,
+}
+
+/// One world spell of the install (the hero's), as the version-2 units JSON writes it: the raw
+/// fields and the summary `kind` (`damage`, `heal`, `modifier` or `none`). `spells.rs` turns it into
+/// a SPEL record.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct WorldSpell {
+    /// 1-based position in the install's spell list; the events refer to spells by it.
+    pub id: i64,
+    pub name: String,
+    #[serde(default)]
+    pub cost_gold: i64,
+    #[serde(default)]
+    pub cost_mana: i64,
+    /// `life`, `elemental`, `death` or `None`.
+    pub school: Option<String>,
+    /// `hero`, `enemy`, `one_enemy` or `None`.
+    pub target: Option<String>,
+    /// Duration in game hours at caster level 0; `None` = instant.
+    pub time_work_hours: Option<i64>,
+    pub kind: String,
+    pub delta_fixed_hits: Option<i64>,
+    /// Flat change of each stat while it lasts, keyed by the unit stat's name (`attack_blow`, ...).
+    #[serde(default)]
+    pub add: BTreeMap<String, i64>,
+    /// Percent change of each stat while it lasts, keyed like `add`.
+    #[serde(default)]
+    pub percent: BTreeMap<String, i64>,
 }
 
 /// One unit card (the fields the converter uses; the rest of the file is ignored).
@@ -39,6 +69,9 @@ pub struct Unit {
     pub magic_power: i64,
     /// `life`, `elemental`, `death`, or `None` for no school.
     pub magic: Option<String>,
+    /// `to_enemy`, `to_ally`, `to_all`, or `None`.
+    #[serde(default)]
+    pub magic_direction: Option<String>,
     pub protection: Protection,
     pub initiative: i64,
     #[serde(default)]
@@ -63,6 +96,7 @@ pub struct Protection {
 #[derive(Debug, Clone, Default)]
 pub struct Units {
     by_id: BTreeMap<i64, Unit>,
+    spells: Vec<WorldSpell>,
 }
 
 impl Units {
@@ -82,7 +116,9 @@ impl Units {
                 return Err(format!("unit id {id} is in the file twice"));
             }
         }
-        Ok(Units { by_id })
+        // Version 1 has no spells; a version 2 file without the array has none either.
+        let spells = if file.version >= 2 { file.spells } else { Vec::new() };
+        Ok(Units { by_id, spells })
     }
 
     pub fn get(&self, id: i64) -> Option<&Unit> {
@@ -95,6 +131,11 @@ impl Units {
 
     pub fn is_empty(&self) -> bool {
         self.by_id.is_empty()
+    }
+
+    /// The world spells in file order (empty for a version 1 file).
+    pub fn spells(&self) -> &[WorldSpell] {
+        &self.spells
     }
 }
 
