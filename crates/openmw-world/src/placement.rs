@@ -236,7 +236,7 @@ pub fn plan(map: &Map, grid: &Grid, heights: &HeightField) -> Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::grid::Grid;
+    use crate::grid::{Grid, Rect, VERT_UNITS};
     use crate::heightmap::Terrain;
     use crate::input::synthetic;
     use crate::mesh::check;
@@ -363,21 +363,30 @@ mod tests {
     }
 
     #[test]
-    fn a_diagonal_chain_of_three_bridge_tiles_has_overlapping_decks() {
-        // Water everywhere; three stone bridges on a diagonal, each a 1x1 building.
-        let codes = vec![2u8; 400];
+    fn a_diagonal_chain_of_three_bridge_tiles_has_overlapping_decks_and_land_at_deck_height() {
+        // Water everywhere, with land on the far side of each end of the chain. The three stone
+        // bridges are 1x1 buildings on a diagonal: (5,14), (6,13), (7,12) (row 0 is the north).
+        let (w, h) = (20usize, 20usize);
+        let mut codes = vec![2u8; w * h];
+        codes[14 * w + 4] = 6; // grass west of the south-west end
+        codes[12 * w + 8] = 6; // grass east of the north-east end
         let buildings = serde_json::json!([
             { "x": 5, "y": 14, "size_x": 1, "size_y": 1, "kind": 13 },
             { "x": 6, "y": 13, "size_x": 1, "size_y": 1, "kind": 13 },
             { "x": 7, "y": 12, "size_x": 1, "size_y": 1, "kind": 13 }
         ]);
-        let (_, grid, p) = plan_of(20, 20, &codes, serde_json::json!([]), buildings);
+        let map = synthetic(w, h, &codes, serde_json::json!([]), buildings);
+        let grid = Grid::new(w, h, 1024).unwrap();
+        let terrain = Terrain::new(grid, map.tile_codes().unwrap());
+        let heights = heightmap::build(&terrain, &map);
+        let p = plan(&map, &grid, &heights);
+
         let decks: Vec<[i64; 3]> = p.cells.values().flatten().map(|r| r.pos).collect();
         assert_eq!(decks.len(), 3);
         for d in &decks {
             assert_eq!(d[2], heightmap::DECK_HEIGHT);
         }
-        // A deck is 1280 square (the tile plus 128 each side). The neighbours on the chain are a
+        // A deck is 1280 square (the tile plus 128 each side). Neighbours on the chain are a
         // diagonal tile apart, so their decks overlap in a 256 by 256 patch the walker can use.
         let overlap = |a: usize, b: usize| {
             let (dx, dy) = ((decks[a][0] - decks[b][0]).abs(), (decks[a][1] - decks[b][1]).abs());
@@ -386,7 +395,19 @@ mod tests {
         assert_eq!(overlap(0, 1), (256, 256));
         assert_eq!(overlap(1, 2), (256, 256));
         assert!(overlap(0, 2).0 <= 0, "the two ends are two tiles apart and do not touch");
-        let _ = grid;
+
+        // The land beside each end rises to the deck height along the shared edge (spec §3.3). The
+        // edge's two corners also touch water, where the step clamp (§3.3 step 8) may lower them, so
+        // the check is on the vertices between the corners.
+        let south_west = grid.footprint(5, 14, 1, 1);
+        let north_east = grid.footprint(7, 12, 1, 1);
+        let inner = |r: &Rect| (r.south / VERT_UNITS + 1)..(r.north / VERT_UNITS);
+        for j in inner(&south_west) {
+            assert_eq!(heights.height(south_west.west / VERT_UNITS, j), heightmap::DECK_HEIGHT as i32, "row {j}");
+        }
+        for j in inner(&north_east) {
+            assert_eq!(heights.height(north_east.east / VERT_UNITS, j), heightmap::DECK_HEIGHT as i32, "row {j}");
+        }
     }
 
     #[test]

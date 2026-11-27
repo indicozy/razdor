@@ -97,7 +97,7 @@ by the smoke test (milestone 4).
 - `convert`: the map to plugin, textures and meshes; one CELL and one LAND for every cell of the map
   and of the margin ring, the CELLs of the references too, and one STAT per mesh (after LTEX).
 
-## Milestone 3 numbers (RK1 sample, game-derived, not committed)
+## Milestone 3 counts on the RK1 sample (the sample file is game-derived and not committed)
 
 `esmtool dump -C` on the converted sample: 21 STAT, 81 LAND, 81 CELL, 18 LTEX and 1126 references
 (645 trees, 52 dead trees, 368 thickets, 21 stones, 28 mountain rocks, 4 villages, 2 castles, 1

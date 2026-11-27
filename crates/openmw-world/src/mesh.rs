@@ -220,8 +220,9 @@ impl Builder {
         out.push_str("<library_effects>\n");
         for p in &used {
             let [r, g, b] = p.rgb();
+            let [ar, ag, ab] = [r * 0.6, g * 0.6, b * 0.6];
             out.push_str(&format!(
-                "<effect id=\"fx_{i}\"><profile_COMMON><technique sid=\"common\"><lambert><diffuse><color>{r:.4} {g:.4} {b:.4} 1</color></diffuse></lambert></technique></profile_COMMON></effect>\n",
+                "<effect id=\"fx_{i}\"><profile_COMMON><technique sid=\"common\"><lambert><ambient><color>{ar:.4} {ag:.4} {ab:.4} 1</color></ambient><diffuse><color>{r:.4} {g:.4} {b:.4} 1</color></diffuse></lambert></technique></profile_COMMON></effect>\n",
                 i = *p as usize
             ));
         }
@@ -700,6 +701,38 @@ mod tests {
             let _ = cy;
             if inside_band && cz <= 420 {
                 assert!(!(cx > -160 && cx < 160), "wall triangle in the gate at {t:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn each_kind_has_its_parts() {
+        let count = |b: &Builder, label: &str| b.pieces.iter().filter(|p| **p == label).count();
+        // (what it is, the builder, the labels and their counts it must have)
+        type Case = (&'static str, Builder, Vec<(&'static str, usize)>);
+        let cases: Vec<Case> = vec![
+            ("palace", palace(4096, 4096), vec![("tower", 4), ("keep", 1), ("gate", 2), ("wall", 5)]),
+            ("castle", castle(4096, 4096), vec![("tower", 4), ("keep", 1), ("gate", 2), ("wall", 5)]),
+            ("fort", fort(2048, 2048), vec![("tower", 1), ("keep", 0), ("gate", 2), ("wall", 5)]),
+            ("village of 3", houses(&[(-512, 0), (512, 0), (0, 896)]), vec![("walls", 3), ("roof", 3)]),
+            ("tavern", tavern(1024, 1024), vec![("walls", 1), ("roof", 1)]),
+            ("church", church(1024, 1024), vec![("walls", 1), ("roof", 1), ("belfry", 1), ("spire", 1)]),
+            ("smithy", smithy(1024, 1024), vec![("walls", 1), ("roof", 1), ("chimney", 1)]),
+            ("market", market(1024, 1024), vec![("post", 4), ("awning", 1), ("counter", 2)]),
+            ("shipyard", shipyard(1024, 1024), vec![("walls", 1), ("roof", 1)]),
+            ("altar", altar(1024, 1024), vec![("base", 1), ("top", 1)]),
+            ("obelisk", obelisk(1024, 1024), vec![("shaft", 1)]),
+            ("dungeon", dungeon(1024, 1024), vec![("mound", 1)]),
+            ("ruins", ruins(1024, 1024), vec![("wall", 3)]),
+            ("tree", tree(0), vec![("trunk", 1), ("crown", 1)]),
+            ("dead tree", dead_tree(), vec![("trunk", 1), ("branch", 3)]),
+            ("thicket", thicket(), vec![("blob", 3)]),
+            ("stone", stone(2), vec![("skirt", 1), ("body", 1), ("cap", 1)]),
+            ("deck", deck(true), vec![("deck", 1)]),
+        ];
+        for (what, b, parts) in cases {
+            for (label, n) in parts {
+                assert_eq!(count(&b, label), n, "{what}: {label}");
             }
         }
     }

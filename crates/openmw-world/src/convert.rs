@@ -341,6 +341,7 @@ mod tests {
         let b = convert(&map, &opts(1024)).unwrap();
         assert_eq!(a.plugin, b.plugin);
         assert_eq!(a.textures, b.textures);
+        assert_eq!(a.meshes, b.meshes);
         assert_eq!(a.heights.pgm(), b.heights.pgm());
     }
 
@@ -353,6 +354,48 @@ mod tests {
     /// Orientation probe (spec §6, M1): one raised vertex at row 1, column 2 of cell (0, 0) and one
     /// texel of a different surface at texel row 0, column 3 of cell (0, 0). The plugin is read back
     /// with the crate's reader, and `esmtool` checks the heights it can show.
+    /// The scenery of M3 counted two ways: the plugin's own records, and `esmtool dump -C`.
+    #[test]
+    fn esmtool_counts_the_statics_and_the_references() {
+        let map = synthetic(
+            20,
+            20,
+            &(0..400).map(|k| ((k * 5) % 16) as u8).collect::<Vec<u8>>(),
+            serde_json::json!([
+                { "x": 2, "y": 2, "sprite": 40, "class": 9 },
+                { "x": 3, "y": 3, "sprite": 41, "class": 9 },
+                { "x": 4, "y": 4, "sprite": 42, "class": 10 },
+                { "x": 5, "y": 5, "sprite": 43, "class": 11 },
+                { "x": 6, "y": 6, "sprite": 30, "class": 8 }
+            ]),
+            serde_json::json!([
+                { "x": 12, "y": 12, "size_x": 4, "size_y": 4, "kind": 3 },
+                { "x": 15, "y": 15, "size_x": 1, "size_y": 1, "kind": 13 }
+            ]),
+        );
+        let out = convert(&map, &opts(1024)).unwrap();
+        let records = tes3::decode(&out.plugin).unwrap();
+        let statics = records.iter().filter(|r| &r.name == b"STAT").count();
+        let refs: usize = records
+            .iter()
+            .filter(|r| &r.name == b"CELL")
+            .map(|r| r.subs.iter().filter(|s| &s.name == b"FRMR").count())
+            .sum();
+        assert_eq!(refs, 7, "2 trees, a dead tree, a thicket, a stone, 1 castle, 1 bridge deck");
+        assert_eq!(statics, out.meshes.len());
+        assert!((5..=6).contains(&statics), "one or two tree kinds, dead tree, thicket, stone, castle, deck: {statics}");
+        if !esmtool_installed() {
+            eprintln!("skipped: esmtool is not on PATH");
+            return;
+        }
+        let dir = scratch("statics");
+        let text = esm_dump(&out, &dir);
+        assert_eq!(count(&text, "Record: STAT"), statics, "{text}");
+        let refnums = text.lines().filter(|l| l.trim_start().starts_with("- Refnum:")).count();
+        assert_eq!(refnums, refs, "{text}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn a_raised_vertex_and_an_odd_texel_land_where_the_spec_puts_them() {
         let map = map_of(16, 16, |_, _| 6);
