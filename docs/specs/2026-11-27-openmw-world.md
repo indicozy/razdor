@@ -870,3 +870,17 @@ bolt or hit meshes. So:
   player and the party for a hostile army); party bodies fight what attacks the player or what the
   player attacks, and any hostile body within 1500 units.
 - Each hit logs `RAZDOR_FIGHT hit from=<id> to=<id> kind=melee|shot|strike|heal|bless amount=<n> hp=<n>`.
+
+### M8: a fight freezes the rest of the world (the owner, 2026-11-28)
+
+- A fight starts when a hostile army's body and the player (or a party body) engage. The fight's
+  sides are fixed at that moment: the player, the party, and that one army. Nobody else joins.
+- While it lasts, everything else stops: the other armies' bodies have their AI packages removed and
+  are held at fight 0 (they don't move, attack or react), DT's clock in Lua (days, `delay_hours`,
+  respawns, event timers) does not advance, and the game time scale is set to 0 if OpenMW 0.51's
+  world API allows it (else DT's clock alone is held). The fight driver only lets bodies of the two
+  sides hit each other.
+- The fight ends when one side is wholly dead or the player gets more than 3000 units away from
+  every living body of the army (a retreat). Then the held armies get their packages and fight
+  values back and the clock runs again.
+- Logged as `RAZDOR_FIGHT_START army=<id>` and `RAZDOR_FIGHT_END winner=player|army|retreat`.
