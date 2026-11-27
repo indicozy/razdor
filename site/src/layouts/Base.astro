@@ -1,0 +1,63 @@
+---
+import "../styles/tokens.css";
+import "../styles/site.css";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+
+interface Props {
+  lang: "ru" | "en";
+  title: string;
+  description: string;
+  /** The page path without the language or the base, e.g. "/" or "/download/". */
+  path: string;
+}
+const { lang, title, description, path } = Astro.props;
+const site = "https://razdor.indicozy.dev";
+const ruUrl = site + path;
+const enUrl = site + "/en" + path;
+const canonical = lang === "ru" ? ruUrl : enUrl;
+const B = import.meta.env.BASE_URL;
+---
+<!doctype html>
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="ru" href={ruUrl} />
+    <link rel="alternate" hreflang="en" href={enUrl} />
+    <link rel="alternate" hreflang="x-default" href={ruUrl} />
+    <link rel="icon" href={`${B}favicon.ico`} sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href={`${B}favicon-32.png`} />
+    <link rel="icon" type="image/png" sizes="192x192" href={`${B}icon-192.png`} />
+    <link rel="apple-touch-icon" href={`${B}apple-touch-icon.png`} />
+    <meta name="theme-color" content="#142b24" />
+  </head>
+  <body>
+    <a class="skip" href="#main">К содержанию</a>
+    <Header lang={lang} path={path} />
+    <slot />
+    <Footer lang={lang} />
+    <script>
+      // Download buttons: the label and link follow the visitor's platform (JS only; without it the
+      // buttons say «Скачать» and link to /download/).
+      const ua = navigator.userAgent;
+      const isIOS = /iPhone|iPad|iPod/.test(ua);
+      const isAndroid = /Android/.test(ua);
+      const isMac = /Macintosh/.test(ua) && !isIOS;
+      const isWin = /Windows/.test(ua);
+      let label = "Скачать для Linux";
+      if (isWin) label = "Скачать для Windows";
+      else if (isMac) label = "Скачать для macOS";
+      else if (isAndroid) label = "Скачать для Android";
+      else if (isIOS) label = "Скачать для iOS";
+      const releases = "https://github.com/indicozy/razdor/releases/latest";
+      document.querySelectorAll<HTMLAnchorElement>("[data-dl]").forEach((a) => {
+        a.textContent = label;
+        a.href = releases;
+      });
+    </script>
+  </body>
+</html>

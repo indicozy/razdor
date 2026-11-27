@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.astro/
+# local look only: the game's art is never committed (symlink to the art folder outside git)
+public/art

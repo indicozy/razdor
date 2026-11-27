@@ -1,0 +1,20 @@
+---
+import { latest } from "../lib/changelog";
+interface Props {
+  lang: "ru" | "en";
+}
+const B = import.meta.env.BASE_URL;
+const version = latest()?.version ?? "";
+---
+<footer class="site-footer">
+  <div class="inner">
+    <nav class="footer-links" aria-label="Ссылки">
+      <a href="https://github.com/indicozy/razdor">GitHub</a>
+      <a href={`${B}wiki/`}>Вики</a>
+      <a href="https://discord.gg/wmMksmWFDM">Discord</a>
+      <a href={`${B}wiki/license/`}>Лицензия и благодарности</a>
+      <a href={`${B}en/`} lang="en" hreflang="en">English</a>
+    </nav>
+    <p class="footer-note">Razdor {version}, движок для «Времён раздора» (Aterdux, 2004). Игровая графика используется с разрешения Aterdux.</p>
+  </div>
+</footer>
